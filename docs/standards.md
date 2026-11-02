@@ -10,10 +10,12 @@ implementation, deployment or a conformance claim.
 [the product specification](specification.md) section 2.1. The EC TS11 v1.0.1
 field comparison and the OWF package behaviour probes are original work for
 [issue #1](https://github.com/ForkbombEu/credimi-attestbook/issues/1). The
-clause-level TS11/ETSI traceability matrix and the ETSI EN 319 482-3 comparison
-remain with the other Phase 0 standards work
-([issue #2](https://github.com/ForkbombEu/credimi-attestbook/issues/2)) and
-should extend this baseline rather than replace it.
+clause-level TS11/ETSI/ARF baseline and the ETSI EN 319 482-3 comparison are
+authored by [issue #2](https://github.com/ForkbombEu/credimi-attestbook/issues/2)
+and are integrated below as Part II; the requirements-to-clause and
+requirements-to-test traceability matrix is in
+[`docs/traceability.md`](traceability.md). Part II extends this baseline rather
+than replacing it.
 
 **Key finding:** OWF 0.5.4 is a useful primitives library, but it is not a
 TS11 v1.0.1 codec. Pin it exactly; put a version-aware translation boundary and
@@ -22,13 +24,13 @@ validation alone.
 
 ### Coordination with the other Phase 0 standards work
 
-Issue #2 authors the TS11/ETSI source register, baseline and traceability
-matrix in PR #21. That work and this OWF audit both target this file from
-separate Phase 0 drafts, so they should be combined as two sections rather than
-one replacing the other. Keep the capability matrix in section 7 as the single
-matrix; the TS11/ETSI section should link to the detailed OWF API/export
-inventory in section 3 rather than repeat it. This audit was written against
-`main` before the #2 section landed.
+Issue #2 authors the TS11/ETSI/ARF source register, baseline and the
+requirements-to-clause / requirements-to-test traceability matrix. The source
+register and baseline are integrated below as Part II; the traceability matrix
+lives in [`docs/traceability.md`](traceability.md). Section 7 remains the single
+OWF capability matrix, and Part II links to section 3's API/export inventory
+rather than repeating it. This audit was written against `main` before the #2
+section landed; the two parts are now combined in this file.
 
 ## 1. Scope, method and non-claims
 
@@ -607,3 +609,278 @@ failed assertion. The audit run passed 35 checks on the tested runtimes.
 - [OWF PR #268 — add `x509` trust anchor](https://github.com/openwallet-foundation-labs/identity-common-ts/pull/268)
 - [OWF PR #404 — shared validation issue model](https://github.com/openwallet-foundation-labs/identity-common-ts/pull/404)
 - [ETSI EN 319 482-3 work item](https://portal.etsi.org/webapp/WorkProgram/Report_WorkItem.asp?WKI_ID=74940)
+
+---
+
+# Part II — TS11 / ETSI / ARF standards baseline (issue #2)
+
+This part records the standards source register, the TS11/ETSI data models and
+API, the ARF 3.0 §5.5/§5.6 conceptual model, and the TS11-vs-ETSI EN 319 482-3
+comparison. It is the issue #2 deliverable, integrated into this shared file per
+the coordination note above instead of replacing Part I. The
+requirements-to-clause and requirements-to-test traceability matrix lives in
+[`docs/traceability.md`](traceability.md). The OWF package API/export inventory
+and its divergence from the TS11 v1.0.1 wire model are covered in Part I
+sections 3 and 6 respectively and are not repeated here.
+
+**Status:** research draft (Phase 0 — not an implementation or compliance claim)
+**Scope:** EC TS11, EUDI ARF 3.0 §5.5/§5.6, and ETSI EN 319 482-3 (draft), plus the legal instruments and referenced ETSI specifications they depend on.
+**Companion documents:** `docs/specification.md` (requirements), `docs/traceability.md` (requirements-to-clause and requirements-to-test matrix).
+
+This document records *verified* sources separately from *draft/restricted/unverified* ones. Nothing here is a claim of ETSI or EC compliance: conformance can only be claimed after implementation and testing against a specific, retrievable source.
+
+* * *
+
+1. Executive summary
+--------------------
+
+- The authoritative EC technical specification for the EUDI attestation catalogue is **EC TS11 v1.0.1** ("Specification of interfaces and formats for the catalogue of attributes and the catalogue of attestations"), dated **2026-01-30**. It is freely readable on GitHub (CC BY 4.0). v1.0.1 is an editorial release; the substantive **v1.0** (2025-11-10) was aligned with the then-stable draft of ETSI TS 119 478.
+- TS11 is grounded in **Regulation (EU) 910/2014** (eIDAS, Article 45e) and **CIR (EU) 2025/1569** (Articles 7 and 8). These define *what* the catalogues must contain; TS11 defines *how* (data models and an API).
+- **ARF 3.0** (§5.5 and §5.6, tag `v3.0.0`, 2026-07-21) defines the conceptual split between a human-readable **Attestation Rulebook**, a machine-readable **attestation scheme**, and the **catalogue** that indexes them. It points to TS11 for the machine-readable scheme format.
+- **ETSI EN 319 482-3** is part of the ETSI **"Additional wallet interfaces"** series (verified via the public drafts of Parts 4 and 6). The Part 3 draft the issue references (**v0.0.6**, 27 October 2026) is **not publicly accessible** — it is not in ETSI's public draft directory and requires an ETSI-portal login. Its exact title and normative delta versus TS11 therefore remain **UNVERIFIED**. This is consistent with the OWF package's own "experimental / ETSI specification not yet finalised" notice.
+- TS11's core machine-readable artefact is the **`SchemaMeta`** data model (with `Schema` and `TrustAuthority` sub-classes). It is a *metadata/schema and trust-reference* model. It is **not** a credential cryptographic-validation, issuance-protocol or interoperability specification — those are delegated to OpenID4VCI/OpenID4VP, ISO/IEC 18013-5, ISO/IEC 23220-2, SD-JWT and the ETSI trust/policy standards. AttestBook must keep these dimensions separate (see §7 and `docs/traceability.md`).
+
+* * *
+
+2. Source register
+------------------
+
+Legend: **verified** = text read from the authoritative location listed here; **restricted** = document exists but requires credentials; **unverified** = referenced but not readable from the listed source.
+
+| # | Document | Version / date | Status | Location |
+|---|----------|----------------|--------|----------|
+| S1 | EC TS11 — Specification of interfaces and formats for the catalogue of attributes and the catalogue of attestations | **1.0.1** (2026-01-30); substantive 1.0 (2025-11-10) | **verified** | <https://github.com/eu-digital-identity-wallet/eudi-doc-standards-and-technical-specifications/blob/main/docs/technical-specifications/ts11-interfaces-and-formats-for-catalogue-of-attributes-and-catalogue-of-schemes.md> |
+| S2 | EUDI Architecture and Reference Framework (ARF) | **3.0.0** (tag dated 2026-07-21) | **verified** | <https://github.com/eu-digital-identity-wallet/eudi-doc-architecture-and-reference-framework> — `docs/main/05-data-model-and-data-exchange-protocols.md` (§5.5, §5.6) |
+| S3 | Regulation (EU) 910/2014 (eIDAS), as amended — Article 45e | consolidated | **verified (reference)** | <https://eur-lex.europa.eu/eli/reg/2014/910/oj/eng> |
+| S4 | CIR (EU) 2025/1569 — rules for qualified EAAs and PuB-EAAs | 2025-07-29 | **verified (reference)** | <http://data.europa.eu/eli/reg_impl/2025/1569/oj> |
+| S5 | ETSI EN 319 482-3 — "Additional wallet interfaces", Part 3 (title/scope unconfirmed) | **draft v0.0.6** (2026-10-27 per issue #2) | **restricted / unverified** | Not in the public ETSI draft directory (requires ETSI-portal login). See §6. |
+| S6 | ETSI EN 319 482 series title ("Additional wallet interfaces") | Parts 4 and 6 public drafts | **verified (series title)** | <https://docbox.etsi.org/esi/open/Latest_Drafts/> |
+| S7 | ETSI TS 119 478 — Specification of interfaces related to Authentic Sources | **V1.1.1 (2026-01)**, published | **verified (status via EC tracker)** | EC tracker issue #26; ETSI portal WI 74951 |
+| S8 | ETSI TS 119 612 — Trusted Lists | V2.3.1 | **verified (reference)** | <https://www.etsi.org/deliver/etsi_ts/119600_119699/119612/> |
+| S9 | ETSI TS 119 602 — List of trusted entities; Data model | draft V0.0.1 | **draft** | referenced by TS11 §6 |
+| S10 | ETSI EN 319 471 — Policy and security requirements for providers of EAA services | draft V1.1.6 (2026-10) | **verified (title; draft)** | public draft in ETSI docbox |
+| S11 | ETSI TS 119 479-2 — EAA Extended Validation Services Framework | draft V1.1.2 (2026-07) | **verified (title; draft)** | public draft in ETSI docbox |
+| S12 | `@owf/eudi-attestation-schema` (OWF SDK implementing TS11 SchemaMeta) | **0.5.4** (2026-10-30) | **verified (metadata/README)** | <https://www.npmjs.com/package/@owf/eudi-attestation-schema> |
+
+> The OWF package audit is Part I of this document (issue #1), including its capability matrix (section 7) and API/export inventory (section 3). This Part II records the package version only for coordination and does not repeat Part I's audit.
+
+* * *
+
+3. EC TS11 v1.0.1 — what it specifies
+--------------------------------------
+
+TS11 specifies two Commission-run catalogues required by eIDAS Article 45e and CIR (EU) 2025/1569:
+
+1. **Catalogue of attributes** — the index of attributes (drawn from authentic public-sector sources) that QTSPs must be able to verify, with a data model (`Attribute` + `DataService` + `SchemaDistribution`) and discovery/verification interfaces.
+2. **Catalogue of attestations** — the index of attestation schemes ("schemas"), with the `SchemaMeta` data model and a management API.
+
+### 3.1 Catalogue of attributes data model (§2)
+
+Main class **`Attribute`** (§2.1), with sub-classes `DataService` (§2.1.1) and `SchemaDistribution` (§2.1.2). Key mandatory properties (multiplicity `[1..*]` or `[1..1]`):
+
+- `name` [1..*] — language-tagged names; at least English SHALL be provided.
+- `identifier` [1..1] — RFC 3986 URI carrying namespace, local identifier and version (CIR Article 7(5)(d)).
+- `description` [1..*] — SHOULD include English.
+- `semanticDataSpecification` [0..1] — optional URI to the OOTS Semantic Repository data model.
+- `distributions` [1..*] — array of `SchemaDistribution` (accessURL + mediaType). CIR Article 2(3) requires at least a JSON Schema (`application/json-schema`).
+- `nameSpace` [0..1] — optional conforms-to URI.
+- `contactInfo` [1..*] — contact URI(s); single contact SHALL be `smtp://` or `https://`.
+- `legalBasis` [0..*] — ELI URI of the applicable EU/national law.
+- `authenticSources` [1..*] — array of `DataService` (per Member State).
+
+`DataService` (§2.1.1): `country` [1..1], `nationalSubID` [0..1], `endpointDescription` [1..1], `endpointURL` [1..1] (eDelivery party identifier or REST endpoint).
+
+### 3.2 Catalogue of attestations — `SchemaMeta` (§4.3)
+
+The machine-readable attestation scheme model (§4.3.1):
+
+| Field | Multiplicity | Type | Normative meaning |
+|-------|--------------|------|-------------------|
+| `id` | [1..1] | string (UUID) | unique schema id assigned by the catalogue server |
+| `version` | [1..1] | string | SemVer schema version |
+| `rulebookURI` | [1..1] | string | URI to the human-readable Attestation Rulebook; may carry `#integrity` (W3C SRI) that the consumer SHALL verify |
+| `trustedAuthorities` | [0..*] | `TrustAuthority[]` | trust model/anchors (X.509 AKI, ETSI Trusted List, OpenID Federation) |
+| `attestationLoS` | [1..1] | string | `iso_18045_high` / `iso_18045_moderate` / `iso_18045_enhanced-basic` / `iso_18045_basic` |
+| `bindingType` | [1..1] | string | `claim` / `key` / `biometric` / `none` |
+| `supportedFormats` | [1..*] | string[] | `dc+sd-jwt`, `mso_mdoc`, `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc` |
+| `schemaURIs` | [1..*] | `Schema[]` | format-specific schema URIs |
+
+Sub-class **`Schema`** (§4.3.2): `formatIdentifier` [1..1] (enumeration above) + `uri` [1..1] (persistent, may carry `#integrity`).
+
+Sub-class **`TrustAuthority`** (§4.3.3): `frameworkType` [1..1] (`aki` | `etsi_tl` | `openid_federation`), `value` [1..1] (base64url AKI, Trusted List URI, or Entity Identifier), `isLoTE` [0..1] (TRUE only for `etsi_tl` pointing at an ETSI TS 119 602 List of Trusted Entities).
+
+### 3.3 Format-specific schemas (§4.3.4)
+
+- `dc+sd-jwt` (SD-JWT VC) → the **Verifiable Credential Type (VCT)** per OpenID4VCI.
+- `mso_mdoc` (ISO mDoc) → the **DocumentType (DocType)** per ISO 23220-2.
+- `jwt_vc_json` / `jwt_vc_json-ld` / `ldp_vc` (W3C VCDM) → per OpenID4VCI Appendix A.1.
+
+If several formats are supported, the registering entity SHALL provide all schemas at registration.
+
+### 3.4 Signing and integrity requirements
+
+- `rulebookURI` and `Schema.uri` MAY be suffixed with `#integrity` (W3C SRI); when present, the consumer SHALL verify the referenced document (§3 of W3C SRI). (§4.3.1, §4.3.2)
+- API responses (GET and PUT) SHALL be **JWS-signed** (§5.3.1, §5.3.2).
+- This JWS signing protects the *catalogue metadata*, not issued credentials. Credential-level signature/validation is out of TS11 scope.
+
+### 3.5 Catalogue of attestations API (§5)
+
+- `GET /schemas` — public query with filter parameters (`id`, `supportedformat`, `attestationlos`, `bindingtype`, `trustedAuthoritiesFrameworkType`, `trustedAuthoritiesValue`, `schemauri`, `rulebookuri`) and pagination. (§5.3.1)
+- `GET /schemas/{schemaId}` — single `SchemaMeta`. (§5.3.1)
+- `PUT /schemas/{schemaId}` — update full `SchemaMeta`. (§5.3.2)
+- `DELETE /schemas/{schemaId}` — delete; `204`/`404`. (§5.3.3)
+- OpenAPI 3.1 definition in Annex A.3 (normative). JSON Schemas in Annex A.1 (attributes) and A.2 (attestations) (normative); XML schemas in Annex A.4 (informative).
+- Read access is public (§5.2.1); write/delete is restricted to the authenticated registering entity (§5.2.2, §4.5.3).
+- DDoS/abuse protection is **SHOULD** (§5.4–§5.6), not a normative conformance requirement.
+
+### 3.6 Versioning and governance (§4.5)
+
+- A newly published rulebook SHALL start at version 1.0; lifecycle uses SemVer (§4.5.1).
+- Maintenance via the versioning system (human-readable) and the API (machine-readable) (§4.5.2).
+- Operations SHALL be authorised only for the entity that registered the schema (§4.5.3).
+
+* * *
+
+4. ARF 3.0 §5.5 / §5.6 — the conceptual model
+----------------------------------------------
+
+ARF 3.0 `docs/main/05-data-model-and-data-exchange-protocols.md`:
+
+- **§5.5.1** — the Rulebook is "documentation for people", the scheme is "the specification for software", and the catalogue is where both are discovered. A rulebook specifies the attestation scheme and proof mechanisms, trust mechanisms (where required), attribute identifiers/syntax/semantics, and required presentation protocol(s).
+- **§5.5.2** — Rulebooks are defined by Attestation Scheme Providers: the EC (PID, mDL rulebooks), public/sectoral/cross-border organisations, individual providers (add-on rulebooks), and single organisations (internal-use rulebooks).
+- **§5.5.3** — publishing in the catalogue requires supplying the **machine-readable attestation scheme in accordance with TS11**.
+- **§5.6.2** — the catalogue of attributes is for QTSPs to locate the authentic-source access point (verification).
+- **§5.6.3** — principles for the catalogue of attestation schemes: machine-readable schemes referring to the human rulebook; registration of QEAA/PuB-EAA schemes *may* happen but is "not mandatory"; non-qualified EAA registration is also "not mandatory"; public access; registration implies no acceptance obligation.
+
+### 4.1 ARF vs TS11 — an obligation discrepancy to flag
+
+ARF §5.6.3 states registration of QEAA/PuB-EAA attestation schemes is **"not mandatory"**, whereas TS11 §4.2 states that all QEAA and Pub_EAA Attestation Rulebooks **"SHALL be published"** in the Commission catalog (and TS11 §4.1 says providers **SHOULD** register). These three statements are in tension. For AttestBook this means: catalogue registration status must not be inferred from a single source, and the product must not treat "registered in catalogue" as a hard rule for every rulebook it imports. This is recorded as an open question (see §8).
+
+* * *
+
+5. Normative obligations vs design choices
+------------------------------------------
+
+**Normative (SHALL / MUST), i.e. conformance-relevant for a TS11 catalogue implementation:**
+
+- `SchemaMeta` mandatory fields and enumerations (§4.3.1–§4.3.3).
+- Format identifiers and their per-format schema types (§4.3.4).
+- JSON Schema media type `application/json-schema` for attribute schemas (§2.1.2).
+- JWS-signed API responses (§5.3).
+- Public read / authorised write-delete split (§5.2.1, §5.2.2, §4.5.3).
+- SemVer versioning starting at 1.0 (§4.5.1).
+- SRI integrity verification when `#integrity` is present (§4.3.1, §4.3.2).
+
+**Recommended (SHOULD) / permitted (MAY):**
+
+- Registration of non-qualified EAAs (SHOULD/RECOMMENDED; §4.1, §4.2).
+- DDoS/misuse protections (SHOULD; §5.4–§5.6).
+- OpenID Federation only for non-qualified EAAs (MAY; §4.3.1).
+- Additional language localisations, `#integrity` suffix (MAY).
+
+**AttestBook design choices (not normative — must not pollute standards documents):**
+
+- Internal persistence/registry model, rulebook version storage, content digests, and provenance metadata (spec FR-001–FR-003).
+- The adapter layer around the OWF SDK.
+- Any UI, REST API grouping, and capture-integration contracts.
+
+* * *
+
+6. TS11 vs ETSI EN 319 482-3 — comparison status
+-------------------------------------------------
+
+The ETSI **EN 319 482** series is titled **"Electronic Signatures and Trust Infrastructures (ESI); Additional wallet interfaces"** (verified from the public drafts of Parts 4 and 6). The issue references **EN 319 482-3 draft v0.0.6 (27 October 2026)** as the future standard to compare against TS11.
+
+**What could be verified:**
+
+- The series exists and is in draft. Parts 4 ("Specification of Wallet-to-Wallet interactions", v0.0.3, 2026-08) and 6 ("Data Portability and Download (export)", v0.0.3, 2026-09) are publicly downloadable from ETSI's open draft directory and are in "call for comments".
+- Part 3 is **not** in the public draft directory; the requested `-public` URL resolves to the ETSI-portal login page. Its exact title and clause-by-clause content could not be read.
+
+**What could not be verified (no claim is made):**
+
+- The exact title and scope of Part 3.
+- Which TS11 elements Part 3 keeps, changes, adds, or drops.
+- Whether Part 3 replaces TS11's `SchemaMeta` model or profiles it.
+- Any new metadata fields, validation rules, or API changes.
+- A migration path beyond "design a version-aware adapter".
+
+**Consequence for AttestBook:** the standards adapter must be **version-aware** from the start, pin **TS11 1.0.1** as the Phase 1 baseline, and treat EN 319 482-3 as an evolving target whose requirements are re-verified when the draft becomes publicly accessible. The OWF package's own warning ("the underlying ETSI specification is not yet finalised … breaking changes are possible") corroborates this.
+
+Related ETSI attestation standards (drafts, publicly visible titles only) that influence but do not define the schema model: EN 319 471 (EAA service provider policy/security requirements), TS 119 479-2 (EAA extended validation services), TS 119 605 (LoTE procedures), TS 119 602 (LoTE data model), TS 119 612 (Trusted Lists).
+
+* * *
+
+7. Dimension separation (credential structure vs crypto/trust/protocol/interoperability)
+----------------------------------------------------------------------------------------
+
+TS11 governs **schema/metadata structure** and **trust-model references** plus **signing of the metadata itself**. It does **not** define:
+
+| Dimension | TS11 role | Covered by (referenced, not in TS11) |
+|-----------|-----------|--------------------------------------|
+| Credential parsing / format recognition | `supportedFormats` + `Schema.formatIdentifier` identify the *expected* formats | format-specific parsers (SD-JWT, mdoc, W3C VC) |
+| Schema / structural validation | normative JSON Schemas (Annex A) and per-format schema types | JSON Schema + VCT/DocType/W3C VC schemas |
+| Cryptographic verification (of the credential) | none | SD-JWT VC, ISO/IEC 18013-5, OpenID4VP proof mechanisms |
+| Trust validation | `TrustAuthority` references (AKI / Trusted List / Federation) only | ETSI TS 119 612 / TS 119 602, X.509 path validation, OpenID Federation |
+| Protocol conformance | none (API only manages schemas) | OpenID4VCI, OpenID4VP, ISO/IEC 18013-5 |
+| End-to-end interoperability | none | external test orchestration (Credimi) |
+
+AttestBook's validation engine must therefore report schema/attestation-constraint results separately from cryptographic, trust, protocol and interoperability results, and never mark a dimension PASS that it did not execute (spec FR-010, FR-012, AC-16, AC-17). The full mapping is in `docs/traceability.md`.
+
+* * *
+
+8. Unsupported / ambiguous / draft / unverified requirements
+------------------------------------------------------------
+
+1. **ETSI EN 319 482-3 draft v0.0.6** — restricted, content unverified (see §6). Cannot yet be cited clause-by-clause.
+2. **ARF vs TS11 registration obligation** — ARF §5.6.3 ("not mandatory") vs TS11 §4.2 ("SHALL be published") vs §4.1 ("SHOULD register"). Ambiguous; do not encode a single hard rule.
+3. **`attestationLoS` → issuer/verifier enforcement** — TS11 gives the enum and points to OpenID4VCI Annex D.2 for the issuance process, but AttestBook's role in *enforcing* LoS at validation time is not defined by TS11; treat as product-level/out-of-scope.
+4. **`TrustAuthority` value semantics** — TS11 defines the field but delegates actual trust resolution to ETSI Trusted Lists / LoTE / OpenID Federation; AttestBook must not claim to perform trust validation solely from this field.
+5. **`isLoTE` deprecation** — TS11 itself notes it "will become unnecessary and shall be deprecated" once OpenID4VCI adds an `etsi_lote` enumeration (§4.3.3 note). Forward-compatibility risk.
+6. **W3C VCDM profiles** — ARF §5.4 notes ETSI profiles for W3C VCDM are pending; W3C VCDM attestations cannot be used in proximity (ISO/IEC 18013-5). Not yet fully profiled.
+7. **API authorisation mechanics** — TS11 §5.2.2 defers the concrete authorisation mechanism to a future version ("will be defined … into section 5.2.2 in future version"). The PUT/DELETE auth method is unspecified today.
+8. **TS 119 602 (LoTE) and TS 119 605** — both still drafts; LoTE-based trust handling is unstable.
+9. **ETSI TS 119 478** — TS11 1.0 was aligned with its then-stable draft; the published V1.1.1 (2026-01) is the current interface spec, and the EC tracker notes it is planned to become an EN with minor gaps to resolve. Any authentic-source discovery/verification built on it must pin the exact version.
+
+* * *
+
+9. Migration implications (TS11 → ETSI)
+---------------------------------------
+
+1. **Pin TS11 1.0.1 as the Phase 1 baseline** and encode the version in stored artefacts so future migration can be mechanical.
+2. **Isolate the model behind a Standards Adapter** (spec §4.1): no TS11 types may leak into registry/validation internals. This is the single most important structural decision for absorbing EN 319 482-3 changes.
+3. **Store the source specification version and the schema digest** with each rulebook/schema, so validation is reproducible and re-verifiable against a later standard.
+4. **Treat enumerated values (`supportedFormats`, `attestationLoS`, `bindingType`, `frameworkType`) as extensible data, not closed TypeScript unions**, so new ETSI values (e.g. `etsi_lote`) can be added without breaking callers.
+5. **Do not duplicate OWF models**; keep AttestBook-specific metadata out of the TS11 documents to preserve interoperability (spec §2.1, FR-001).
+6. **Re-verify EN 319 482-3** when its draft becomes public or is published, and only then record the clause-by-clause delta and update the traceability matrix.
+
+* * *
+
+10. Assumptions and open questions
+----------------------------------
+
+Assumptions recorded for this phase:
+
+- "EC TS11 v1.0.1 (January 2026)" in issue #2 maps to the document's own version table: v1.0.1 dated 2026-01-30 (editorial: licensing/reuse clarification).
+- "ARF 3.0" maps to the `v3.0.0` tag of `eudi-doc-architecture-and-reference-framework`.
+- "ETSI EN 319 482-3 draft v0.0.6 (27 October 2026)" is taken from issue #2 as the target draft identifier; its content was not retrievable.
+
+Open questions (for architecture consolidation, issue #5):
+
+- OQ-1: How should the ARF-vs-TS11 registration-obligation discrepancy be reflected in import/registration UX and validation?
+- OQ-2: Which `attestationLoS`/`bindingType` values does the Phase 1 validator enforce, versus merely surface?
+- OQ-3: Should the catalogue API authorisation be stubbed until TS11 §5.2.2 is specified, or implemented against a provisional OAuth2/OIDC model?
+- OQ-4: How do we verify `#integrity` (W3C SRI) references safely against untrusted remote content (SSRF/limits per spec §15)?
+
+* * *
+
+11. References
+--------------
+
+See the source register (§2). Key URLs:
+
+- TS11 v1.0.1: <https://github.com/eu-digital-identity-wallet/eudi-doc-standards-and-technical-specifications/blob/main/docs/technical-specifications/ts11-interfaces-and-formats-for-catalogue-of-attributes-and-catalogue-of-schemes.md>
+- ARF 3.0 §5.5/§5.6: <https://github.com/eu-digital-identity-wallet/eudi-doc-architecture-and-reference-framework/blob/v3.0.0/docs/main/05-data-model-and-data-exchange-protocols.md>
+- CIR (EU) 2025/1569: <http://data.europa.eu/eli/reg_impl/2025/1569/oj>
+- ETSI public draft directory: <https://docbox.etsi.org/esi/open/Latest_Drafts/>
+- EC tracker, ETSI TS 119 478: <https://github.com/eu-digital-identity-wallet/eudi-doc-standards-and-technical-specifications/issues/26>
+- OWF package: <https://www.npmjs.com/package/@owf/eudi-attestation-schema>
