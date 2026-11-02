@@ -23,8 +23,8 @@ validation alone.
 ### Coordination with the other Phase 0 standards work
 
 Issue #2 authors the TS11/ETSI source register, baseline and traceability
-matrix. That work and this OWF audit both target this file on separate Phase 0
-branches, so they should be combined as two sections rather than one replacing
+matrix. That work and this OWF audit both target this file from separate Phase 0
+drafts, so they should be combined as two sections rather than one replacing
 the other. Keep the capability matrix in section 7 as the single matrix; the
 TS11/ETSI section should link to the detailed OWF API/export inventory in
 section 3 rather than repeat it. This audit was written against `main` before
