@@ -1,9 +1,9 @@
 # AttestBook — Requirements (Catalog Discovery & Import domain)
 
 **Status:** Phase 0 draft — research-derived requirements for the external catalog / discovery / import domain only.  
-**Authoritative spec:** [`docs/specification.md`](../docs/specification.md)  
-**Evidence:** [`docs/catalog-research.md`](../docs/catalog-research.md) (survey of SIROS, EUDIPLO, FIDES, EUDI reference and Sphereon)  
-**Scope note:** This file currently records the requirements tied to specification FR-004, FR-005 and FR-006 plus the import-relevant security controls. Other functional domains (registry, editor, validation engine, capture, Credimi integration) are covered by their own Phase 0 tickets and will be consolidated with [`docs/architecture.md`](../docs/architecture.md) and [`docs/implementation-plan.md`](../docs/implementation-plan.md).
+**Authoritative spec:** [`docs/specification.md`](specification.md)  
+**Evidence:** [`docs/catalog-research.md`](catalog-research.md) (survey of SIROS, EUDIPLO, FIDES, EUDI reference and Sphereon)  
+**Scope note:** This file currently records the requirements tied to specification FR-004, FR-005 and FR-006 plus the import-relevant security controls. Other functional domains (registry, editor, validation engine, capture, Credimi integration) are covered by their own Phase 0 tickets and will be consolidated with [`docs/architecture.md`](architecture.md) and [`docs/implementation-plan.md`](implementation-plan.md).
 
 Requirements are marked with their verification status against the current research: **VERIFIED** (observed in a live source during the survey), **DOCUMENTED** (claimed by the source but not observed), or **DESIGN** (AttestBook-internal decision, not yet implemented).
 

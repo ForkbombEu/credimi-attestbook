@@ -9,11 +9,11 @@
 
 ## 1. Purpose and scope
 
-AttestBook must import rulebooks and credential metadata from external catalogs, and discover issuer metadata (specification [section 6, FR-004/FR-005/FR-006](../docs/specification.md)). This document records what the candidate catalogs and reference implementations **actually** expose — their URLs, availability, authentication, data structures, and version/provenance signals — so the Phase 1 importer can be built on verified facts rather than assumptions.
+AttestBook must import rulebooks and credential metadata from external catalogs, and discover issuer metadata (specification [section 6, FR-004/FR-005/FR-006](specification.md)). This document records what the candidate catalogs and reference implementations **actually** expose — their URLs, availability, authentication, data structures, and version/provenance signals — so the Phase 1 importer can be built on verified facts rather than assumptions.
 
 It covers the sources named in the issue: **SIROS**, **EUDIPLO**, **FIDES**, the **EUDI reference implementation** rulebooks catalog, and **Sphereon**. One closely related source (**WE BUILD consortium**) is noted because it feeds the SIROS registry.
 
-Scope limits: this is research and a recommendation, not an implementation. Requirements derived from it are recorded in [`docs/requirements.md`](../docs/requirements.md). TS11/ETSI normative conformance itself is verified in the standards ticket ([#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2)); this document only reports what each source *claims* and what was *observed*.
+Scope limits: this is research and a recommendation, not an implementation. Requirements derived from it are recorded in [`docs/requirements.md`](requirements.md). TS11/ETSI normative conformance itself is verified in the standards ticket ([#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2)); this document only reports what each source *claims* and what was *observed*.
 
 * * *
 
