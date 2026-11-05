@@ -105,7 +105,7 @@ Versions in this table were inspected or executed during Phase 0. Values marked
 
 | Item | Tested / inspected value | Status | Evidence |
 | --- | --- | --- | --- |
-| EC TS11 | v1.0.1 (2026-01-30) | verified | [`docs/standards.md`](standards.md) §2, §3; specification §3.2 |
+| EC TS11 | v1.0.1 (2026-01-30) | verified | [`docs/standards.md`](standards.md) Part II §2, §3; specification §3.2 |
 | EUDI ARF | 3.0.0 (tag 2026-07-21), §5.5/§5.6 | verified | [`docs/standards.md`](standards.md) Part II §4 |
 | ETSI EN 319 482-3 | draft v0.0.6 (2026-10-27), content restricted | **UNVERIFIED** | [`docs/standards.md`](standards.md) Part II §6, §8 |
 | OWF package | `@owf/eudi-attestation-schema` **0.5.4** (published 2026-10-30) | verified, 46 runtime exports | [`docs/standards.md`](standards.md) §2–§3; `research/owf-audit` |
@@ -141,7 +141,7 @@ later issue explicitly supersedes one.
 | **D-1** | AD-1 | Pin `@owf/eudi-attestation-schema` **0.5.4** exactly; pin the lockfile and exercise the real package in integration tests. | 0.5.4 is the tested `latest`; 0.6.0-alpha is a prerelease on `@owf/*` 0.7.0-alpha. Spec §2.1; standards §2, §9.2. | #27 |
 | **D-2** | AD-2 | Keep a canonical AttestBook domain model and a narrow, version-aware codec between TS11 v1.0.1, the OWF 0.5.4 profile and AttestBook metadata. Never expose OWF `SchemaMeta` as the TS11 public contract. | The models diverge in id, integrity placement, trust frameworks, `supportedFormats`, schema references and format set (standards §6). Spec §2.1; AC-04. | #27 |
 | **D-3** | AD-3 | Wrap JOSE verification in a strict policy: no `alg: none`, no unbound `alg`/key, reject header/payload inconsistencies, allowlist algorithms (ES256 first), reject synthetic `iat`, and verify `x5c`/trust separately or report it `NOT_TESTED`. | OWF `verifySchemaMeta` accepts inconsistent headers and synthesises `iat` (standards §5.4). Spec §15; SR-16. | #27 |
-| **D-4** | AD-4 | Pin **EC TS11 v1.0.1** as the Phase 1 baseline, store the applicable spec version per rulebook/schema, and treat ETSI EN 319 482-3 as an evolving, UNVERIFIED target. | Standards §6, §9; specification §3.2. No clause-level ETSI delta exists yet. | #27, #29 |
+| **D-4** | AD-4 | Pin **EC TS11 v1.0.1** as the Phase 1 baseline, store the applicable spec version per rulebook/schema, and treat ETSI EN 319 482-3 as an evolving, UNVERIFIED target. | Standards Part II §6, §9; specification §3.2. No clause-level ETSI delta exists yet. | #27, #29 |
 | **D-5** | AD-5 | Store TS11/OWF enumerated values as extensible data, validating membership against the pinned baseline; do not make them closed TypeScript unions. Unknown future values are preserved and reported, not silently coerced. | The TS11→ETSI migration may add values (e.g. `etsi_lote`); standards §9.2, architecture §4.2. | #27 |
 | **D-6** | AD-6 | A version's content digest is **SHA-256 over the exact stored artifact bytes**. Published bytes are immutable and content-addressed. No semantic canonicalization is required in Phase 1; if a canonical form is needed later, use RFC 8785 JCS. | Byte-exact storage is reproducible and needs no unverified canonicalizer; OWF has no canonicalization API (architecture §9). | #29 |
 | **D-7** | AD-7 | Use a **single SQLite database file** for Phase 1, with WAL, foreign keys, checked-in migrations and a repository interface. PostgreSQL is not a Phase 1 dependency; adopting it later requires a separate decision. | Zero-config local development, no external service, portable Docker, strong relational integrity for provider→rulebook→version invariants (architecture §10, spec §17). | #28 |
@@ -366,10 +366,11 @@ COMPLETED**, as the repository workflow requires.
 | 10 | [#38](https://github.com/ForkbombEu/credimi-attestbook/issues/38) | Credential validation playground UI | #37, #33 | Real API use; dimension display; e2e success/failure |
 | 11 | [#39](https://github.com/ForkbombEu/credimi-attestbook/issues/39) | MVP end-to-end acceptance | #38, #35 | Full CI matrix and Phase 1 acceptance report |
 
-The critical path is
-#26 → #27 → #28 → #29 → #30 → #31 → #34 → #36 → #37 → #38 → #39. #32 → #33 is the
-parallel validation branch that also feeds #34; #30/#32 and #31/#33 can run in parallel,
-as can #35/#36. This ordering is a dependency statement, not a request for human approval.
+The two equally long dependency chains are
+#26 → #27 → #28 → #29 → #30 → #31 → #34 → #36 → #37 → #38 → #39 and
+#26 → #27 → #28 → #29 → #32 → #33 → #34 → #36 → #37 → #38 → #39. Both the import and
+validation branches must finish before #34; #30/#32 and #31/#33 can run in parallel, as can
+#35/#36. This ordering is a dependency statement, not a request for human approval.
 
 ### Phase 1 exit criteria
 

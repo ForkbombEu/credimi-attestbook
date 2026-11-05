@@ -212,4 +212,7 @@ recorded as open findings in [`docs/implementation-plan.md`](implementation-plan
 - [`docs/requirements.md`](requirements.md) — requirement index (FR-015–FR-019)
 - [`docs/traceability.md`](traceability.md) — requirements-to-test mapping
 - [`docs/standards.md`](standards.md) — dimension separation and standards context
-- Issue [#4](https://github.com/ForkbombEu/credimi-attestbook/issues/4), [#17](https://github.com/ForkbombEu/credimi-attestbook/issues/17) (Phase 4 roadmap)
+- Issue [#4](https://github.com/ForkbombEu/credimi-attestbook/issues/4) and Phase 4 issues
+  [#46](https://github.com/ForkbombEu/credimi-attestbook/issues/46),
+  [#47](https://github.com/ForkbombEu/credimi-attestbook/issues/47),
+  [#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48)

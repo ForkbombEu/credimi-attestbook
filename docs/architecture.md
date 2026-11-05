@@ -190,17 +190,19 @@ single HTTP layer; no module is reachable through the database directly.
   the importing provider only through an explicit, audited action.
 - **Publication is an audited operation** (spec §15): who published, when, what digest,
   under which standard version.
-- **Open question OQ-3 (from [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2)):**
-  TS11 §5.2.2 does not yet define the concrete authorisation mechanism ("will be defined …
-  in future version"). AttestBook must either stub it or adopt a provisional OAuth2/OIDC
-  model; the decision is flagged in §12, not silently invented as normative.
+- **Authorisation mechanism (D-10).** TS11 §5.2.2 does not yet define the concrete
+  authorisation mechanism ("will be defined … in future version"). AttestBook therefore uses
+  a provisional, self-contained bearer-token/actor model bound to provider accounts for write
+  APIs, keeps public reads public, and does not claim a normative TS11 authorisation
+  mechanism or expose a TS11 catalogue write API in Phase 1. Revisit when TS11 specifies it.
 
 ## 7. Initial data model
 
 **Deliverable: initial data model.** This is a logical domain model for Phase 0, not the
 final persistence schema (that belongs to Phase 1
-[#8](https://github.com/ForkbombEu/credimi-attestbook/issues/8)). Column "Field class"
-marks **TS11** (normative wire field, held in the TS11 profile object), **OWF** (OWF
+[#28](https://github.com/ForkbombEu/credimi-attestbook/issues/28); the engine and storage
+rules are D-7 in [`docs/implementation-plan.md`](implementation-plan.md) §5). Column "Field
+class" marks **TS11** (normative wire field, held in the TS11 profile object), **OWF** (OWF
 profile field) or **Internal** (AttestBook metadata, never serialized into a standards
 document).
 

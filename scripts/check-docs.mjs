@@ -4,12 +4,16 @@
 // It is intentionally dependency-free so it can run before the application
 // scaffold exists (plain Node, or Bun). It checks:
 //   1. the five Phase 0 documents required by specification §18 exist;
-//   2. every local Markdown link in the checked files resolves;
+//   2. local inline Markdown links and reference definitions resolve;
 //   3. the five documents cross-reference each other, the authoritative
 //      specification and the traceability matrix;
 //   4. architecture decisions (AD-*), open questions (OQ-*) and capture
 //      decisions (CD-*) are carried into docs/implementation-plan.md;
-//   5. the migrated Phase 1 backlog (#26–#39) is present in the plan.
+//   5. every Phase 1 issue #26–#39 has a row in the §9 dependency table.
+//
+// Reference-style uses without a definition (which render as text, not links)
+// and angle-bracket targets containing spaces are not parsed; the repository
+// documents do not use those forms.
 //
 // Usage: node scripts/check-docs.mjs
 // Exit code 0 on success, 1 on any failure.

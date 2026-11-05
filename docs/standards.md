@@ -877,13 +877,19 @@ Assumptions recorded for this phase:
 - "ARF 3.0" maps to the `v3.0.0` tag of `eudi-doc-architecture-and-reference-framework`.
 - "ETSI EN 319 482-3 draft v0.0.6 (27 October 2026)" is taken from issue #2 as the target draft identifier; its content was not retrievable.
 
-Open questions carried into the consolidated decision register (D-9 to D-12) and the open
-findings in [`docs/implementation-plan.md`](implementation-plan.md) §11:
+Open questions resolved by decisions D-9 to D-12 in
+[`docs/implementation-plan.md`](implementation-plan.md) §3:
 
-- OQ-1: How should the ARF-vs-TS11 registration-obligation discrepancy be reflected in import/registration UX and validation?
-- OQ-2: Which `attestationLoS`/`bindingType` values does the Phase 1 validator enforce, versus merely surface?
-- OQ-3: Should the catalogue API authorisation be stubbed until TS11 §5.2.2 is specified, or implemented against a provisional OAuth2/OIDC model?
-- OQ-4: How do we verify `#integrity` (W3C SRI) references safely against untrusted remote content (SSRF/limits per spec §15)?
+- OQ-1: The ARF-vs-TS11 registration-obligation discrepancy is handled by D-12, which keeps
+  source conformance, registration claims and AttestBook compatibility as separate metadata
+  and does not encode a single hard rule.
+- OQ-2: D-9 validates `attestationLoS`/`bindingType` vocabulary and rulebook consistency
+  only; it does not enforce issuer-side issuance or LoS processes.
+- OQ-3: D-10 uses a provisional, self-contained bearer-token/actor model for product write
+  APIs and does not claim the unspecified TS11 catalogue authorisation mechanism or expose a
+  TS11 catalogue write API in Phase 1.
+- OQ-4: D-11 verifies `#integrity` only over bytes fetched through the SSRF-safe, bounded
+  fetcher; `sha256` is supported and other algorithms are reported unsupported, not PASS.
 
 * * *
 
