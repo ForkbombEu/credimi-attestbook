@@ -146,3 +146,58 @@ test('fails when a Phase 1 wave-table row is missing', () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('fails when a required document looks empty', () => {
+  const root = makeFixture();
+  try {
+    mutate(root, 'docs/architecture.md', () => '# Architecture\n\nToo short.\n');
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /docs\/architecture\.md looks empty/);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('fails when a D decision is not carried into the implementation plan', () => {
+  const root = makeFixture();
+  try {
+    mutate(root, 'docs/implementation-plan.md', (text) =>
+      text.replaceAll('D-13', 'D-removed'),
+    );
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /D-13 is referenced in the Phase 0 documents but not carried into docs\/implementation-plan\.md/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ignores link syntax inside fenced code blocks and inline code', () => {
+  const root = makeFixture();
+  try {
+    mutate(root, 'docs/architecture.md', (text) =>
+      `${text}\n\`\`\`md\n[fenced](missing-fenced.md)\n\`\`\`\n\`[inline](missing-inline.md)\`\n`,
+    );
+    const result = runChecker(root);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('resolves angle-bracket reference definitions and root-relative or encoded links', () => {
+  const root = makeFixture();
+  try {
+    mutate(root, 'docs/architecture.md', (text) =>
+      `${text}\n[angle-ref]: <requirements.md>\n[root](/docs/specification.md)\n[encoded](requirements%2Emd)\n`,
+    );
+    const result = runChecker(root);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

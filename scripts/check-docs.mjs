@@ -135,7 +135,7 @@ for (const name of requiredDocs) {
 }
 
 const planText = existsSync(planPath) ? readFileSync(planPath, 'utf8') : '';
-const decisionPattern = /\b(?:AD|OQ|CD)-\d+\b/g;
+const decisionPattern = /\b(?:AD|OQ|CD|D|R)-\d+\b/g;
 const decisionIds = new Set();
 for (const file of checkedFiles) {
   for (const match of readFileSync(file, 'utf8').matchAll(decisionPattern)) {
@@ -143,7 +143,8 @@ for (const file of checkedFiles) {
   }
 }
 for (const id of [...decisionIds].sort()) {
-  if (!planText.includes(id)) {
+  const idPattern = new RegExp(`\\b${id}\\b`);
+  if (!idPattern.test(planText)) {
     fail(`${id} is referenced in the Phase 0 documents but not carried into docs/implementation-plan.md`);
   }
 }

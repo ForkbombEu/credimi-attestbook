@@ -30,7 +30,7 @@ split from the closed duplicates #15–#19.
 | --- | --- | --- | --- |
 | FR-001 | Rulebook management: multiple providers, stable identity, metadata, provenance, digests | Phase 1: #28, #29, #37 | Internal metadata kept out of standards documents |
 | FR-002 | Versioning: draft/published/historical, immutable published artifacts, version-specific validation, digest verification | Phase 1: #29 | Content digest over exact stored bytes (D-6) |
-| FR-003 | Provider management, ownership and publication authority | Phase 1: #28, #35 | Provision product auth only; TS11 catalogue auth is unspecified (D-10) |
+| FR-003 | Provider management, ownership and publication authority | Phase 1: #28, #35 | Provisional product auth only; TS11 catalogue auth is unspecified (D-10) |
 | FR-004 | External rulebook import: URL/JSON, preview, structural validation, compatibility, provenance, safe re-import | Phase 1: #30, #31, #36 | Adapter-based; no assumed full TS11 conformance (R4.4) |
 | FR-005 | Catalog synchronization: conditional fetch, idempotency, change detection, conflict reporting, availability | Phase 1 partial: #31; full sync later | Scheduled sync and source diagnostics are not an MVP dependency |
 | FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #43 | Not authoritative for rulebooks |
@@ -71,7 +71,7 @@ split from the closed duplicates #15–#19.
 | AC-03 | Supported TS11 rulebooks imported and inspected | Phase 1: #30, #31, #36, #39 |
 | AC-04 | Metadata managed/exported without losing normative information | Phase 1: #27, #29, #37 |
 | AC-05 | Reproducible versioning | Phase 1: #29 |
-| AC-06 | Published versions immutable | Phase 1: #29 |
+| AC-06 | Published versions immutable | Phase 1: #29, #37 |
 | AC-07 | Credential validated against a selected rulebook version | Phase 1: #32, #38 |
 | AC-08 | Errors identify constraints and failing attributes | Phase 1: #32, #33, #38 |
 | AC-09 | Create, edit and publish a supported rulebook | Phase 2: #40, #41, #42 |
