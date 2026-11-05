@@ -4,6 +4,7 @@
 // product limits (resource-exhaustion control), not TS11 constraints; the
 // standards adapter remains responsible for wire-profile validation.
 
+import { SHA256_HEX_PATTERN } from './digest'
 import { invalidInput } from './errors'
 import type { JsonObject } from './types'
 
@@ -18,8 +19,10 @@ export const MAX_ATTESTATIONS_PER_RULEBOOK = 64
 export const MAX_INTEGRITY_LENGTH = 256
 export const MAX_ID_LENGTH = 128
 export const MAX_LABEL_LENGTH = 100
+export const MAX_VERSION_LENGTH = 40
 
 const INTEGRITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9+/=_-]+$/
+const SEMANTIC_VERSION_PATTERN = /^(0|[1-9]\d{0,8})\.(0|[1-9]\d{0,8})(?:\.(0|[1-9]\d{0,8}))?$/
 
 function describe(value: unknown): string {
   return typeof value === 'string' ? 'a string' : typeof value
@@ -191,4 +194,27 @@ export function requireLabel(value: unknown, field: string): string | null {
     return null
   }
   return requireText(value, field, MAX_LABEL_LENGTH)
+}
+
+/**
+ * Requires a bounded `MAJOR.MINOR` or `MAJOR.MINOR.PATCH` SemVer label
+ * (architecture §9 / TS11 §4.5.1). Numeric only: a prerelease or build suffix
+ * is not accepted until a slice needs it, so no version is accidentally
+ * unordered.
+ */
+export function requireSemanticVersion(value: unknown, field: string): string {
+  const raw = requireText(value, field, MAX_VERSION_LENGTH)
+  if (!SEMANTIC_VERSION_PATTERN.test(raw)) {
+    throw invalidInput(`${field} must be a semantic version such as 1.0 or 1.0.1`)
+  }
+  return raw
+}
+
+/** Requires a lowercase hexadecimal SHA-256 content digest. */
+export function requireSha256Digest(value: unknown, field: string): string {
+  const raw = requireText(value, field, 64)
+  if (!SHA256_HEX_PATTERN.test(raw)) {
+    throw invalidInput(`${field} must be a lowercase hexadecimal SHA-256 digest`)
+  }
+  return raw
 }

@@ -1,12 +1,12 @@
-// AttestBook registry service (issue #28).
+// AttestBook registry service (issues #28 and #29).
 //
 // This service is the authenticated write path into the registry database.
 // Operator-only provider provisioning lives in `bootstrap.ts`. The service
 // combines:
 //   * bearer-token authentication bound to a provider account (D-10);
 //   * service-level ownership enforcement for every mutation;
-//   * draft-only mutation, so published/historical state is not silently
-//     changed before the versioning issue (#29) adds the lifecycle;
+//   * draft rulebook mutation, with an immutable draft→published→historical
+//     version lifecycle and content-addressed, digest-verified snapshots (#29);
 //   * transactional writes with an audit trail.
 //
 // Public reads need no token. The HTTP API that exposes these operations is
@@ -15,6 +15,7 @@
 import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 
+import { sha256Hex } from './digest'
 import {
   conflict,
   forbidden,
@@ -32,16 +33,20 @@ import type {
   AuthTokenRecord,
   CreateAttestationInput,
   CreateRulebookInput,
+  CreateRulebookVersionInput,
   CreateSchemaReferenceInput,
   IssuedToken,
   Provider,
   Rulebook,
   RulebookFilter,
+  RulebookVersion,
+  RulebookVersionContent,
   SchemaReference,
   UpdateAttestationInput,
   UpdateProviderInput,
   UpdateRulebookInput,
   UpdateSchemaReferenceInput,
+  VersionDigestVerification,
 } from './types'
 import {
   assertArray,
@@ -55,9 +60,16 @@ import {
   requireIntegrity,
   requireJsonObject,
   requireLabel,
+  requireSemanticVersion,
+  requireSha256Digest,
   requireStringArray,
   requireText,
 } from './validation'
+import {
+  buildRulebookVersionDocument,
+  RULEBOOK_VERSION_MEDIA_TYPE,
+  serializeRulebookVersion,
+} from './versioning'
 
 export interface RegistryOptions {
   readonly database: Database
@@ -406,6 +418,11 @@ export class Registry {
   deleteRulebook(accessToken: string, rulebookId: string): void {
     const actor = this.authenticate(accessToken)
     const existing = this.requireOwnedDraft(actor, rulebookId)
+    // A rulebook reopened for a next draft can still have published versions.
+    // Deleting the rulebook would delete those immutable rows, so refuse it.
+    if (this.store.countNonDraftRulebookVersions(existing.id) > 0) {
+      throw immutable('The rulebook has published or historical versions and cannot be deleted.')
+    }
     const attestations = this.store.listAttestations(existing.id)
     const references = this.store.listSchemaReferences(existing.id)
 
@@ -683,6 +700,243 @@ export class Registry {
     })()
   }
 
+  // ---------------------------------------------------- versions and artifacts
+
+  /** Public catalogue read of a rulebook's versions in creation order. */
+  listRulebookVersions(rulebookId: string): readonly RulebookVersion[] {
+    const id = requireIdentifier(rulebookId, 'rulebookId')
+    this.requireRulebook(id)
+    return this.store.listRulebookVersions(id)
+  }
+
+  getRulebookVersion(rulebookId: string, version: string): RulebookVersion | null {
+    const id = requireIdentifier(rulebookId, 'rulebookId')
+    return this.store.getRulebookVersion(id, requireSemanticVersion(version, 'version'))
+  }
+
+  /** Retrieval by content digest, e.g. to look up the exact bytes a run used. */
+  findRulebookVersionsByDigest(digest: string): readonly RulebookVersion[] {
+    return this.store.findRulebookVersionsByDigest(requireSha256Digest(digest, 'digest'))
+  }
+
+  /** A version's exact stored snapshot bytes; `null` when it does not exist. */
+  getRulebookVersionContent(rulebookId: string, version: string): RulebookVersionContent | null {
+    const record = this.getRulebookVersion(rulebookId, version)
+    if (record === null) {
+      return null
+    }
+    const artifact = this.store.getArtifact(record.contentDigest)
+    if (artifact === null) {
+      // The foreign key makes this unreachable; treat it as a server fault
+      // rather than a caller-visible not-found.
+      throw new Error('rulebook version references a missing artifact')
+    }
+    return { version: record, mediaType: artifact.mediaType, bytes: artifact.bytes }
+  }
+
+  /**
+   * Recomputes the digest over the stored bytes and compares it with the
+   * version's recorded digest (FR-002, D-6). `null` when the version does not
+   * exist.
+   */
+  verifyRulebookVersionDigest(
+    rulebookId: string,
+    version: string,
+  ): VersionDigestVerification | null {
+    const content = this.getRulebookVersionContent(rulebookId, version)
+    if (content === null) {
+      return null
+    }
+    const actualDigest = sha256Hex(content.bytes)
+    return {
+      version: content.version,
+      expectedDigest: content.version.contentDigest,
+      actualDigest,
+      verified: actualDigest === content.version.contentDigest,
+    }
+  }
+
+  /**
+   * Freezes the rulebook's current draft content as a new draft version. When
+   * the rulebook was published, this reopens the working copy for the next
+   * version; every already-published version stays immutable.
+   */
+  createRulebookVersion(
+    accessToken: string,
+    rulebookId: string,
+    input: CreateRulebookVersionInput,
+  ): RulebookVersion {
+    const actor = this.authenticate(accessToken)
+    assertObject(input, 'version')
+    const rulebook = this.requireOwnedRulebook(actor, rulebookId)
+    if (rulebook.publicationStatus === 'historical') {
+      throw immutable('The rulebook is historical; a new version cannot be created for it.')
+    }
+
+    const version = requireSemanticVersion(input.version, 'version')
+    if (this.store.getRulebookVersion(rulebook.id, version) !== null) {
+      throw conflict(`Version "${version}" already exists for this rulebook.`)
+    }
+
+    const specVersion = rulebook.applicableSpec
+    const bytes = this.buildVersionBytes(rulebook, version, specVersion)
+    const contentDigest = sha256Hex(bytes)
+    const createdAt = this.now()
+    const record: RulebookVersion = {
+      id: this.generateId(),
+      rulebookId: rulebook.id,
+      version,
+      status: 'draft',
+      contentDigest,
+      specVersion,
+      provenance:
+        input.provenance === undefined
+          ? rulebook.provenance
+          : requireJsonObject(input.provenance, 'provenance'),
+      createdAt,
+      publishedAt: null,
+    }
+
+    this.transaction(() => {
+      this.store.insertArtifactIfAbsent({
+        digest: contentDigest,
+        mediaType: RULEBOOK_VERSION_MEDIA_TYPE,
+        bytes,
+        createdAt,
+      })
+      this.store.insertRulebookVersion(record)
+      if (rulebook.publicationStatus === 'published') {
+        this.store.setRulebookPublicationStatus(rulebook.id, 'draft', createdAt)
+      }
+      this.store.insertAudit({
+        at: createdAt,
+        actorProviderId: actor.providerId,
+        action: 'version.create',
+        entityType: 'rulebook_version',
+        entityId: record.id,
+        detail: { rulebookId: rulebook.id, version, contentDigest, specVersion },
+      })
+    })()
+
+    return record
+  }
+
+  /**
+   * Re-snapshots the rulebook's current content into an existing draft version.
+   * Published and historical versions are immutable and cannot be refreshed.
+   */
+  refreshDraftRulebookVersion(
+    accessToken: string,
+    rulebookId: string,
+    version: string,
+  ): RulebookVersion {
+    const actor = this.authenticate(accessToken)
+    const rulebook = this.requireOwnedRulebook(actor, rulebookId)
+    const label = requireSemanticVersion(version, 'version')
+    const existing = this.store.getRulebookVersion(rulebook.id, label)
+    if (existing === null) {
+      throw notFound('The rulebook version does not exist.')
+    }
+    if (existing.status !== 'draft') {
+      throw immutable(`The version is ${existing.status}; only a draft version can be refreshed.`)
+    }
+
+    const specVersion = rulebook.applicableSpec
+    const bytes = this.buildVersionBytes(rulebook, label, specVersion)
+    const contentDigest = sha256Hex(bytes)
+    if (contentDigest === existing.contentDigest && specVersion === existing.specVersion) {
+      return existing
+    }
+
+    const at = this.now()
+    const updated: RulebookVersion = { ...existing, contentDigest, specVersion }
+    this.transaction(() => {
+      this.store.insertArtifactIfAbsent({
+        digest: contentDigest,
+        mediaType: RULEBOOK_VERSION_MEDIA_TYPE,
+        bytes,
+        createdAt: at,
+      })
+      this.store.updateDraftRulebookVersionContent(existing.id, contentDigest, specVersion)
+      this.store.insertAudit({
+        at,
+        actorProviderId: actor.providerId,
+        action: 'version.refresh',
+        entityType: 'rulebook_version',
+        entityId: existing.id,
+        detail: {
+          rulebookId: rulebook.id,
+          version: label,
+          previousDigest: existing.contentDigest,
+          contentDigest,
+        },
+      })
+    })()
+
+    return updated
+  }
+
+  /**
+   * Publishes a draft version after proving its stored snapshot still matches
+   * the rulebook's current content. Any previously published version of the
+   * same rulebook becomes historical.
+   */
+  publishRulebookVersion(
+    accessToken: string,
+    rulebookId: string,
+    version: string,
+  ): RulebookVersion {
+    const actor = this.authenticate(accessToken)
+    const rulebook = this.requireOwnedRulebook(actor, rulebookId)
+    if (rulebook.publicationStatus === 'historical') {
+      throw immutable('The rulebook is historical; its versions cannot be published.')
+    }
+
+    const label = requireSemanticVersion(version, 'version')
+    const existing = this.store.getRulebookVersion(rulebook.id, label)
+    if (existing === null) {
+      throw notFound('The rulebook version does not exist.')
+    }
+    if (existing.status !== 'draft') {
+      throw immutable(`The version is ${existing.status}; only a draft version can be published.`)
+    }
+
+    // Publishing must not silently freeze content that changed after the draft
+    // snapshot was taken; the provider refreshes the draft explicitly.
+    const currentBytes = this.buildVersionBytes(rulebook, existing.version, rulebook.applicableSpec)
+    if (sha256Hex(currentBytes) !== existing.contentDigest) {
+      throw conflict('The draft version content is stale; refresh it before publishing.')
+    }
+
+    const supersededVersions = this.store
+      .listRulebookVersions(rulebook.id)
+      .filter((candidate) => candidate.status === 'published' && candidate.id !== existing.id)
+      .map((candidate) => candidate.version)
+    const publishedAt = this.now()
+
+    this.transaction(() => {
+      this.store.demotePublishedRulebookVersions(rulebook.id)
+      this.store.publishRulebookVersion(existing.id, publishedAt)
+      this.store.setRulebookPublicationStatus(rulebook.id, 'published', publishedAt)
+      this.store.insertAudit({
+        at: publishedAt,
+        actorProviderId: actor.providerId,
+        action: 'version.publish',
+        entityType: 'rulebook_version',
+        entityId: existing.id,
+        detail: {
+          rulebookId: rulebook.id,
+          version: existing.version,
+          contentDigest: existing.contentDigest,
+          specVersion: existing.specVersion,
+          supersededVersions,
+        },
+      })
+    })()
+
+    return { ...existing, status: 'published', publishedAt }
+  }
+
   // ------------------------------------------------------------------ helpers
 
   private deleteSchemaReferenceWithAudit(
@@ -731,17 +985,34 @@ export class Registry {
     return rulebook
   }
 
-  private requireOwnedDraft(actor: AuthenticatedActor, id: string): Rulebook {
+  private requireOwnedRulebook(actor: AuthenticatedActor, id: string): Rulebook {
     const rulebook = this.requireRulebook(id)
     if (rulebook.providerId !== actor.providerId) {
       throw forbidden()
     }
+    return rulebook
+  }
+
+  private requireOwnedDraft(actor: AuthenticatedActor, id: string): Rulebook {
+    const rulebook = this.requireOwnedRulebook(actor, id)
     if (rulebook.publicationStatus !== 'draft') {
       throw immutable(
         `The rulebook is ${rulebook.publicationStatus}; only draft rulebooks can be changed.`,
       )
     }
     return rulebook
+  }
+
+  /** Builds the deterministic snapshot bytes for a rulebook at one version. */
+  private buildVersionBytes(rulebook: Rulebook, version: string, specVersion: string): Uint8Array {
+    const document = buildRulebookVersionDocument({
+      rulebook,
+      version,
+      specVersion,
+      attestations: this.store.listAttestations(rulebook.id),
+      schemaReferences: this.store.listSchemaReferences(rulebook.id),
+    })
+    return serializeRulebookVersion(document)
   }
 
   private requireAttestation(rulebookId: string, attestationId: string): AttestationType {

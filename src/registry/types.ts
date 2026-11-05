@@ -106,6 +106,52 @@ export interface ProvisionProviderInput {
   readonly tokenLabel?: string
 }
 
+/**
+ * An immutable snapshot of a rulebook at one version (issue #29). The exact
+ * snapshot bytes live in a content-addressed artifact; `contentDigest` is the
+ * SHA-256 of those bytes (D-6). Provenance is registry-internal and never part
+ * of the snapshot or a standards document.
+ */
+export interface RulebookVersion {
+  readonly id: string
+  readonly rulebookId: string
+  /** Version label such as `1.0` or `1.0.1`. */
+  readonly version: string
+  readonly status: PublicationStatus
+  /** Lowercase hex SHA-256 of the exact snapshot bytes. */
+  readonly contentDigest: string
+  /** Profile the snapshot was authored against, e.g. `ts11@1.0.1`. */
+  readonly specVersion: string
+  readonly provenance: JsonObject
+  readonly createdAt: string
+  /** Set exactly when the version leaves `draft`; never changed afterwards. */
+  readonly publishedAt: string | null
+}
+
+/** Metadata of a content-addressed artifact; the bytes are retrieved by the store. */
+export interface RulebookVersionContent {
+  readonly version: RulebookVersion
+  readonly mediaType: string
+  readonly bytes: Uint8Array
+}
+
+/** Result of recomputing a version's digest from its stored artifact bytes. */
+export interface VersionDigestVerification {
+  readonly version: RulebookVersion
+  readonly expectedDigest: string
+  readonly actualDigest: string
+  readonly verified: boolean
+}
+
+export interface CreateRulebookVersionInput {
+  readonly version: string
+  /**
+   * Version provenance (for example how the content was imported). Defaults to
+   * the rulebook's provenance and is frozen when the version is published.
+   */
+  readonly provenance?: JsonObject
+}
+
 export interface CreateAttestationInput {
   readonly name: string
   readonly attestationLoS: string
@@ -182,6 +228,9 @@ export const AUDIT_ACTIONS = [
   'schema_ref.create',
   'schema_ref.update',
   'schema_ref.delete',
+  'version.create',
+  'version.refresh',
+  'version.publish',
 ] as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number]

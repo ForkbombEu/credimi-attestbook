@@ -19,6 +19,7 @@ import type {
   Provider,
   PublicationStatus,
   Rulebook,
+  RulebookVersion,
   SchemaReference,
 } from './types'
 
@@ -82,6 +83,33 @@ interface AuditRow {
   readonly entity_type: string
   readonly entity_id: string
   readonly detail_json: string | null
+}
+
+interface ArtifactRow {
+  readonly digest: string
+  readonly media_type: string
+  readonly bytes: Uint8Array
+  readonly created_at: string
+}
+
+interface RulebookVersionRow {
+  readonly id: string
+  readonly rulebook_id: string
+  readonly version: string
+  readonly status: string
+  readonly content_digest: string
+  readonly spec_version: string
+  readonly provenance_json: string
+  readonly created_at: string
+  readonly published_at: string | null
+}
+
+/** Exact bytes to register in the content-addressed artifact store. */
+export interface StoredArtifact {
+  readonly digest: string
+  readonly mediaType: string
+  readonly bytes: Uint8Array
+  readonly createdAt: string
 }
 
 export interface AuditInput {
@@ -182,6 +210,22 @@ function toAuditEntry(row: AuditRow): AuditEntry {
     entityType: row.entity_type,
     entityId: row.entity_id,
     detail: row.detail_json === null ? null : parseJsonObject(row.detail_json),
+  }
+}
+
+function toRulebookVersion(row: RulebookVersionRow): RulebookVersion {
+  return {
+    id: row.id,
+    rulebookId: row.rulebook_id,
+    version: row.version,
+    // The CHECK constraint restricts this column; the cast keeps the domain
+    // type honest without reselecting the row.
+    status: row.status as PublicationStatus,
+    contentDigest: row.content_digest,
+    specVersion: row.spec_version,
+    provenance: parseJsonObject(row.provenance_json),
+    createdAt: row.created_at,
+    publishedAt: row.published_at,
   }
 }
 
@@ -354,6 +398,13 @@ export class RegistryStore {
     this.database.query('UPDATE rulebooks SET updated_at = ? WHERE id = ?').run(updatedAt, id)
   }
 
+  /** Changes only the rulebook's publication state, which is product metadata. */
+  setRulebookPublicationStatus(id: string, status: PublicationStatus, updatedAt: string): void {
+    this.database
+      .query('UPDATE rulebooks SET publication_status = ?, updated_at = ? WHERE id = ?')
+      .run(status, updatedAt, id)
+  }
+
   insertAttestation(attestation: AttestationType): void {
     this.database
       .query(
@@ -499,6 +550,124 @@ export class RegistryStore {
 
   deleteSchemaReference(id: string): void {
     this.database.query('DELETE FROM schema_refs WHERE id = ?').run(id)
+  }
+
+  // ---------------------------------------------------- versions and artifacts
+
+  /**
+   * Registers exact bytes in the content-addressed store. An existing digest is
+   * left untouched: a BEFORE INSERT trigger rejects a second insert of the same
+   * digest (so `INSERT OR REPLACE` cannot swap the bytes), and the guarded
+   * `INSERT ... WHERE NOT EXISTS` keeps the normal path a no-op.
+   */
+  insertArtifactIfAbsent(artifact: StoredArtifact): void {
+    this.database
+      .query(
+        `INSERT INTO artifacts (digest, media_type, bytes, created_at)
+         SELECT ?, ?, ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM artifacts WHERE digest = ?)`,
+      )
+      .run(artifact.digest, artifact.mediaType, artifact.bytes, artifact.createdAt, artifact.digest)
+  }
+
+  getArtifact(digest: string): StoredArtifact | null {
+    const row = this.database
+      .query<ArtifactRow, [string]>('SELECT * FROM artifacts WHERE digest = ?')
+      .get(digest)
+    return row === null
+      ? null
+      : {
+          digest: row.digest,
+          mediaType: row.media_type,
+          bytes: row.bytes,
+          createdAt: row.created_at,
+        }
+  }
+
+  insertRulebookVersion(version: RulebookVersion): void {
+    this.database
+      .query(
+        `INSERT INTO rulebook_versions (
+          id, rulebook_id, version, status, content_digest, spec_version,
+          provenance_json, created_at, published_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        version.id,
+        version.rulebookId,
+        version.version,
+        version.status,
+        version.contentDigest,
+        version.specVersion,
+        JSON.stringify(version.provenance),
+        version.createdAt,
+        version.publishedAt,
+      )
+  }
+
+  getRulebookVersion(rulebookId: string, version: string): RulebookVersion | null {
+    const row = this.database
+      .query<RulebookVersionRow, [string, string]>(
+        'SELECT * FROM rulebook_versions WHERE rulebook_id = ? AND version = ?',
+      )
+      .get(rulebookId, version)
+    return row === null ? null : toRulebookVersion(row)
+  }
+
+  listRulebookVersions(rulebookId: string): readonly RulebookVersion[] {
+    return this.database
+      .query<RulebookVersionRow, [string]>(
+        'SELECT * FROM rulebook_versions WHERE rulebook_id = ? ORDER BY rowid',
+      )
+      .all(rulebookId)
+      .map(toRulebookVersion)
+  }
+
+  findRulebookVersionsByDigest(digest: string): readonly RulebookVersion[] {
+    return this.database
+      .query<RulebookVersionRow, [string]>(
+        'SELECT * FROM rulebook_versions WHERE content_digest = ? ORDER BY rowid',
+      )
+      .all(digest)
+      .map(toRulebookVersion)
+  }
+
+  /** Replaces the snapshot of a still-draft version; published rows are rejected by a trigger. */
+  updateDraftRulebookVersionContent(id: string, contentDigest: string, specVersion: string): void {
+    this.database
+      .query(
+        `UPDATE rulebook_versions SET content_digest = ?, spec_version = ?
+         WHERE id = ? AND status = 'draft'`,
+      )
+      .run(contentDigest, specVersion, id)
+  }
+
+  publishRulebookVersion(id: string, publishedAt: string): void {
+    this.database
+      .query(
+        `UPDATE rulebook_versions SET status = 'published', published_at = ?
+         WHERE id = ? AND status = 'draft'`,
+      )
+      .run(publishedAt, id)
+  }
+
+  /** Demotes every currently published version of a rulebook to `historical`. */
+  demotePublishedRulebookVersions(rulebookId: string): void {
+    this.database
+      .query(
+        `UPDATE rulebook_versions SET status = 'historical'
+         WHERE rulebook_id = ? AND status = 'published'`,
+      )
+      .run(rulebookId)
+  }
+
+  countNonDraftRulebookVersions(rulebookId: string): number {
+    const row = this.database
+      .query<{ count: number }, [string]>(
+        "SELECT COUNT(*) AS count FROM rulebook_versions WHERE rulebook_id = ? AND status <> 'draft'",
+      )
+      .get(rulebookId)
+    return row?.count ?? 0
   }
 
   insertAudit(entry: AuditInput): void {

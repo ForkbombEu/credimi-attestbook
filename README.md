@@ -62,12 +62,13 @@ bun run docs:check   # Phase 0 documentation consistency, plain Node
   checksums reject edited/unknown migrations and the schema enforces foreign keys,
   uniqueness and JSON-column constraints;
 - `src/registry/` — provider provisioning, hashed bearer tokens, rulebook/attestation/schema
-  reference CRUD, persistence across a database reopen, cross-provider authorization denial
-  and immutable published/historical state; see [`docs/registry.md`](docs/registry.md);
+  reference CRUD, draft/published/historical versions with content-addressed snapshots,
+  digests, persistence across a database reopen, cross-provider authorization denial and
+  immutable published/historical state; see [`docs/registry.md`](docs/registry.md);
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
   the Phase 0 verification gate for the persistence decision (D-7).
 
-## Registry persistence
+## Registry persistence and versions
 
 The registry services in `src/registry/` store providers, rulebooks, attestation types, schema
 references, provisional write tokens and an audit trail in a SQLite database. Writes are
@@ -76,9 +77,15 @@ mutation enforces provider ownership. Migrations live in `migrations/` and are a
 runner in `src/db/migrations.ts`; editing an already-applied migration is rejected by its
 checksum.
 
+A rulebook's content can be frozen as a draft version, then published. Each version stores the
+SHA-256 digest of its exact snapshot bytes in a content-addressed artifact, and published and
+historical versions are immutable in the service and in SQLite triggers. Versions can be
+retrieved by `(rulebookId, version)` or by content digest. Import, the HTTP API and the
+version-history UI come in later issues.
+
 The HTTP API is not wired to the registry yet (issue #34). The service contract, stable
-identifier rules, standards-metadata boundary and authorization model are documented in
-[`docs/registry.md`](docs/registry.md).
+identifier rules, standards-metadata boundary, authorization model and version lifecycle are
+documented in [`docs/registry.md`](docs/registry.md).
 
 ## Build and run
 

@@ -44,10 +44,12 @@ describe('registry migrations', () => {
         .all()
         .map((row) => row.name)
       for (const table of [
+        'artifacts',
         'attestations',
         'audit_log',
         'auth_tokens',
         'providers',
+        'rulebook_versions',
         'rulebooks',
         'schema_migrations',
         'schema_refs',
@@ -269,6 +271,166 @@ describe('registry migrations', () => {
           )
           .run(FIXED_NOW),
       ).toThrow(/UNIQUE constraint/i)
+    } finally {
+      database.close()
+    }
+  })
+
+  test('protects content-addressed artifacts and published versions at the schema level', () => {
+    const database = createDatabase()
+    try {
+      applyMigrations(database, { now: () => FIXED_NOW })
+      database
+        .query(
+          `INSERT INTO providers (id, name, publication_authority, metadata_json, created_at)
+           VALUES ('provider-1', 'Provider', 'account-1', '{}', ?)`,
+        )
+        .run(FIXED_NOW)
+      database
+        .query(
+          `INSERT INTO rulebooks (id, provider_id, name, applicable_spec, created_at, updated_at)
+           VALUES ('rulebook-1', 'provider-1', 'Rulebook', 'ts11@1.0.1', ?, ?)`,
+        )
+        .run(FIXED_NOW, FIXED_NOW)
+
+      const digest = 'a'.repeat(64)
+      database
+        .query(
+          `INSERT INTO artifacts (digest, media_type, bytes, created_at)
+           VALUES (?, 'application/json', X'7b7d', ?)`,
+        )
+        .run(digest, FIXED_NOW)
+
+      const insertVersionSql = `INSERT INTO rulebook_versions (
+          id, rulebook_id, version, status, content_digest, spec_version,
+          provenance_json, created_at
+        ) VALUES (?, 'rulebook-1', ?, 'draft', ?, 'ts11@1.0.1', '{}', ?)`
+
+      database.query(insertVersionSql).run('version-1', '1.0', digest, FIXED_NOW)
+
+      // A version label is unique per rulebook and must point at stored bytes.
+      // The identity trigger rejects the duplicate before the UNIQUE index does.
+      expect(() =>
+        database.query(insertVersionSql).run('version-duplicate', '1.0', digest, FIXED_NOW),
+      ).toThrow(/identity already exists/i)
+      expect(() =>
+        database.query(insertVersionSql).run('version-orphan', '2.0', 'b'.repeat(64), FIXED_NOW),
+      ).toThrow(/FOREIGN KEY/i)
+      // Draft rows cannot carry a publication timestamp.
+      expect(() =>
+        database
+          .query("UPDATE rulebook_versions SET published_at = ? WHERE id = 'version-1'")
+          .run(FIXED_NOW),
+      ).toThrow(/CHECK constraint/i)
+
+      // A draft row can be refreshed, but an artifact never changes.
+      expect(() =>
+        database
+          .query('UPDATE rulebook_versions SET content_digest = ? WHERE id = ?')
+          .run(digest, 'version-1'),
+      ).not.toThrow()
+      expect(() =>
+        database.query("UPDATE artifacts SET bytes = X'00' WHERE digest = ?").run(digest),
+      ).toThrow(/immutable/i)
+      expect(() => database.query('DELETE FROM artifacts WHERE digest = ?').run(digest)).toThrow(
+        /immutable/i,
+      )
+
+      database
+        .query(
+          "UPDATE rulebook_versions SET status = 'published', published_at = ? WHERE id = 'version-1'",
+        )
+        .run(FIXED_NOW)
+      expect(() =>
+        database
+          .query('UPDATE rulebook_versions SET content_digest = ? WHERE id = ?')
+          .run('c'.repeat(64), 'version-1'),
+      ).toThrow(/immutable/i)
+      expect(() =>
+        database
+          .query("UPDATE rulebook_versions SET status = 'draft' WHERE id = 'version-1'")
+          .run(),
+      ).toThrow(/immutable/i)
+      expect(() =>
+        database.query("DELETE FROM rulebook_versions WHERE id = 'version-1'").run(),
+      ).toThrow(/immutable/i)
+
+      // A draft version can exist alongside the published one.
+      expect(() =>
+        database.query(insertVersionSql).run('version-2', '2.0', digest, FIXED_NOW),
+      ).not.toThrow()
+
+      // REPLACE resolves conflicts by deleting the replaced row without firing
+      // DELETE triggers, so identity re-inserts/updates are rejected up front.
+      expect(() =>
+        database
+          .query(
+            `INSERT OR REPLACE INTO rulebook_versions (
+              id, rulebook_id, version, status, content_digest, spec_version,
+              provenance_json, created_at, published_at
+            ) VALUES ('version-1', 'rulebook-1', '1.0', 'published', ?, 'ts11@1.0.1', '{}', ?, ?)`,
+          )
+          .run(digest, FIXED_NOW, FIXED_NOW),
+      ).toThrow(/identity already exists/i)
+      expect(() =>
+        database
+          .query(
+            `INSERT OR REPLACE INTO artifacts (digest, media_type, bytes, created_at)
+             VALUES (?, 'application/json', X'00', ?)`,
+          )
+          .run(digest, FIXED_NOW),
+      ).toThrow(/artifact digest already exists/i)
+      expect(() =>
+        database
+          .query("UPDATE OR REPLACE rulebook_versions SET version = '1.0' WHERE id = 'version-2'")
+          .run(),
+      ).toThrow(/identity already exists/i)
+
+      // Deleting the parent cascades to versions, and the published DELETE
+      // trigger aborts the statement, including in an INSERT OR REPLACE.
+      expect(() => database.query("DELETE FROM rulebooks WHERE id = 'rulebook-1'").run()).toThrow(
+        /immutable/i,
+      )
+      expect(() =>
+        database
+          .query(
+            `INSERT OR REPLACE INTO rulebooks (
+              id, provider_id, name, applicable_spec, created_at, updated_at
+            ) VALUES ('rulebook-1', 'provider-1', 'Hijacked', 'ts11@1.0.1', ?, ?)`,
+          )
+          .run(FIXED_NOW, FIXED_NOW),
+      ).toThrow(/immutable/i)
+
+      // A status-only transition is the exception; changing any other column at
+      // the same time is still rejected.
+      expect(() =>
+        database
+          .query(
+            "UPDATE rulebook_versions SET status = 'historical', provenance_json = '{\"changed\":true}' WHERE id = 'version-1'",
+          )
+          .run(),
+      ).toThrow(/immutable/i)
+
+      // The only permitted transition is published -> historical, once.
+      expect(() =>
+        database
+          .query("UPDATE rulebook_versions SET status = 'historical' WHERE id = 'version-1'")
+          .run(),
+      ).not.toThrow()
+      expect(() =>
+        database
+          .query("UPDATE rulebook_versions SET status = 'published' WHERE id = 'version-1'")
+          .run(),
+      ).toThrow(/immutable/i)
+
+      // A draft version can still be deleted; its artifact remains.
+      expect(() =>
+        database.query("DELETE FROM rulebook_versions WHERE id = 'version-2'").run(),
+      ).not.toThrow()
+      expect(
+        database.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM artifacts').get()
+          ?.count,
+      ).toBe(1)
     } finally {
       database.close()
     }
