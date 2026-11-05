@@ -150,7 +150,10 @@ conflicts on re-import and never silently overwrite locally edited or published 
 requests. Sources without conditional support are re-fetched and diffed by digest.
 
 **R5.2 — Idempotent imports & change detection (DESIGN).** Imports are idempotent; change
-detection uses AttestBook-side content digests (no source exposes a reliable digest).
+detection uses AttestBook-side content digests (no source exposes a reliable digest). Because
+the digest is byte-exact, re-serialized source JSON (key order/whitespace) is reported as a
+change; the importer compares normalized content when deciding whether the semantic content
+changed and never silently treats serialization-only differences as identical.
 
 **R5.3 — Conflict reporting & version preservation (DESIGN).** Report conflicts explicitly;
 preserve historical versions; published artifacts remain immutable.

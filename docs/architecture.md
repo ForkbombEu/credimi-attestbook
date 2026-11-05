@@ -257,8 +257,10 @@ Rules:
   D-8: **FAIL** if any dimension FAILs; else **INCONCLUSIVE** if any is INCONCLUSIVE; else
   **NOT_TESTED** if any applicable dimension was not executed; else **PASS** only when every
   applicable dimension PASSed; **NOT_APPLICABLE** only when no dimension is applicable.
-  Per-dimension statuses are always returned. An overall PASS therefore never hides an
-  untested dimension.
+  Per-dimension statuses are always returned. A dimension is applicable when the selected
+  rulebook, credential format and request require it; the existence of an implementation does
+  not change applicability. A required dimension with no implementation is `NOT_TESTED`,
+  never `NOT_APPLICABLE`, so an overall PASS never hides an untested dimension.
 - **Never report a dimension PASS that was not executed.** A schema-valid credential with an
   invalid signature is not "fully valid"; a locally-passing credential is not "interoperable"
   (FR-012, AC-16, AC-17).
