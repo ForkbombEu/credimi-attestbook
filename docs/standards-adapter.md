@@ -192,13 +192,15 @@ silently approximated:
 - `sha384`/`sha512` SRI verification or resolution through OWF (sha256 only). The SRI
   parser accepts one `sha256-`/`sha384-`/`sha512-` base64 digest and does not implement W3C
   SRI options or multiple-digest lists; those are unknown limits for a later slice.
-- Network access. The adapter performs no fetches itself: callers pass the `resolve`
-  callback to OWF. That callback **must** enforce the untrusted-input controls required by
-  specification §15 and AGENTS.md — scheme allowlist, SSRF protection, redirect policy,
-  response-size and time limits — before the import slice (#30) wires a real fetcher.
-- Fetching or verifying the **rulebook** document itself. The adapter parses and
-  round-trips `rulebookURI#integrity=`, but bytes are fetched and checked by the bounded
-  import slice ([#30](https://github.com/ForkbombEu/credimi-attestbook/issues/30)), not here.
+- Network access through OWF. The adapter performs no fetches itself: callers pass the
+  `resolve` callback to OWF. That callback **must** enforce the untrusted-input controls
+  required by specification §15 and AGENTS.md — scheme allowlist, SSRF protection, redirect
+  policy, response-size and time limits. The import slice (#30,
+  [`docs/import.md`](import.md)) provides those controls for the imported catalog document
+  and leaves schema-reference resolution opt-in with a caller-supplied resolver.
+- Fetching or verifying `rulebookURI` or the schema reference bytes. The adapter parses and
+  round-trips `rulebookURI#integrity=` and per-reference SRI, but the #30 import slice does
+  not fetch those documents and reports the unresolved references `not_tested`.
 - Credential parsing, credential schema validation, credential cryptography, protocol
   conformance and interoperability (later slices; OWF has no credential validator).
 - Registry persistence, publication lifecycle and provider ownership.

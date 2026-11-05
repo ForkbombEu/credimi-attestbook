@@ -3,7 +3,8 @@
 AttestBook is a standalone, API-first platform for managing, validating and testing
 Attestation Rulebooks in the European Digital Identity Wallet ecosystem. This repository
 currently contains the Phase 0 research and architecture documents, the Phase 1 application
-scaffold and the persistent provider/rulebook registry slice.
+scaffold, the persistent provider/rulebook registry slice and the bounded URL/JSON rulebook
+import slice.
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -65,6 +66,9 @@ bun run docs:check   # Phase 0 documentation consistency, plain Node
   reference CRUD, draft/published/historical versions with content-addressed snapshots,
   digests, persistence across a database reopen, cross-provider authorization denial and
   immutable published/historical state; see [`docs/registry.md`](docs/registry.md);
+- `src/import/` — bounded `https`/JSON rulebook import with SSRF prevention, address
+  pinning, redirect, time, size and JSON limits, catalog preview, conformance and compatibility
+  reporting, provenance, and authenticated draft import; see [`docs/import.md`](docs/import.md);
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
   the Phase 0 verification gate for the persistence decision (D-7).
 
@@ -80,12 +84,29 @@ checksum.
 A rulebook's content can be frozen as a draft version, then published. Each version stores the
 SHA-256 digest of its exact snapshot bytes in a content-addressed artifact, and published and
 historical versions are immutable in the service and in SQLite triggers. Versions can be
-retrieved by `(rulebookId, version)` or by content digest. Import, the HTTP API and the
-version-history UI come in later issues.
+retrieved by `(rulebookId, version)` or by content digest. Re-import conflict handling, the
+HTTP API and the version-history UI come in later issues.
 
 The HTTP API is not wired to the registry yet (issue #34). The service contract, stable
 identifier rules, standards-metadata boundary, authorization model and version lifecycle are
 documented in [`docs/registry.md`](docs/registry.md).
+
+## Safe URL and JSON import
+
+The service-level import pipeline in `src/import/` retrieves a supported TS11/OWF rulebook
+or catalog JSON document from an `https` URL or accepts it as JSON bytes, validates every
+entry through the real standards adapter, and returns a preview with structural diagnostics,
+conformance classification, a compatibility report and provenance (final source URL,
+retrieval time, exact-bytes SHA-256 digest and the source's own conformance claim).
+`RulebookImporter.import` authenticates the provider, refuses a source with any incompatible
+entry, and creates draft rulebooks with their attestation types and schema references.
+
+Remote retrieval is untrusted-input code: https-only, DNS/SSRF address checks with address
+pinning, redirect re-validation, request and total timeouts, response-size and JSON shape
+limits, bounded catalog entries and schema-reference fan-out. Schema references are
+retained but not fetched or SRI-verified in this slice, and re-import/conflict handling is
+issue #31. See [`docs/import.md`](docs/import.md) for the full contract, limits and
+limitations.
 
 ## Build and run
 

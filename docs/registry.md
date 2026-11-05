@@ -1,13 +1,15 @@
 # AttestBook registry — persistence, identifiers, authorization and immutable versions
 
 **Status:** Phase 1 registry and versioning slices implemented by
-[issue #28](https://github.com/ForkbombEu/credimi-attestbook/issues/28) and
-[issue #29](https://github.com/ForkbombEu/credimi-attestbook/issues/29).
+[issue #28](https://github.com/ForkbombEu/credimi-attestbook/issues/28),
+[issue #29](https://github.com/ForkbombEu/credimi-attestbook/issues/29) and the initial
+bounded import slice by
+[issue #30](https://github.com/ForkbombEu/credimi-attestbook/issues/30).
 They provide a persistent SQLite registry for providers, rulebooks, attestation types, schema
 references, write credentials and an audit trail, plus draft/published/historical rulebook
 versions with content-addressed artifacts, SHA-256 digests, provenance and immutable
-publication. They are **not** the HTTP contract, the import pipeline, validation or a
-conformance claim.
+publication. They are **not** the HTTP contract, credential validation or a conformance
+claim; see [`docs/import.md`](import.md) for the import pipeline.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) (FR-001, FR-002, FR-003,
 FR-008, §13, §15, §17)
@@ -42,9 +44,19 @@ Implemented by #29 (`migrations/0002_versions_artifacts.sql`):
 - version provenance recorded on every version and a publication audit entry recording who
   published which digest under which profile, and which versions were superseded.
 
-Deliberately **not** in #28/#29:
+Implemented by #30:
 
-- URL/JSON import, fetch hardening and re-import idempotency — issues #30/#31;
+- `RulebookImporter` creates drafts from a compatible, bounded URL/JSON preview and stores
+  `sourceUrl` plus provenance (adapter, retrieval time, byte length, exact-bytes SHA-256
+  digest, envelope, profile, conformance and the source's own conformance signal);
+- `createRulebook` accepts an attestation's schema references in the same call, so an
+  imported rulebook, its attestation type and its references are written in one
+  transaction; the references' OWF `meta`/unknown members are retained as registry-internal
+  metadata.
+
+Deliberately **not** in #28/#29/#30:
+
+- re-import idempotency, duplicate detection and conflict diagnostics — issue #31;
 - credential validation against a version — issues #32/#33;
 - the versioned REST API and generated OpenAPI — issue #34;
 - protected HTTP write routes, rate limits and API security documentation — issue #35;
@@ -350,6 +362,11 @@ The implementation is covered by real temporary SQLite files (not in-memory fake
 - `src/registry/authorization.test.ts` — public reads
   without a token, cross-provider mutation denial for every resource, token scoping and
   unauthorized writes that leave the database unchanged.
+- `src/registry/create-rulebook-refs.test.ts` — transactional creation of attestation schema
+  references, duplicate-format and per-attestation fan-out rejection, and rollback when a
+  reference is invalid.
+- `src/import/` — the bounded URL/JSON import preview and authenticated draft import; see
+  [`docs/import.md`](import.md).
 
 Run the suite with `bun run check` (format, lint, strict typecheck and tests). The tests cover
 the #28/#29 acceptance criteria; they do **not** claim HTTP contract coverage (#34), URL/JSON
@@ -365,7 +382,8 @@ version history and comparison.
 - [`docs/traceability.md`](traceability.md) Matrix B — FR-001/FR-002/FR-003 test mapping.
 - [`docs/standards-adapter.md`](standards-adapter.md) — canonical model, wire codecs and the
   product-metadata boundary used by future version storage.
-- Issues [#30](https://github.com/ForkbombEu/credimi-attestbook/issues/30) (import),
+- Issues [#30](https://github.com/ForkbombEu/credimi-attestbook/issues/30) (initial import,
+  documented in [`docs/import.md`](import.md)),
   [#31](https://github.com/ForkbombEu/credimi-attestbook/issues/31) (idempotent re-import),
   [#32](https://github.com/ForkbombEu/credimi-attestbook/issues/32) (validation against a
   pinned version), [#34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) (REST

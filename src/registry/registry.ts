@@ -35,6 +35,7 @@ import type {
   CreateRulebookInput,
   CreateRulebookVersionInput,
   CreateSchemaReferenceInput,
+  CreateAttestationSchemaReferenceInput,
   IssuedToken,
   Provider,
   Rulebook,
@@ -52,6 +53,7 @@ import {
   assertArray,
   assertObject,
   MAX_ATTESTATIONS_PER_RULEBOOK,
+  MAX_SCHEMA_REFERENCES_PER_ATTESTATION,
   MAX_NAME_LENGTH,
   MAX_SPEC_LENGTH,
   requireAbsoluteHttpUrl,
@@ -318,6 +320,39 @@ export class Registry {
       names.add(attestation.name)
     }
 
+    // Imported rulebooks arrive with their schema references attached to one
+    // attestation type (#30). Build and validate them before any write so the
+    // whole create is refused without a partial rulebook.
+    const schemaReferences: SchemaReference[] = []
+    attestationInputs.forEach((attestationInput, index) => {
+      const attestation = attestations[index]
+      if (attestation === undefined) {
+        return
+      }
+      const referenceInputs = attestationInput.schemaReferences ?? []
+      assertArray(
+        referenceInputs,
+        `attestations[${index}].schemaReferences`,
+        MAX_SCHEMA_REFERENCES_PER_ATTESTATION,
+      )
+      const formats = new Set<string>()
+      referenceInputs.forEach((referenceInput, referenceIndex) => {
+        const reference = this.buildAttestationSchemaReference(
+          attestation,
+          referenceInput,
+          createdAt,
+          `attestations[${index}].schemaReferences[${referenceIndex}]`,
+        )
+        if (formats.has(reference.formatIdentifier)) {
+          throw invalidInput(
+            `attestations[${index}].schemaReferences must not repeat the formatIdentifier "${reference.formatIdentifier}"`,
+          )
+        }
+        formats.add(reference.formatIdentifier)
+        schemaReferences.push(reference)
+      })
+    })
+
     const rulebook: Rulebook = {
       id: rulebookId,
       providerId: actor.providerId,
@@ -351,6 +386,21 @@ export class Registry {
           entityType: 'attestation',
           entityId: attestation.id,
           detail: { rulebookId, name: attestation.name },
+        })
+      }
+      for (const reference of schemaReferences) {
+        this.store.insertSchemaReference(reference)
+        this.store.insertAudit({
+          at: createdAt,
+          actorProviderId: actor.providerId,
+          action: 'schema_ref.create',
+          entityType: 'schema_ref',
+          entityId: reference.id,
+          detail: {
+            rulebookId,
+            attestationId: reference.attestationId,
+            formatIdentifier: reference.formatIdentifier,
+          },
         })
       }
     })()
@@ -1086,6 +1136,34 @@ export class Registry {
       integrity:
         input.integrity === undefined ? null : requireIntegrity(input.integrity, 'integrity'),
       metadata: input.metadata === undefined ? {} : requireJsonObject(input.metadata, 'metadata'),
+      createdAt,
+    }
+  }
+
+  /** Builds a schema reference for an attestation created in the same call. */
+  private buildAttestationSchemaReference(
+    attestation: AttestationType,
+    input: CreateAttestationSchemaReferenceInput,
+    createdAt: string,
+    path: string,
+  ): SchemaReference {
+    assertObject(input, path)
+    return {
+      id: this.generateId(),
+      rulebookId: attestation.rulebookId,
+      attestationId: attestation.id,
+      formatIdentifier: requireText(
+        input.formatIdentifier,
+        `${path}.formatIdentifier`,
+        MAX_NAME_LENGTH,
+      ),
+      uri: requireAbsoluteHttpUrl(input.uri, `${path}.uri`),
+      integrity:
+        input.integrity === undefined
+          ? null
+          : requireIntegrity(input.integrity, `${path}.integrity`),
+      metadata:
+        input.metadata === undefined ? {} : requireJsonObject(input.metadata, `${path}.metadata`),
       createdAt,
     }
   }

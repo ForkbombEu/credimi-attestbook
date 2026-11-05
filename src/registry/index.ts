@@ -40,6 +40,7 @@ export {
   type AuthenticatedActor,
   type AuthTokenRecord,
   type CreateAttestationInput,
+  type CreateAttestationSchemaReferenceInput,
   type CreateRulebookInput,
   type CreateRulebookVersionInput,
   type CreateSchemaReferenceInput,
@@ -63,6 +64,7 @@ export {
 
 export {
   MAX_ATTESTATIONS_PER_RULEBOOK,
+  MAX_SCHEMA_REFERENCES_PER_ATTESTATION,
   MAX_DESCRIPTION_LENGTH,
   MAX_ID_LENGTH,
   MAX_INTEGRITY_LENGTH,
