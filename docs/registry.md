@@ -268,6 +268,9 @@ the same content-addressed store.
 - `RulebookVersion.provenance` records version provenance. Creation defaults to the rulebook's
   provenance or accepts explicit provenance; publication is recorded in the audit log with the
   actor, timestamp, digest, profile and superseded versions, and in `published_at`.
+  Provenance is captured when the version is created; refreshing draft content does not change
+  it, so a rulebook-provenance change made before publication requires a new version. This
+  slice has no separate "edit version provenance" operation.
 
 Versions are not exportable yet: the public API (#34) and the detail/version-history UI (#37)
 own export and comparison. Version comparison is also #37; this slice stores the data needed
@@ -280,15 +283,26 @@ Immutability does not depend on the caller using the service.
 
 - reject every `UPDATE` and `DELETE` on `artifacts`, so a digest can never disagree with its
   bytes;
+- reject an `INSERT` of an existing artifact digest, so `INSERT OR REPLACE` cannot swap the
+  bytes behind a key (SQLite's REPLACE deletes the old row without firing `DELETE` triggers);
+- reject an `INSERT` or `UPDATE` that would claim an existing version id or
+  `(rulebook_id, version)` label, so `INSERT OR REPLACE`/`UPDATE OR REPLACE` cannot delete a
+  published row through conflict resolution;
 - reject `UPDATE`/`DELETE` on `rulebook_versions` rows whose stored status is `published` or
   `historical`, except the status-only `published → historical` transition;
 - reject a second transition or a downgrade back to `draft`.
 
-Tests exercise both the service checks and direct SQL attempts; a rejected mutation leaves the
-database unchanged. Artifacts are append-only: deleting a draft rulebook removes its draft
-version rows but does not reclaim artifact bytes, because there is no safe way to delete
-content-addressed bytes in this slice. Garbage collection is not implemented; retention is an
-operator concern until a slice adds it explicitly.
+Deleting the parent rulebook cascades to its versions, and the published/historical `DELETE`
+trigger aborts the whole statement; the service also refuses such a deletion before SQL. A
+draft rulebook *without* published versions can still be deleted, which removes its draft
+version rows.
+
+Tests exercise both the service checks and direct SQL attempts (including `INSERT OR REPLACE`
+and `UPDATE OR REPLACE`); a rejected mutation leaves the database unchanged. Artifacts are
+append-only: deleting a draft rulebook removes its draft version rows but does not reclaim
+artifact bytes, because there is no safe way to delete content-addressed bytes in this slice.
+Garbage collection is not implemented; retention is an operator concern until a slice adds it
+explicitly.
 
 ## 7. Validation and failure model
 

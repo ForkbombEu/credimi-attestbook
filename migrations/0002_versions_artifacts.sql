@@ -5,9 +5,16 @@
 -- exact snapshot bytes live in `artifacts`, keyed by their SHA-256 digest; a
 -- version row only points at those bytes. Published and historical versions,
 -- and every artifact, are immutable in the database itself, not only in the
--- service: the triggers below reject UPDATE/DELETE even for a caller that
--- bypasses the TypeScript layer. The only permitted mutation of a published
--- version is its transition to `historical` when a newer version is published.
+-- service: the triggers below reject UPDATE/DELETE and identity re-insertion
+-- even for a caller that bypasses the TypeScript layer. The only permitted
+-- mutation of a published version is its transition to `historical` when a
+-- newer version is published.
+--
+-- `INSERT OR REPLACE`/`UPDATE OR REPLACE` need explicit guards: SQLite resolves
+-- REPLACE conflicts by deleting the replaced row *without* firing DELETE
+-- triggers. A plain BEFORE INSERT/UPDATE identity check (below) rejects the
+-- statement before conflict resolution can delete a published row or an
+-- artifact.
 
 CREATE TABLE artifacts (
   -- Lowercase hex SHA-256 over the exact `bytes` column (decision D-6).
@@ -16,6 +23,15 @@ CREATE TABLE artifacts (
   bytes BLOB NOT NULL,
   created_at TEXT NOT NULL
 );
+
+-- An artifact is stored once. Without this guard, INSERT OR REPLACE would swap
+-- the bytes behind an existing digest and leave them disagreeing with the key.
+CREATE TRIGGER artifacts_insert_conflict
+BEFORE INSERT ON artifacts
+WHEN EXISTS (SELECT 1 FROM artifacts WHERE digest = NEW.digest)
+BEGIN
+  SELECT RAISE(ABORT, 'artifact digest already exists');
+END;
 
 CREATE TRIGGER artifacts_immutable_update
 BEFORE UPDATE ON artifacts
@@ -55,6 +71,35 @@ CREATE TABLE rulebook_versions (
 
 CREATE INDEX rulebook_versions_rulebook_id_idx ON rulebook_versions (rulebook_id);
 CREATE INDEX rulebook_versions_content_digest_idx ON rulebook_versions (content_digest);
+
+-- Version identity is insert-once. `INSERT OR REPLACE` would otherwise delete a
+-- published row (its DELETE trigger does not run) and insert a new one.
+CREATE TRIGGER rulebook_versions_insert_identity
+BEFORE INSERT ON rulebook_versions
+WHEN EXISTS (
+  SELECT 1 FROM rulebook_versions
+  WHERE id = NEW.id
+     OR (rulebook_id = NEW.rulebook_id AND version = NEW.version)
+)
+BEGIN
+  SELECT RAISE(ABORT, 'rulebook version identity already exists');
+END;
+
+-- The same guard for `UPDATE OR REPLACE`: an update may not claim the id or
+-- version label of a different row, because REPLACE would delete that row
+-- without firing its DELETE trigger.
+CREATE TRIGGER rulebook_versions_update_identity
+BEFORE UPDATE ON rulebook_versions
+WHEN EXISTS (SELECT 1 FROM rulebook_versions WHERE id = NEW.id AND id <> OLD.id)
+  OR EXISTS (
+    SELECT 1 FROM rulebook_versions
+    WHERE id <> OLD.id
+      AND rulebook_id = NEW.rulebook_id
+      AND version = NEW.version
+  )
+BEGIN
+  SELECT RAISE(ABORT, 'rulebook version identity already exists');
+END;
 
 -- Once a version has been published, only its transition to `historical` is
 -- allowed. Every other update (content, provenance, identity, timestamps) is

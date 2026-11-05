@@ -309,9 +309,10 @@ describe('registry migrations', () => {
       database.query(insertVersionSql).run('version-1', '1.0', digest, FIXED_NOW)
 
       // A version label is unique per rulebook and must point at stored bytes.
+      // The identity trigger rejects the duplicate before the UNIQUE index does.
       expect(() =>
         database.query(insertVersionSql).run('version-duplicate', '1.0', digest, FIXED_NOW),
-      ).toThrow(/UNIQUE constraint/i)
+      ).toThrow(/identity already exists/i)
       expect(() =>
         database.query(insertVersionSql).run('version-orphan', '2.0', 'b'.repeat(64), FIXED_NOW),
       ).toThrow(/FOREIGN KEY/i)
@@ -354,6 +355,52 @@ describe('registry migrations', () => {
         database.query("DELETE FROM rulebook_versions WHERE id = 'version-1'").run(),
       ).toThrow(/immutable/i)
 
+      // A draft version can exist alongside the published one.
+      expect(() =>
+        database.query(insertVersionSql).run('version-2', '2.0', digest, FIXED_NOW),
+      ).not.toThrow()
+
+      // REPLACE resolves conflicts by deleting the replaced row without firing
+      // DELETE triggers, so identity re-inserts/updates are rejected up front.
+      expect(() =>
+        database
+          .query(
+            `INSERT OR REPLACE INTO rulebook_versions (
+              id, rulebook_id, version, status, content_digest, spec_version,
+              provenance_json, created_at, published_at
+            ) VALUES ('version-1', 'rulebook-1', '1.0', 'published', ?, 'ts11@1.0.1', '{}', ?, ?)`,
+          )
+          .run(digest, FIXED_NOW, FIXED_NOW),
+      ).toThrow(/identity already exists/i)
+      expect(() =>
+        database
+          .query(
+            `INSERT OR REPLACE INTO artifacts (digest, media_type, bytes, created_at)
+             VALUES (?, 'application/json', X'00', ?)`,
+          )
+          .run(digest, FIXED_NOW),
+      ).toThrow(/artifact digest already exists/i)
+      expect(() =>
+        database
+          .query("UPDATE OR REPLACE rulebook_versions SET version = '1.0' WHERE id = 'version-2'")
+          .run(),
+      ).toThrow(/identity already exists/i)
+
+      // Deleting the parent cascades to versions, and the published DELETE
+      // trigger aborts the statement, including in an INSERT OR REPLACE.
+      expect(() => database.query("DELETE FROM rulebooks WHERE id = 'rulebook-1'").run()).toThrow(
+        /immutable/i,
+      )
+      expect(() =>
+        database
+          .query(
+            `INSERT OR REPLACE INTO rulebooks (
+              id, provider_id, name, applicable_spec, created_at, updated_at
+            ) VALUES ('rulebook-1', 'provider-1', 'Hijacked', 'ts11@1.0.1', ?, ?)`,
+          )
+          .run(FIXED_NOW, FIXED_NOW),
+      ).toThrow(/immutable/i)
+
       // A status-only transition is the exception; changing any other column at
       // the same time is still rejected.
       expect(() =>
@@ -376,10 +423,7 @@ describe('registry migrations', () => {
           .run(),
       ).toThrow(/immutable/i)
 
-      // A draft version still can be created and deleted; its artifact remains.
-      expect(() =>
-        database.query(insertVersionSql).run('version-2', '2.0', digest, FIXED_NOW),
-      ).not.toThrow()
+      // A draft version can still be deleted; its artifact remains.
       expect(() =>
         database.query("DELETE FROM rulebook_versions WHERE id = 'version-2'").run(),
       ).not.toThrow()

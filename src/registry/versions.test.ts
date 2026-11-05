@@ -396,6 +396,38 @@ describe('publication lifecycle and immutability', () => {
       database.query('DELETE FROM artifacts WHERE digest = ?').run(published.contentDigest),
     ).toThrow(/immutable/i)
 
+    // REPLACE resolves SQLite conflicts by deleting the replaced row without
+    // firing DELETE triggers, so identity re-inserts are rejected before that.
+    expect(() =>
+      database
+        .query(
+          `INSERT OR REPLACE INTO rulebook_versions (
+            id, rulebook_id, version, status, content_digest, spec_version,
+            provenance_json, created_at, published_at
+          ) VALUES (?, ?, '1.0', 'published', ?, 'ts11@1.0.1', '{"x":1}', ?, ?)`,
+        )
+        .run(
+          published.id,
+          rulebook.id,
+          published.contentDigest,
+          '2026-01-01T00:00:00.000Z',
+          '2026-01-01T00:00:00.000Z',
+        ),
+    ).toThrow(/identity already exists/i)
+    expect(() =>
+      database
+        .query(
+          `INSERT OR REPLACE INTO artifacts (digest, media_type, bytes, created_at)
+           VALUES (?, 'application/json', X'00', '2026-01-01T00:00:00.000Z')`,
+        )
+        .run(published.contentDigest),
+    ).toThrow(/artifact digest already exists/i)
+    // Deleting the parent cascades to versions, and the version DELETE trigger
+    // aborts the whole statement.
+    expect(() => database.query('DELETE FROM rulebooks WHERE id = ?').run(rulebook.id)).toThrow(
+      /immutable/i,
+    )
+
     // The only permitted transition is published -> historical.
     expect(() =>
       database

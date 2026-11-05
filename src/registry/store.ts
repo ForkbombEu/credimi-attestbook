@@ -555,17 +555,19 @@ export class RegistryStore {
   // ---------------------------------------------------- versions and artifacts
 
   /**
-   * Registers exact bytes in the content-addressed store. The digest is the
-   * primary key, so re-registering identical bytes is a no-op; the database
-   * triggers reject any later update or delete.
+   * Registers exact bytes in the content-addressed store. An existing digest is
+   * left untouched: a BEFORE INSERT trigger rejects a second insert of the same
+   * digest (so `INSERT OR REPLACE` cannot swap the bytes), and the guarded
+   * `INSERT ... WHERE NOT EXISTS` keeps the normal path a no-op.
    */
   insertArtifactIfAbsent(artifact: StoredArtifact): void {
     this.database
       .query(
-        `INSERT INTO artifacts (digest, media_type, bytes, created_at) VALUES (?, ?, ?, ?)
-         ON CONFLICT (digest) DO NOTHING`,
+        `INSERT INTO artifacts (digest, media_type, bytes, created_at)
+         SELECT ?, ?, ?, ?
+         WHERE NOT EXISTS (SELECT 1 FROM artifacts WHERE digest = ?)`,
       )
-      .run(artifact.digest, artifact.mediaType, artifact.bytes, artifact.createdAt)
+      .run(artifact.digest, artifact.mediaType, artifact.bytes, artifact.createdAt, artifact.digest)
   }
 
   getArtifact(digest: string): StoredArtifact | null {
