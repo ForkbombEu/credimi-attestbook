@@ -1,0 +1,20 @@
+{
+  "name": "attestbook-owf-audit-probe",
+  "private": true,
+  "type": "module",
+  "description": "Phase 0 audit probe for the pinned @owf/eudi-attestation-schema dependency",
+  "scripts": {
+    "probe": "node probe.mjs",
+    "probe:bun": "bun probe.mjs",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@owf/crypto": "0.6.2",
+    "@owf/eudi-attestation-schema": "0.5.4",
+    "@owf/identity-common": "0.6.2"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "5.9.3"
+  }
+}
