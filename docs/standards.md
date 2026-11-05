@@ -1,7 +1,16 @@
 # Standards baseline and OWF dependency audit
 
-**Status:** Phase 0 research draft. This document does not authorize Phase 1
-implementation, deployment or a conformance claim.
+**Status:** Phase 0 research baseline. The findings below are consolidated into adopted
+decisions and a dependency-ordered Phase 1 plan in
+[`docs/implementation-plan.md`](implementation-plan.md). This document does not authorize a
+conformance claim, production deployment or a standards claim beyond the evidence cited.
+
+**Phase 0 document set:** [`docs/architecture.md`](architecture.md) ·
+[`docs/requirements.md`](requirements.md) ·
+[`docs/capture-integration.md`](capture-integration.md) ·
+[`docs/implementation-plan.md`](implementation-plan.md) ·
+[`docs/traceability.md`](traceability.md) ·
+[`docs/specification.md`](specification.md) (authoritative).
 
 **Audit date:** 2026-11-02
 
@@ -493,10 +502,13 @@ validation. It translates between the two wire profiles and calls OWF for the
 OWF profile; TS11-specific translation is the documented narrow extension
 allowed by `docs/specification.md` section 2.1.
 
-### 9.2 Provisional decisions for the architecture review
+### 9.2 Decisions adopted in the consolidated plan
 
-These are Phase 0 findings, to be confirmed in the architecture decision
-([issue #5](https://github.com/ForkbombEu/credimi-attestbook/issues/5)), not an approved implementation plan:
+These Phase 0 findings are consolidated in
+[`docs/implementation-plan.md`](implementation-plan.md) §3: pinning is D-1, the codec
+boundary is D-2, the JOSE policy is D-3, the runtime and tooling baseline is D-13, and
+credential-validation separation is D-17. The no-conformance statement is repeated in the
+plan's §12 non-claims. Where wording differs, the consolidated decision register wins:
 
 1. **Pin 0.5.4 exactly** for the first integration spike; treat newer versions
    as a dependency upgrade requiring a repeat of this audit.
@@ -514,8 +526,9 @@ These are Phase 0 findings, to be confirmed in the architecture decision
    credentials; AttestBook's validation engine must use credential-format
    libraries and report dimensions independently.
 6. **Do not claim TS11 or ETSI conformance** from OWF validation alone. The
-   standards traceability matrix and ETSI comparison remain Phase 0 work
-   ([issue #2](https://github.com/ForkbombEu/credimi-attestbook/issues/2)).
+   standards traceability matrix and ETSI comparison remain in
+   [`docs/traceability.md`](traceability.md) and this document Part II; no conformance
+   claim is made.
 
 ## 10. Upstream issue candidates
 
@@ -558,10 +571,10 @@ Unresolved:
   expose 482-3 on the audit date.
 - **Is `issuanceProfile` normative?** It is absent from the TS11 v1.0.1
   normative schema; no clause is cited in the package README.
-- **Which model should AttestBook expose?** TS11 v1.0.1 is the baseline in
-  `docs/specification.md`; the architecture decision must choose whether the
-  public contract follows TS11 v1.0.1, a later ETSI draft, or both behind a
-  versioned adapter.
+- **Which model should AttestBook expose?** Resolved by D-2 and D-4: TS11 v1.0.1 is the
+  Phase 1 baseline and the canonical model sits behind the version-aware adapter. OWF's
+  `SchemaMeta` is not the public TS11 contract, and ETSI EN 319 482-3 is not a public model
+  until the draft is readable and re-audited. This item is no longer open.
 - **Which trust frameworks must AttestBook accept?** TS11 names `aki`,
   `etsi_tl` and `openid_federation`; OWF exposes `etsi_tl` and `x509`.
 - **Which OID4VCI version** should the issuer template target? The helper emits
@@ -623,7 +636,7 @@ requirements-to-clause and requirements-to-test traceability matrix lives in
 and its divergence from the TS11 v1.0.1 wire model are covered in Part I
 sections 3 and 6 respectively and are not repeated here.
 
-**Status:** research draft (Phase 0 — not an implementation or compliance claim)
+**Status:** Phase 0 research baseline, consolidated into the implementation plan — not an implementation or compliance claim.
 **Scope:** EC TS11, EUDI ARF 3.0 §5.5/§5.6, and ETSI EN 319 482-3 (draft), plus the legal instruments and referenced ETSI specifications they depend on.
 **Companion documents:** `docs/specification.md` (requirements), `docs/traceability.md` (requirements-to-clause and requirements-to-test matrix).
 
@@ -864,12 +877,19 @@ Assumptions recorded for this phase:
 - "ARF 3.0" maps to the `v3.0.0` tag of `eudi-doc-architecture-and-reference-framework`.
 - "ETSI EN 319 482-3 draft v0.0.6 (27 October 2026)" is taken from issue #2 as the target draft identifier; its content was not retrievable.
 
-Open questions (for architecture consolidation, issue #5):
+Open questions resolved by decisions D-9 to D-12 in
+[`docs/implementation-plan.md`](implementation-plan.md) §3:
 
-- OQ-1: How should the ARF-vs-TS11 registration-obligation discrepancy be reflected in import/registration UX and validation?
-- OQ-2: Which `attestationLoS`/`bindingType` values does the Phase 1 validator enforce, versus merely surface?
-- OQ-3: Should the catalogue API authorisation be stubbed until TS11 §5.2.2 is specified, or implemented against a provisional OAuth2/OIDC model?
-- OQ-4: How do we verify `#integrity` (W3C SRI) references safely against untrusted remote content (SSRF/limits per spec §15)?
+- OQ-1: The ARF-vs-TS11 registration-obligation discrepancy is handled by D-12, which keeps
+  source conformance, registration claims and AttestBook compatibility as separate metadata
+  and does not encode a single hard rule.
+- OQ-2: D-9 validates `attestationLoS`/`bindingType` vocabulary and rulebook consistency
+  only; it does not enforce issuer-side issuance or LoS processes.
+- OQ-3: D-10 uses a provisional, self-contained bearer-token/actor model for product write
+  APIs and does not claim the unspecified TS11 catalogue authorisation mechanism or expose a
+  TS11 catalogue write API in Phase 1.
+- OQ-4: D-11 verifies `#integrity` only over bytes fetched through the SSRF-safe, bounded
+  fetcher; `sha256` is supported and other algorithms are reported unsupported, not PASS.
 
 * * *
 

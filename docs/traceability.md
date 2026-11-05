@@ -1,7 +1,17 @@
 AttestBook — Standards Traceability Matrix (Phase 0)
 =====================================================
 
-**Status:** research draft. This matrix links AttestBook requirements (from `docs/specification.md`) and the standards obligations identified in `docs/standards.md` to their normative clauses and to the test categories in `docs/specification.md` §16.
+**Status:** Phase 0 consolidated matrix. It links AttestBook requirements (from
+[`docs/specification.md`](specification.md)) and the standards obligations identified in
+[`docs/standards.md`](standards.md) to their normative clauses and to the test categories in
+[`docs/specification.md`](specification.md) §16. The Phase 1 slice order that delivers these
+checks is in [`docs/implementation-plan.md`](implementation-plan.md) §9.
+
+**Phase 0 document set:** [`docs/architecture.md`](architecture.md) ·
+[`docs/standards.md`](standards.md) ·
+[`docs/requirements.md`](requirements.md) ·
+[`docs/capture-integration.md`](capture-integration.md) ·
+[`docs/implementation-plan.md`](implementation-plan.md).
 
 Two matrices follow:
 
