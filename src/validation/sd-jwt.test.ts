@@ -11,6 +11,23 @@ function encodeSegment(value: unknown): string {
   return Buffer.from(JSON.stringify(value), 'utf8').toString('base64url')
 }
 
+function mutateCredentialHeader(
+  credential: string,
+  mutate: (header: Record<string, unknown>) => void,
+): string {
+  const [jwt, ...rest] = credential.split('~')
+  const parts = (jwt ?? '').split('.')
+  const header = parts[0]
+  const payload = parts[1]
+  const signature = parts[2]
+  if (header === undefined || payload === undefined || signature === undefined) {
+    throw new Error('test fixture is not a compact JWT')
+  }
+  const decoded = decodeSegment(header)
+  mutate(decoded)
+  return [[encodeSegment(decoded), payload, signature].join('.'), ...rest].join('~')
+}
+
 function mutateCredentialPayload(
   credential: string,
   mutate: (payload: Record<string, unknown>) => void,
@@ -155,6 +172,19 @@ describe('parseSdJwtVc', () => {
       return
     }
     expect(outcome.findings.map((entry) => entry.code)).toContain('claim_depth_exceeded')
+  })
+
+  test('rejects an unexpected issuer JWT typ header', async () => {
+    const credential = await issueTestCredential()
+    const tampered = mutateCredentialHeader(credential, (header) => {
+      header.typ = 'JWT'
+    })
+    const outcome = await parseSdJwtVc(tampered)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    expect(outcome.findings.map((entry) => entry.code)).toContain('unexpected_typ_header')
   })
 
   test('caps the number of disclosures it will unpack', async () => {

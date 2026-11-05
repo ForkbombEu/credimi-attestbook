@@ -55,9 +55,12 @@ therefore carries `schemaDocuments` with the **exact UTF-8 document text**. The 
   chain is not resolved yet;
 - executes JSON Schema only when it declares JSON Schema 2020-12 (or no `$schema`) and uses
   no keyword AttestBook cannot bound safely. `format`, `pattern`, `patternProperties`,
-  `uniqueItems` and the `$ref`/`$dynamicRef`/`$recursiveRef` family are reported `NOT_TESTED`
-  with `unsupported_schema_keyword`; unknown keywords and other dialects are also
-  `NOT_TESTED` instead of being ignored and reported as validated.
+  `uniqueItems`, the legacy `dependencies` applicator and the
+  `$ref`/`$dynamicRef`/`$recursiveRef` family are reported `NOT_TESTED` with
+  `unsupported_schema_keyword`; unknown keywords and other dialects are also `NOT_TESTED`
+  instead of being ignored and reported as validated. A document that mixes a root `vct`
+  with JSON Schema keywords is `NOT_TESTED` as `ambiguous_schema_document` because either
+  classification would skip constraints.
 
 A reference with no supplied document makes schema validation `NOT_TESTED`. Supplying an
 unrelated schema cannot widen validation silently.
@@ -147,13 +150,14 @@ unpacked. Each JSON Schema document is compiled with a fresh Ajv instance so cal
 Tests execute the real pinned libraries and a real migrated SQLite registry:
 
 - `src/validation/sd-jwt.test.ts` — real SD-JWT VC parsing, disclosure integrity, protected
-  claims, unsupported hash algorithm, key-binding detection, claim-depth and disclosure-count
-  bounds;
+  claims, unsupported hash algorithm, key-binding detection, `typ` header and claim-depth/
+  disclosure-count bounds;
 - `src/validation/schema.test.ts` — Type Metadata positive/negative attribute checks, JSON
   Schema positive/negative checks, SRI mismatch/unsupported algorithm/missing pin, rejection
-  of catastrophic-regex, format, uniqueItems and `$ref` routes, unsupported dialects and
-  unknown keywords, unresolved Type Metadata `extends`, oversized Type Metadata and credential
-  claim sets, missing documents;
+  of catastrophic-regex, format, uniqueItems, legacy `dependencies` and `$ref` routes,
+  unsupported dialects, unknown keywords and ambiguous `vct`/JSON Schema documents,
+  unresolved Type Metadata `extends`, oversized Type Metadata and credential claim sets,
+  missing documents;
 - `src/validation/engine.test.ts` — pinned version/digest evidence, dimension statuses,
   unsupported formats, key binding, digest-tamper abort, version pinning;
 - `src/app.validation.test.ts` — typed HTTP contract, 400/404/413/503 cases, no credential or

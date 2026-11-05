@@ -403,6 +403,74 @@ describe('validateSchemaDocuments integrity and coverage', () => {
     }
   })
 
+  test('rejects legacy dependencies schemas that could hide a regex', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      dependencies: {
+        given_name: {
+          properties: { given_name: { pattern: '^(a+)+$' } },
+        },
+      },
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+    expect(outcome.findings.some((entry) => entry.code === 'schema_violation')).toBe(false)
+  })
+
+  test('reports a document that mixes vct with JSON Schema keywords as ambiguous', async () => {
+    const schema = JSON.stringify({
+      vct: TEST_VCT,
+      type: 'object',
+      properties: { given_name: { type: 'number' } },
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: TYPE_METADATA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: TYPE_METADATA_URI, content: schema }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('ambiguous_schema_document')
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
+  })
+
+  test('reports a vct document with a $ref as ambiguous', async () => {
+    const schema = JSON.stringify({
+      vct: TEST_VCT,
+      $ref: '#/x-hidden',
+      'x-hidden': { pattern: '^(a+)+$' },
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: TYPE_METADATA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: TYPE_METADATA_URI, content: schema }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('ambiguous_schema_document')
+  })
+
   test('reports a non-2020-12 schema dialect as not tested', async () => {
     const schema = JSON.stringify({
       $schema: 'https://json-schema.org/draft/2019-09/schema',

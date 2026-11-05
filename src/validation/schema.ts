@@ -65,6 +65,8 @@ const UNSUPPORTED_SCHEMA_KEYWORDS = [
   '$dynamicRef',
   '$recursiveRef',
   '$ref',
+  // Legacy draft keyword; Ajv still evaluates it and its values are schemas.
+  'dependencies',
   'format',
   'pattern',
   'patternProperties',
@@ -81,7 +83,6 @@ const SINGLE_SCHEMA_KEYWORDS = new Set([
   'additionalItems',
   'contains',
   'contentSchema',
-  'dependencies',
   'else',
   'if',
   'items',
@@ -95,6 +96,65 @@ const SINGLE_SCHEMA_KEYWORDS = new Set([
 const MAP_SCHEMA_KEYWORDS = new Set(['$defs', 'definitions', 'dependentSchemas', 'properties'])
 
 const ARRAY_SCHEMA_KEYWORDS = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems'])
+
+/**
+ * Root members that only make sense on a JSON Schema. A document that has both
+ * `vct` and one of these is ambiguous: classifying it as Type Metadata would
+ * silently skip its JSON Schema constraints.
+ */
+const JSON_SCHEMA_ROOT_KEYWORDS = [
+  '$anchor',
+  '$defs',
+  '$dynamicAnchor',
+  '$dynamicRef',
+  '$recursiveRef',
+  '$ref',
+  '$schema',
+  'additionalProperties',
+  'allOf',
+  'anyOf',
+  'const',
+  'contains',
+  'definitions',
+  'dependencies',
+  'dependentRequired',
+  'dependentSchemas',
+  'else',
+  'enum',
+  'exclusiveMaximum',
+  'exclusiveMinimum',
+  'format',
+  'if',
+  'items',
+  'maxContains',
+  'maxItems',
+  'maxLength',
+  'maxProperties',
+  'maximum',
+  'minContains',
+  'minItems',
+  'minLength',
+  'minProperties',
+  'minimum',
+  'multipleOf',
+  'not',
+  'oneOf',
+  'pattern',
+  'patternProperties',
+  'prefixItems',
+  'properties',
+  'propertyNames',
+  'required',
+  'then',
+  'type',
+  'unevaluatedItems',
+  'unevaluatedProperties',
+  'uniqueItems',
+] as const
+
+function looksLikeJsonSchema(document: Record<string, unknown>): boolean {
+  return JSON_SCHEMA_ROOT_KEYWORDS.some((keyword) => keyword in document)
+}
 
 /**
  * A fresh Ajv instance per document: caller-supplied schemas are untrusted and
@@ -767,8 +827,8 @@ export function validateSchemaDocuments(
       return
     }
 
-    const kind: 'type_metadata' | 'json_schema' =
-      isRecord(document) && typeof document.vct === 'string' ? 'type_metadata' : 'json_schema'
+    const typeMetadataLike = isRecord(document) && typeof document.vct === 'string'
+    const kind: 'type_metadata' | 'json_schema' = typeMetadataLike ? 'type_metadata' : 'json_schema'
 
     if (exceedsDepth(document, MAX_SCHEMA_DEPTH)) {
       applications.push({
@@ -790,6 +850,31 @@ export function validateSchemaDocuments(
         uri: reference.uri,
         integrity: reference.integrity,
         kind,
+        applied: false,
+      })
+      return
+    }
+
+    if (typeMetadataLike && looksLikeJsonSchema(document as Record<string, unknown>)) {
+      applications.push({
+        reference,
+        kind: null,
+        applied: false,
+        status: 'NOT_TESTED',
+        findings: [
+          finding(
+            'ambiguous_schema_document',
+            'The supplied document has a `vct` member and JSON Schema keywords; its kind is ambiguous, so it was not evaluated.',
+            'warning',
+            `/schemaReferences/${index}`,
+          ),
+        ],
+      })
+      schemaReferences.push({
+        formatIdentifier: reference.formatIdentifier,
+        uri: reference.uri,
+        integrity: reference.integrity,
+        kind: null,
         applied: false,
       })
       return

@@ -121,8 +121,9 @@ The structural dimensions (`credential_parsing`, `format_recognition`,
 structurally valid credential is never reported as fully valid or interoperable. Unsupported
 formats are recognised and reported `NOT_TESTED` rather than mocked; JSON Schema keywords that
 need unbounded regex/format evaluation (`format`, `pattern`, `patternProperties`,
-`uniqueItems`, `$ref` and its variants) are reported `NOT_TESTED` instead of executed, and
-unpinned or unresolved Type Metadata `extends` documents are not treated as validated.
+`uniqueItems`, the legacy `dependencies` applicator, `$ref` and its variants) are reported
+`NOT_TESTED` instead of executed; ambiguous `vct`/JSON Schema documents, unpinned references
+and unresolved Type Metadata `extends` are not treated as validated.
 Credential contents and claim values are never logged or returned. See [`docs/validation.md`](docs/validation.md) for
 the contract, statuses, limits and non-claims.
 
