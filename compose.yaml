@@ -1,0 +1,13 @@
+name: attestbook
+
+services:
+  attestbook:
+    build:
+      context: .
+    image: attestbook:local
+    environment:
+      HOST: 0.0.0.0
+      PORT: 3000
+    ports:
+      - '3000:3000'
+    restart: unless-stopped

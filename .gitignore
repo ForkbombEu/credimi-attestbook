@@ -1,0 +1,12 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Local configuration and secrets
+.env
+.env.*
+
+# Tooling and operating-system noise
+.DS_Store
+*.log

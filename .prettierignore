@@ -1,0 +1,11 @@
+# Phase 0 documents and research retain their own reviewed formatting.
+AGENTS.md
+docs/
+research/
+scripts/
+
+# Generated and vendor content.
+dist/
+coverage/
+node_modules/
+bun.lock

@@ -66,8 +66,8 @@ split from the closed duplicates #15–#19.
 
 | ID | Criterion | Phase / issue |
 | --- | --- | --- |
-| AC-01 | Runs independently from Credimi | Phase 1: #26, #39 |
-| AC-02 | Actual OWF package installed, used and integration-tested | Phase 1: #26, #27, #39 |
+| AC-01 | Runs independently from Credimi | Phase 1: #26 (`src/dependencies.test.ts`), #39 |
+| AC-02 | Actual OWF package installed, used and integration-tested | Phase 1: #26 (`src/owf.test.ts`), #27, #39 |
 | AC-03 | Supported TS11 rulebooks imported and inspected | Phase 1: #30, #31, #36, #39 |
 | AC-04 | Metadata managed/exported without losing normative information | Phase 1: #27, #29, #37 |
 | AC-05 | Reproducible versioning | Phase 1: #29 |
@@ -83,7 +83,7 @@ split from the closed duplicates #15–#19.
 | AC-15 | Credimi consumes results without database access | Phase 5: #49 |
 | AC-16 | Rulebook, cryptographic, protocol and interoperability results remain distinguishable | Phase 1: #33 |
 | AC-17 | Unsupported functionality explicitly reported | Phase 1: #32, #33 |
-| AC-18 | Automated tests, Docker and developer documentation | Phase 1: #26, #39 |
+| AC-18 | Automated tests, Docker and developer documentation | Phase 1: #26 (`bun run check`, Docker smoke job, README), #39 |
 
 ### 1.4 Explicit non-goals
 

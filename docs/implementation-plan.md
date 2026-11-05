@@ -109,12 +109,13 @@ Versions in this table were inspected or executed during Phase 0. Values marked
 | EUDI ARF | 3.0.0 (tag 2026-07-21), §5.5/§5.6 | verified | [`docs/standards.md`](standards.md) Part II §4 |
 | ETSI EN 319 482-3 | draft v0.0.6 (2026-10-27), content restricted | **UNVERIFIED** | [`docs/standards.md`](standards.md) Part II §6, §8 |
 | OWF package | `@owf/eudi-attestation-schema` **0.5.4** (published 2026-10-30) | verified, 46 runtime exports | [`docs/standards.md`](standards.md) §2–§3; `research/owf-audit` |
-| OWF dependencies | `@owf/crypto` 0.6.2, `@owf/identity-common` 0.6.2, `@sd-jwt/sd-jwt-vc` 0.24.1, `zod` 4.6.7 | verified via lockfile | `research/owf-audit/package.json` |
+| OWF dependencies | `@owf/crypto` 0.6.2, `@owf/identity-common` 0.6.2, `@owf/cose` 0.6.2, `@owf/token-status-list` 0.6.2, `@sd-jwt/sd-jwt-vc` 0.24.1, `@sd-jwt/core` 0.24.1, `zod` 4.6.7 | verified via lockfile and pinned by `overrides` | `research/owf-audit/package-lock.json`, `bun.lock`, `src/owf.test.ts` |
 | Node.js | 20.20.2, 22.23.4, 24.22.2 | verified | [`docs/standards.md`](standards.md) §8 |
 | Bun | 1.3.1 (Linux x64) | verified in the Phase 0 audit environment | [`docs/standards.md`](standards.md) §8 |
 | OWF probe re-run | Node.js 24.22.2, 35 checks passed | re-verified 2026-11-05 | `research/owf-audit` run for this plan |
-| SQLite via Bun | not yet executed by an AttestBook application | **verification gate** | #26 builds the first real runner |
-| HTTP/UI/validation libraries | not yet executed by AttestBook | **verification gate** | exact versions pinned by #26/#32 |
+| SQLite via Bun | Bun 1.3.1 built-in `bun:sqlite`; WAL and foreign keys enabled | verified | `src/sqlite-smoke.test.ts`; #26 |
+| Hono HTTP library | 4.13.16 | verified (health endpoint under Bun) | `src/app.test.ts`, Docker smoke job; #26 |
+| UI/validation libraries | not yet executed by AttestBook | **verification gate** | exact versions pinned by #32/#36 |
 
 Rules that follow from this table:
 
@@ -153,7 +154,7 @@ later issue explicitly supersedes one.
 | **D-13** | — | Make **Bun 1.3.1** the primary Phase 1 runtime and package manager; produce ESM and strict TypeScript; use Node 20+ only for the OWF compatibility probe and the dependency-free documentation check. Use `skipLibCheck: true` because of the `@sd-jwt/sd-jwt-vc` 0.24.1 declarations, while keeping `strict` and `exactOptionalPropertyTypes` for application code. | Spec §2.2 prefers Bun subject to compatibility; the audit verified Bun 1.3.1 with the OWF package (standards §8). | #26 |
 | **D-14** | — | Baseline stack: Hono with a Zod/OpenAPI layer for the HTTP API; React + Vite for the standalone UI; `@sd-jwt/sd-jwt-vc` plus Ajv 2020-12 for SD-JWT VC parsing/structural validation; Playwright for browser tests. Exact versions are pinned by #26/#32 after a compatibility probe. | Lightweight, ESM/TypeScript-native, no microservices, same API for UI (spec §2.2, §13, §14). | #26, #32 |
 | **D-15** | — | CI is GitHub Actions with pinned Bun 1.3.1, frozen lockfile, and separate quality, test, build, Docker-smoke, docs and OpenAPI jobs. Every check must pass before merge; no deployment job and no secrets. The agent does not alter branch-protection settings: #26 verifies whether the checks are required on `main`, reports any gap in its PR, and the repository owner opens the repository-administration issue (the agent does not open issues as itself). | Spec §16/§17; issue #26. AGENTS.md backlog step 2 asks for required checks, but the agent's delivery policy forbids changing repository settings, so #26 records the deviation instead of silently leaving checks advisory. | #26 |
-| **D-16** | — | Add a repository documentation check (`node scripts/check-docs.mjs`) that verifies the five Phase 0 documents, relative links and required cross-references. #25 runs it directly and in `.github/workflows/docs.yml`; #26 wires it into the main CI. | Acceptance criterion "documentation consistency checks pass"; R-14. | #25, #26 |
+| **D-16** | — | Add a repository documentation check (`node scripts/check-docs.mjs`) that verifies the five Phase 0 documents, relative links and required cross-references. #25 runs it directly and in `.github/workflows/docs.yml`; #26 folds it into the `docs` job of `.github/workflows/ci.yml`. | Acceptance criterion "documentation consistency checks pass"; R-14. | #25, #26 |
 | **D-17** | — | Phase 1 validates SD-JWT VC structure and attestation constraints only. Cryptographic, trust, protocol and interoperability dimensions are returned as `NOT_TESTED` unless a real external check runs; mdoc and other formats are recognised or reported, never mocked as valid. | FR-010–FR-012, AC-16/AC-17; standards capability matrix. | #32, #33 |
 
 ### Decision traceability
