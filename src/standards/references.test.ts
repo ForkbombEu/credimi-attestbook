@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import type { AdapterResult, CanonicalSchemaMeta } from './index'
 import { parseOwfSchemaMeta, resolveSchemaMetaReferences } from './index'
-import { buildOwfWire, SCHEMA_URI, sha256Sri, TEST_SCHEMA_DOCUMENT } from './test-fixtures'
+import { buildOwfWire, SCHEMA_URI, sha256Sri, TEST_SCHEMA_DOCUMENT } from './test/fixtures'
 
 function failureDiagnostics(result: AdapterResult<unknown>) {
   expect(result.ok).toBe(false)
@@ -133,8 +133,8 @@ describe('OWF-backed schema reference resolution', () => {
 
     expect(diagnostics).toEqual([
       expect.objectContaining({
-        kind: 'invalid_input',
-        code: 'missing_required_member',
+        kind: 'unsupported_operation',
+        code: 'unsupported_schema_meta_member',
         path: 'id',
       }),
     ])

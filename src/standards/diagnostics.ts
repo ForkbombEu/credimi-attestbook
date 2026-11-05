@@ -17,6 +17,7 @@ export type DiagnosticCode =
   | 'ambiguous_profile'
   | 'preserved_unknown_member'
   | 'preserved_unknown_value'
+  | 'signing_time_stamped'
   | 'missing_required_member'
   | 'invalid_member_value'
   | 'invalid_ts11_id'

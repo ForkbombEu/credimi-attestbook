@@ -27,8 +27,11 @@ validation engine (those arrive in later slices).
 | `src/standards/references.ts` | SRI reference-resolution boundary around OWF `resolveSchemaReferences` |
 | `src/standards/diagnostics.ts` | Structured diagnostics and their `invalid_input` / `unsupported_operation` split |
 
-Production code imports from `src/standards/index.ts`.
-The wire-specific modules stay an implementation detail.
+Production code imports from `src/standards/index.ts`. That barrel also re-exports
+the low-level codecs for tests and later slices, but consumers should normally use
+`parseSchemaMetaDocument`, `serializeSchemaMeta`, `signSchemaMetaJws`,
+`verifySchemaMetaJws`, `resolveSchemaMetaReferences` and the diagnostics types; the
+wire modules remain an implementation detail.
 
 ## 2. Operations
 
@@ -37,7 +40,7 @@ The wire-specific modules stay an implementation detail.
 | Profile detection | adapter-owned | adapter-owned | `src/standards/profiles.test.ts` |
 | Structural parsing and validation | adapter-owned translation extension | real package `validateSchemaMeta` | `ts11-codec.test.ts`, `owf-codec.test.ts` |
 | Serialization | adapter-owned translation extension | real package validation after building | `serializeTs11SchemaMeta`, `serializeOwfSchemaMeta` |
-| Strict baseline validation | `validateSchemaMetaDocument` rejects additions | real package remains the authority | `ts11-codec.test.ts` |
+| Strict baseline validation | `validateSchemaMetaDocument` rejects additions | OWF validates, then the adapter baseline-strict check rejects unknown top-level members | `ts11-codec.test.ts`, `owf-codec.test.ts` |
 | JWS signing | **unsupported** (see §7) | real `signSchemaMeta` behind the JOSE policy | `jose.test.ts` |
 | JWS verification | **unsupported** for the TS11 list envelope | real `verifySchemaMeta` behind the JOSE policy | `jose.test.ts` |
 | SRI reference resolution | only for OWF-representable documents, sha256 only | real `resolveSchemaReferences` | `references.test.ts` |
@@ -105,7 +108,8 @@ Representative codes:
   `unsupported_trust_authority`, `unsupported_sri_algorithm`,
   `unsupported_schema_meta_member`, `unsupported_jose_algorithm`.
 - not tested: `trust_not_tested`.
-- preserved: `preserved_unknown_member`, `preserved_unknown_value`.
+- preserved: `preserved_unknown_member`, `preserved_unknown_value`,
+  `signing_time_stamped`.
 
 A serialization that fails because the target profile requires a member the source profile
 does not carry is `unsupported_operation`, not `invalid_input`; a canonical document missing
@@ -140,6 +144,7 @@ Concrete unsupported cases:
 | TS11 `aki`/`openid_federation` trust framework | `unsupported_trust_authority` | `trustedAuthorities.0.frameworkType` |
 | `sha384`/`sha512` SRI | `unsupported_sri_algorithm` | `schemaURIs.0.integrity` |
 | OWF URL `id` exported as TS11 | `invalid_ts11_id` | `id` |
+| OWF requires a URL `id`; TS11 marks `id` optional or carries a UUID | `unsupported_schema_meta_member` | `id` |
 
 ## 6. Strict JOSE policy
 
@@ -156,6 +161,7 @@ of the real package:
 | `x5c` | Signing requires at least one certificate; verification requires a non-empty chain. |
 | `iat` | Must be a positive integer present in the signed payload and equal to the value OWF returns. A synthesised value is rejected (`synthetic_iat`). |
 | Signature | Delegated to OWF `verifySchemaMeta`; a failure is `invalid_signature` or `invalid_schema_meta`. |
+| `iat` on signing | OWF `signSchemaMeta` always stamps the current time and replaces a canonical `iat`; the replacement is reported with `signing_time_stamped` (`preserved`), not hidden. |
 | Trust | x5c chain, trust anchor and `trustedAuthorities` are **not** validated; every successful verification carries `trust_not_tested`. |
 
 TS11 catalogue response signing uses a `{ iss, iat, data }` list envelope that OWF does not
@@ -191,7 +197,8 @@ silently approximated:
   duplicate formats, cross-member format consistency, unknown members and unknown enum
   values;
 - OWF parsing/serialization through the real package, agreement with `validateSchemaMeta`
-  on valid and invalid documents, and real-package validation errors;
+  on valid and invalid documents, real-package validation errors, baseline-strict unknown
+  members, `__proto__` rejection and preserved-member collisions;
 - JOSE positive and negative flows with a real ES256 key: tampered signature, wrong key,
   wrong `kid`, wrong algorithm, missing `x5c`, wrong `typ`, `alg: none`, and a synthesised
   `iat` that OWF accepts but the adapter rejects;

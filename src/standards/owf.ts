@@ -43,11 +43,25 @@ const OWF_KNOWN_MEMBERS = new Set([
   'issuanceProfile',
 ])
 
+export interface OwfParseOptions {
+  /**
+   * When true, unknown top-level members are validation errors instead of
+   * preserved forward-compatible data. OWF itself accepts them, so this is the
+   * AttestBook baseline-strict wrapper.
+   */
+  readonly baselineStrict?: boolean
+}
+
 /**
  * Parses an OWF 0.5.4 SchemaMeta document through `validateSchemaMeta` from the
  * real package, then translates it into the canonical model.
  */
-export function parseOwfSchemaMeta(document: unknown): AdapterResult<CanonicalSchemaMeta> {
+export function parseOwfSchemaMeta(
+  document: unknown,
+  options: OwfParseOptions = {},
+): AdapterResult<CanonicalSchemaMeta> {
+  const strict = options.baselineStrict === true
+
   const validation = validateSchemaMeta(document)
   if (!validation.valid) {
     return fail(
@@ -93,16 +107,33 @@ export function parseOwfSchemaMeta(document: unknown): AdapterResult<CanonicalSc
   const unknownMembers: Record<string, unknown> = {}
   const record = document as Record<string, unknown>
   for (const key of Object.keys(record)) {
-    if (!OWF_KNOWN_MEMBERS.has(key)) {
-      unknownMembers[key] = record[key]
-      diagnostics.push(
-        preserved(
-          'preserved_unknown_member',
-          `preserved unrecognised OWF member "${key}" for forward compatibility`,
-          key,
-        ),
-      )
+    if (OWF_KNOWN_MEMBERS.has(key)) {
+      continue
     }
+    if (key === '__proto__') {
+      diagnostics.push(
+        invalidInput('invalid_member_value', 'the "__proto__" member is not accepted', key),
+      )
+      continue
+    }
+    if (strict) {
+      diagnostics.push(
+        invalidInput('invalid_member_value', `unrecognised OWF 0.5.4 member "${key}"`, key),
+      )
+      continue
+    }
+    unknownMembers[key] = record[key]
+    diagnostics.push(
+      preserved(
+        'preserved_unknown_member',
+        `preserved unrecognised OWF member "${key}" for forward compatibility`,
+        key,
+      ),
+    )
+  }
+
+  if (hasBlockingDiagnostic(diagnostics)) {
+    return fail(diagnostics)
   }
 
   const schemaMeta: CanonicalSchemaMeta = {
@@ -294,8 +325,24 @@ function buildOwfSchemaUri(
 export function buildOwfSchemaMeta(schemaMeta: CanonicalSchemaMeta): AdapterResult<SchemaMeta> {
   const diagnostics: AdapterDiagnostic[] = []
 
-  if (!isNonEmptyString(schemaMeta.id)) {
-    diagnostics.push(invalidInput('missing_required_member', 'OWF 0.5.4 requires an "id"', 'id'))
+  if (schemaMeta.id === undefined) {
+    diagnostics.push(
+      unsupportedOperation(
+        'unsupported_schema_meta_member',
+        'OWF 0.5.4 requires an "id"; TS11 v1.0.1 marks it optional and server-assigned',
+        'id',
+      ),
+    )
+  } else if (!isNonEmptyString(schemaMeta.id)) {
+    diagnostics.push(invalidInput('invalid_member_value', 'expected a non-empty id', 'id'))
+  } else if (!isAbsoluteUrl(schemaMeta.id)) {
+    diagnostics.push(
+      unsupportedOperation(
+        'unsupported_schema_meta_member',
+        'OWF 0.5.4 requires a URL "id"; this canonical id is not a URL (for example a TS11 UUID)',
+        'id',
+      ),
+    )
   }
   if (!isNonEmptyString(schemaMeta.version)) {
     diagnostics.push(
@@ -410,6 +457,18 @@ export function buildOwfSchemaMeta(schemaMeta: CanonicalSchemaMeta): AdapterResu
 
   if (schemaMeta.iat !== undefined && (!Number.isInteger(schemaMeta.iat) || schemaMeta.iat < 0)) {
     diagnostics.push(invalidInput('invalid_member_value', 'expected a non-negative integer', 'iat'))
+  }
+
+  for (const key of Object.keys(schemaMeta.unknownMembers)) {
+    if (OWF_KNOWN_MEMBERS.has(key)) {
+      diagnostics.push(
+        invalidInput(
+          'invalid_member_value',
+          `preserved member "${key}" collides with an OWF member`,
+          key,
+        ),
+      )
+    }
   }
 
   if (hasBlockingDiagnostic(diagnostics)) {

@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { validateSchemaMeta } from '@owf/eudi-attestation-schema'
 
-import { parseSchemaMetaDocument } from './codec'
+import { parseSchemaMetaDocument, validateSchemaMetaDocument } from './codec'
 import { OWF_PROFILE, type AdapterResult, type CanonicalSchemaMeta } from './index'
 import {
   buildOwfSchemaMeta,
@@ -18,7 +18,7 @@ import {
   SCHEMA_URI,
   sha256Sri,
   TEST_SCHEMA_DOCUMENT,
-} from './test-fixtures'
+} from './test/fixtures'
 
 function failureDiagnostics(result: AdapterResult<unknown>) {
   expect(result.ok).toBe(false)
@@ -207,15 +207,37 @@ describe('OWF 0.5.4 serialization through the real package', () => {
     ).toContain('unsupported_sri_algorithm')
   })
 
-  test('reports invalid canonical input as invalid input, not unsupported', () => {
+  test('reports a missing or non-URL id as an unsupported translation', () => {
     const canonical = readOwf()
     const { id, ...withoutId } = canonical
     expect(id).toBeDefined()
-    const missingId = failureDiagnostics(serializeOwfSchemaMeta(withoutId))
-    expect(missingId).toEqual([
+
+    expect(failureDiagnostics(serializeOwfSchemaMeta(withoutId))).toEqual([
+      expect.objectContaining({
+        kind: 'unsupported_operation',
+        code: 'unsupported_schema_meta_member',
+        path: 'id',
+      }),
+    ])
+
+    const ts11Canonical = successValue(parseTs11SchemaMeta(buildTs11Document()))
+    expect(
+      failureDiagnostics(serializeOwfSchemaMeta(ts11Canonical)).some(
+        (entry) =>
+          entry.kind === 'unsupported_operation' &&
+          entry.code === 'unsupported_schema_meta_member' &&
+          entry.path === 'id',
+      ),
+    ).toBe(true)
+  })
+
+  test('reports malformed canonical input as invalid input, not unsupported', () => {
+    const canonical = readOwf()
+    const emptyId = failureDiagnostics(serializeOwfSchemaMeta({ ...canonical, id: '' }))
+    expect(emptyId).toEqual([
       expect.objectContaining({
         kind: 'invalid_input',
-        code: 'missing_required_member',
+        code: 'invalid_member_value',
         path: 'id',
       }),
     ])
@@ -231,6 +253,53 @@ describe('OWF 0.5.4 serialization through the real package', () => {
           entry.path === 'schemaURIs.0.formatIdentifier',
       ),
     ).toBe(true)
+  })
+
+  test('strict validation rejects unknown OWF top-level members', () => {
+    const document = { ...buildOwfWire(), futureMember: true }
+    expect(parseOwfSchemaMeta(document).ok).toBe(true)
+
+    const strict = validateSchemaMetaDocument(document)
+    expect(failureDiagnostics(strict)).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_member_value',
+        path: 'futureMember',
+      }),
+    ])
+  })
+
+  test('rejects a "__proto__" top-level member instead of dropping it', () => {
+    const document: Record<string, unknown> = { ...buildOwfWire() }
+    Object.defineProperty(document, '__proto__', {
+      value: { polluted: true },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+
+    expect(failureDiagnostics(parseOwfSchemaMeta(document))).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_member_value',
+        path: '__proto__',
+      }),
+    ])
+  })
+
+  test('rejects preserved members that collide with OWF members', () => {
+    const canonical = {
+      ...readOwf(),
+      unknownMembers: { version: '9.9.9' },
+    }
+
+    expect(failureDiagnostics(serializeOwfSchemaMeta(canonical))).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_member_value',
+        path: 'version',
+      }),
+    ])
   })
 
   test('reports the OWF profile through the shared serializer', () => {

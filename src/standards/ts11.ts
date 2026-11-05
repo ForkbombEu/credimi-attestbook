@@ -127,6 +127,12 @@ function collectUnknownMembers(
     }
     found = true
     const path = memberPath(basePath, key)
+    if (key === '__proto__') {
+      diagnostics.push(
+        invalidInput('invalid_member_value', 'the "__proto__" member is not accepted', path),
+      )
+      continue
+    }
     if (strict) {
       diagnostics.push(
         invalidInput('invalid_member_value', `unrecognised TS11 v1.0.1 member "${key}"`, path),

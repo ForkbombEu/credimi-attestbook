@@ -75,7 +75,11 @@ export function parseSchemaMetaDocument(
             ? { baselineStrict: options.baselineStrict }
             : {}),
         })
-      : parseOwfSchemaMeta(document)
+      : parseOwfSchemaMeta(document, {
+          ...(options.baselineStrict !== undefined
+            ? { baselineStrict: options.baselineStrict }
+            : {}),
+        })
 
   if (!parsed.ok) {
     return fail([...diagnostics, ...parsed.diagnostics])

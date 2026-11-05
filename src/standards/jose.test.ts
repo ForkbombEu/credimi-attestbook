@@ -22,7 +22,7 @@ import {
   TEST_CERTIFICATE_DER,
   TEST_CERTIFICATE_PEM,
   type TestKey,
-} from './test-fixtures'
+} from './test/fixtures'
 
 function failureDiagnostics(result: AdapterResult<unknown>) {
   expect(result.ok).toBe(false)
@@ -95,6 +95,26 @@ describe('strict JOSE signing', () => {
 
   test('defaults to ES256', () => {
     expect(DEFAULT_JWS_ALGORITHM).toBe('ES256')
+  })
+
+  test('reports when OWF replaces a canonical iat with the signing time', async () => {
+    const key = await createTestKey()
+    const result = await signSchemaMetaJws({
+      schemaMeta: { ...readOwf(), iat: 123 },
+      keyId: 'kid-1',
+      certificates: [TEST_CERTIFICATE_PEM],
+      signer: key.signer,
+    })
+    const signed = successValue(result)
+
+    expect(signed.iat).not.toBe(123)
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        kind: 'preserved',
+        code: 'signing_time_stamped',
+        path: 'iat',
+      }),
+    ])
   })
 
   test('rejects an empty certificate chain', async () => {
@@ -435,6 +455,8 @@ describe('strict JOSE verification', () => {
   test('decodeCompactJws rejects malformed compact serializations', () => {
     expect(decodeCompactJws('a.b').ok).toBe(false)
     expect(decodeCompactJws('a.b.c').ok).toBe(false)
+    expect(decodeCompactJws('a..c').ok).toBe(false)
+    expect(decodeCompactJws('..').ok).toBe(false)
     expect(decodeCompactJws('!!!.!!!.!!!').ok).toBe(false)
   })
 

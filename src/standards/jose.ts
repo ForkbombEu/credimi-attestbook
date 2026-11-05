@@ -19,6 +19,7 @@ import {
   invalidInput,
   notTested,
   ok,
+  preserved,
   unsupportedOperation,
   type AdapterDiagnostic,
   type AdapterResult,
@@ -41,6 +42,8 @@ export type JwsAlgorithm = (typeof ALLOWED_JWS_ALGORITHMS)[number]
 export const DEFAULT_JWS_ALGORITHM: JwsAlgorithm = 'ES256'
 
 const JOSE_TYPE = 'attestation-schema+jwt'
+
+const PEM_CERTIFICATE_PATTERN = /-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/
 
 export interface JwsHeader {
   readonly alg: string
@@ -126,7 +129,14 @@ export function decodeCompactJws(jws: string): AdapterResult<CompactJwsParts> {
     ])
   }
   const [headerPart, payloadPart, signature] = parts
-  if (headerPart === undefined || payloadPart === undefined || signature === undefined) {
+  if (
+    headerPart === undefined ||
+    payloadPart === undefined ||
+    signature === undefined ||
+    headerPart === '' ||
+    payloadPart === '' ||
+    signature === ''
+  ) {
     return fail([
       invalidInput(
         'invalid_jose_header',
@@ -243,11 +253,11 @@ export async function signSchemaMetaJws(
       ),
     ])
   }
-  if (options.certificates.some((certificate) => certificate.trim() === '')) {
+  if (options.certificates.some((certificate) => !PEM_CERTIFICATE_PATTERN.test(certificate))) {
     return fail([
       invalidInput(
         'invalid_signing_certificate',
-        'every signing certificate must be a non-empty PEM string',
+        'every signing certificate must be a PEM-encoded certificate',
         'certificates',
       ),
     ])
@@ -269,9 +279,10 @@ export async function signSchemaMetaJws(
       signer: options.signer,
     })
   } catch (error) {
-    const message = errorMessage(error)
-    const code = /certificate/i.test(message) ? 'invalid_signing_certificate' : 'signing_failed'
-    return fail([...diagnostics, invalidInput(code, message, 'certificates')])
+    return fail([
+      ...diagnostics,
+      invalidInput('signing_failed', errorMessage(error), 'certificates'),
+    ])
   }
 
   const headerDiagnostics = checkHeader(signed.header, {
@@ -296,6 +307,16 @@ export async function signSchemaMetaJws(
         'payload.iat',
       ),
     ])
+  }
+
+  if (options.schemaMeta.iat !== undefined && options.schemaMeta.iat !== signed.iat) {
+    diagnostics.push(
+      preserved(
+        'signing_time_stamped',
+        `OWF signSchemaMeta stamped iat ${signed.iat}; the canonical iat ${options.schemaMeta.iat} was replaced`,
+        'iat',
+      ),
+    )
   }
 
   return ok(

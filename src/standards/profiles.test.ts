@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { parseSchemaMetaDocument } from './codec'
 import { detectProfile, OWF_PROFILE, TS11_PROFILE, type AdapterResult } from './index'
-import { buildOwfWire, buildTs11Document } from './test-fixtures'
+import { buildOwfWire, buildTs11Document } from './test/fixtures'
 
 function failureDiagnostics(result: AdapterResult<unknown>) {
   expect(result.ok).toBe(false)

@@ -23,7 +23,7 @@ import {
   SCHEMA_URI,
   sha256Sri,
   TEST_SCHEMA_DOCUMENT,
-} from './test-fixtures'
+} from './test/fixtures'
 
 function failureDiagnostics(result: AdapterResult<unknown>) {
   expect(result.ok).toBe(false)
@@ -115,6 +115,23 @@ describe('TS11 v1.0.1 parsing', () => {
         path: 'attestationLoS',
       }),
     ])
+  })
+
+  test('rejects a "__proto__" member instead of dropping it', () => {
+    const document = buildTs11Document()
+    Object.defineProperty(document, '__proto__', {
+      value: { polluted: true },
+      enumerable: true,
+      configurable: true,
+      writable: true,
+    })
+
+    expect(codes(parseTs11SchemaMeta(document))).toContain('invalid_member_value')
+    expect(
+      failureDiagnostics(parseTs11SchemaMeta(document)).some(
+        (entry) => entry.kind === 'invalid_input' && entry.path === '__proto__',
+      ),
+    ).toBe(true)
   })
 
   test('strict validation rejects members and values outside the pinned baseline', () => {
