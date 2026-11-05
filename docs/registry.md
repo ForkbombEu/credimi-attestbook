@@ -68,7 +68,7 @@ Initial tables:
 | `auth_tokens` | Provisional write credentials | only a SHA-256 token hash is stored; provider-scoped, revocable |
 | `rulebooks` | Stable rulebook identity and product metadata | provider foreign key; status ∈ draft/published/historical; JSON-object provenance/metadata |
 | `attestations` | Attestation types owned by a rulebook | unique `(rulebook_id, name)`; formats stored as JSON array |
-| `schema_refs` | Format identifier, URI and SRI value | unique `(rulebook_id, format_identifier)`; an optional attestation must belong to the same rulebook |
+| `schema_refs` | Format identifier, URI and SRI value | one format per attestation type (and separately one per rulebook-level scope); an optional attestation must belong to the same rulebook |
 | `audit_log` | Privileged mutation trail | action, actor provider (nullable for bootstrap), entity and timestamp |
 | `schema_migrations` | Applied migration bookkeeping | version, checksum and application timestamp |
 
@@ -137,8 +137,8 @@ provisional product model of D-10. The service enforces it, not the UI or a rout
    creates a provider, assigns its publication authority and issues its first token. It is
    deliberately not a `Registry` service method: this is the only unauthenticated write and
    exists because a provider cannot hold a token before it exists; it is never exposed as an
-   HTTP route. The publication authority is unique and cannot be changed through the service,
-   so a provider cannot self-assert another account's authority (FR-003).
+   HTTP route. The publication authority is case-insensitively unique and cannot be changed
+   through the service, so a provider cannot self-assert another account's authority (FR-003).
 2. **Writes require a bearer token.** `issueToken`, `updateProvider`, `deleteProvider` and
    every rulebook/attestation/schema mutation authenticate the token. Tokens use the `att_`
    prefix, 256 random bits and a SHA-256 hash at rest; the raw secret is returned once at
@@ -154,8 +154,11 @@ provisional product model of D-10. The service enforces it, not the UI or a rout
    status cannot be changed through the service.
 6. **Mutations are audited.** Creates, updates, deletes, token issuance and revocation write
    an `audit_log` row with the acting provider (or `null` for operator provisioning). Removing
-   an attestation type deletes its schema references explicitly and records a
-   `schema_ref.delete` row with reason `attestation.delete` before the attestation row.
+   an attestation type deletes its schema references explicitly and records
+   `schema_ref.delete` rows with reason `attestation.delete` before the attestation row.
+   Deleting a rulebook likewise records an explicit `schema_ref.delete` and
+   `attestation.delete` row for each child (reason `rulebook.delete`) before the rulebook row.
+   Child mutations also update the rulebook's `updatedAt`.
 
 Token revocation is idempotent and only affects the authenticated provider's tokens. Phase 1
 does not yet implement token expiry, rotation policy, rate limiting or HTTP-level request
@@ -169,10 +172,11 @@ Inputs are validated and bounded before SQL: non-empty trimmed text, maximum len
 objects only (with a serialized-size limit), `http(s)` URLs without embedded credentials,
 bounded unique string arrays and W3C SRI-shaped `integrity` values. URLs are stored in their
 parsed normal form (lowercase scheme/host, `parsed.href`), so a valid uppercase scheme cannot
-trip the database's case-sensitive URL check. Stored JSON metadata is a detached serialized
-copy, so a caller cannot mutate what was persisted afterwards. These are product safety
-limits, not a claim of TS11 conformance; the standards adapter remains the wire-profile
-validator, and SRI **verification** belongs to #30.
+trip the database's case-sensitive URL check; the length limit is re-checked after
+percent-encoding expansion. Stored JSON metadata is a detached serialized copy, so a caller
+cannot mutate what was persisted afterwards. These are product safety limits, not a claim of
+TS11 conformance; the standards adapter remains the wire-profile validator, and SRI
+**verification** belongs to #30.
 
 Failures are typed `RegistryError`s with a stable code so the HTTP layer can map them without
 parsing messages:

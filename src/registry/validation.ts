@@ -5,7 +5,7 @@
 // standards adapter remains responsible for wire-profile validation.
 
 import { invalidInput } from './errors'
-import { PUBLICATION_STATUSES, type JsonObject, type PublicationStatus } from './types'
+import type { JsonObject } from './types'
 
 export const MAX_NAME_LENGTH = 200
 export const MAX_TEXT_LENGTH = 200
@@ -152,7 +152,11 @@ export function requireAbsoluteHttpUrl(value: unknown, field: string): string {
     throw invalidInput(`${field} must not embed credentials`)
   }
   // Store the parsed form: it lowercases the scheme/host and guarantees the
-  // value matches the schema's case-sensitive http(s) check.
+  // value matches the schema's case-sensitive http(s) check. Percent-encoding
+  // can expand the value, so re-check the limit on what will be stored.
+  if (parsed.href.length > MAX_URL_LENGTH) {
+    throw invalidInput(`${field} must be at most ${MAX_URL_LENGTH} characters after normalisation`)
+  }
   return parsed.href
 }
 
@@ -187,11 +191,4 @@ export function requireLabel(value: unknown, field: string): string | null {
     return null
   }
   return requireText(value, field, MAX_LABEL_LENGTH)
-}
-
-export function requirePublicationStatus(value: unknown): PublicationStatus {
-  if (typeof value !== 'string' || !PUBLICATION_STATUSES.includes(value as PublicationStatus)) {
-    throw invalidInput(`publicationStatus must be one of ${PUBLICATION_STATUSES.join(', ')}`)
-  }
-  return value as PublicationStatus
 }

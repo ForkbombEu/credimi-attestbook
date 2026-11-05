@@ -216,6 +216,15 @@ export class RegistryStore {
       .map(toProvider)
   }
 
+  findProviderByPublicationAuthority(publicationAuthority: string): Provider | null {
+    const row = this.database
+      .query<ProviderRow, [string]>(
+        'SELECT * FROM providers WHERE publication_authority = ? COLLATE NOCASE',
+      )
+      .get(publicationAuthority)
+    return row === null ? null : toProvider(row)
+  }
+
   updateProvider(provider: Provider): void {
     // publication_authority is operator-assigned and intentionally immutable
     // through the service; only the display name and internal metadata change.
@@ -341,6 +350,10 @@ export class RegistryStore {
     this.database.query('DELETE FROM rulebooks WHERE id = ?').run(id)
   }
 
+  touchRulebook(id: string, updatedAt: string): void {
+    this.database.query('UPDATE rulebooks SET updated_at = ? WHERE id = ?').run(updatedAt, id)
+  }
+
   insertAttestation(attestation: AttestationType): void {
     this.database
       .query(
@@ -437,13 +450,23 @@ export class RegistryStore {
 
   findSchemaReferenceByFormat(
     rulebookId: string,
+    attestationId: string | null,
     formatIdentifier: string,
   ): SchemaReference | null {
-    const row = this.database
-      .query<SchemaReferenceRow, [string, string]>(
-        'SELECT * FROM schema_refs WHERE rulebook_id = ? AND format_identifier = ?',
-      )
-      .get(rulebookId, formatIdentifier)
+    const row =
+      attestationId === null
+        ? this.database
+            .query<SchemaReferenceRow, [string, string]>(
+              `SELECT * FROM schema_refs
+               WHERE rulebook_id = ? AND attestation_id IS NULL AND format_identifier = ?`,
+            )
+            .get(rulebookId, formatIdentifier)
+        : this.database
+            .query<SchemaReferenceRow, [string, string, string]>(
+              `SELECT * FROM schema_refs
+               WHERE rulebook_id = ? AND attestation_id = ? AND format_identifier = ?`,
+            )
+            .get(rulebookId, attestationId, formatIdentifier)
     return row === null ? null : toSchemaReference(row)
   }
 

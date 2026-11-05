@@ -46,3 +46,15 @@ export function immutable(message = 'Published registry data is immutable.'): Re
 export function isRegistryError(error: unknown): error is RegistryError {
   return error instanceof RegistryError
 }
+
+/**
+ * Detects a SQLite uniqueness violation so the service can keep its typed
+ * error contract even if a pre-check races with another connection.
+ */
+export function isUniqueConstraintError(error: unknown): boolean {
+  if (!(error instanceof Error)) {
+    return false
+  }
+  const code = (error as { readonly code?: unknown }).code
+  return typeof code === 'string' && code.startsWith('SQLITE_CONSTRAINT_UNIQUE')
+}

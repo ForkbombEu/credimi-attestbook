@@ -13,9 +13,10 @@ CREATE TABLE providers (
   name TEXT NOT NULL CHECK (length(trim(name)) > 0),
   -- Opaque account binding used for publication authority. Never inferred from
   -- a remote URL (FR-003); provisioning is an operator action (D-10).
-  -- Operator-assigned account binding; unique and immutable through the
-  -- service so a provider cannot self-assert another account's authority.
-  publication_authority TEXT NOT NULL UNIQUE
+  -- Operator-assigned account binding; case-insensitively unique and
+  -- immutable through the service so a provider cannot self-assert another
+  -- account's authority.
+  publication_authority TEXT NOT NULL COLLATE NOCASE UNIQUE
     CHECK (length(trim(publication_authority)) > 0),
   metadata_json TEXT NOT NULL DEFAULT '{}'
     CHECK (json_valid(metadata_json) AND json_type(metadata_json) = 'object'),
@@ -89,10 +90,19 @@ CREATE TABLE schema_refs (
   metadata_json TEXT NOT NULL DEFAULT '{}'
     CHECK (json_valid(metadata_json) AND json_type(metadata_json) = 'object'),
   created_at TEXT NOT NULL,
-  UNIQUE (rulebook_id, format_identifier),
   FOREIGN KEY (attestation_id, rulebook_id)
     REFERENCES attestations (id, rulebook_id) ON DELETE CASCADE
 );
+
+-- A schema reference is unique in its own scope: one reference per format for
+-- a rulebook-level reference, and one per format for each attestation type.
+-- Two attestation types may therefore each reference a `dc+sd-jwt` schema.
+CREATE UNIQUE INDEX schema_refs_rulebook_format_idx
+  ON schema_refs (rulebook_id, format_identifier)
+  WHERE attestation_id IS NULL;
+CREATE UNIQUE INDEX schema_refs_attestation_format_idx
+  ON schema_refs (rulebook_id, attestation_id, format_identifier)
+  WHERE attestation_id IS NOT NULL;
 
 CREATE INDEX schema_refs_rulebook_id_idx ON schema_refs (rulebook_id);
 CREATE INDEX schema_refs_attestation_id_idx ON schema_refs (attestation_id);

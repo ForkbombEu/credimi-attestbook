@@ -15,7 +15,15 @@
 import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 
-import { conflict, forbidden, immutable, invalidInput, notFound, unauthorized } from './errors'
+import {
+  conflict,
+  forbidden,
+  immutable,
+  invalidInput,
+  isUniqueConstraintError,
+  notFound,
+  unauthorized,
+} from './errors'
 import { RegistryStore } from './store'
 import { generateBearerToken, hashBearerToken } from './tokens'
 import type {
@@ -132,7 +140,7 @@ export class Registry {
       return existing
     }
 
-    this.database.transaction(() => {
+    this.transaction(() => {
       this.store.updateProvider(updated)
       this.store.insertAudit({
         at: this.now(),
@@ -157,7 +165,7 @@ export class Registry {
     }
 
     const at = this.now()
-    this.database.transaction(() => {
+    this.transaction(() => {
       this.store.deleteProvider(actor.providerId)
       this.store.insertAudit({
         at,
@@ -188,7 +196,7 @@ export class Registry {
       secret,
     }
 
-    this.database.transaction(() => {
+    this.transaction(() => {
       this.store.insertToken(
         tokenId,
         actor.providerId,
@@ -222,7 +230,7 @@ export class Registry {
     }
 
     const at = this.now()
-    this.database.transaction(() => {
+    this.transaction(() => {
       this.store.revokeToken(targetId, at)
       this.store.insertAudit({
         at,
@@ -312,7 +320,7 @@ export class Registry {
       updatedAt: createdAt,
     }
 
-    this.database.transaction(() => {
+    this.transaction(() => {
       this.store.insertRulebook(rulebook)
       this.store.insertAudit({
         at: createdAt,
@@ -380,7 +388,7 @@ export class Registry {
 
     const updated: Rulebook = { ...candidate, updatedAt: this.now() }
 
-    this.database.transaction(() => {
+    this.transaction(() => {
       this.store.updateRulebook(updated)
       this.store.insertAudit({
         at: updated.updatedAt,
@@ -398,11 +406,28 @@ export class Registry {
   deleteRulebook(accessToken: string, rulebookId: string): void {
     const actor = this.authenticate(accessToken)
     const existing = this.requireOwnedDraft(actor, rulebookId)
+    const attestations = this.store.listAttestations(existing.id)
+    const references = this.store.listSchemaReferences(existing.id)
 
-    this.database.transaction(() => {
+    this.transaction(() => {
+      const at = this.now()
+      for (const reference of references) {
+        this.deleteSchemaReferenceWithAudit(actor, reference, at, 'rulebook.delete')
+      }
+      for (const attestation of attestations) {
+        this.store.deleteAttestation(attestation.id)
+        this.store.insertAudit({
+          at,
+          actorProviderId: actor.providerId,
+          action: 'attestation.delete',
+          entityType: 'attestation',
+          entityId: attestation.id,
+          detail: { rulebookId: existing.id, name: attestation.name, reason: 'rulebook.delete' },
+        })
+      }
       this.store.deleteRulebook(existing.id)
       this.store.insertAudit({
-        at: this.now(),
+        at,
         actorProviderId: actor.providerId,
         action: 'rulebook.delete',
         entityType: 'rulebook',
@@ -428,7 +453,7 @@ export class Registry {
       throw conflict(`An attestation type named "${attestation.name}" already exists.`)
     }
 
-    this.database.transaction(() => {
+    this.transaction(() => {
       this.store.insertAttestation(attestation)
       this.store.insertAudit({
         at: attestation.createdAt,
@@ -438,6 +463,7 @@ export class Registry {
         entityId: attestation.id,
         detail: { rulebookId: rulebook.id, name: attestation.name },
       })
+      this.store.touchRulebook(rulebook.id, attestation.createdAt)
     })()
 
     return attestation
@@ -489,16 +515,18 @@ export class Registry {
       return existing
     }
 
-    this.database.transaction(() => {
+    const at = this.now()
+    this.transaction(() => {
       this.store.updateAttestation(updated)
       this.store.insertAudit({
-        at: this.now(),
+        at,
         actorProviderId: actor.providerId,
         action: 'attestation.update',
         entityType: 'attestation',
         entityId: updated.id,
         detail: { fields: changed },
       })
+      this.store.touchRulebook(rulebook.id, at)
     })()
 
     return updated
@@ -512,7 +540,7 @@ export class Registry {
       .listSchemaReferences(rulebook.id)
       .filter((reference) => reference.attestationId === existing.id)
 
-    this.database.transaction(() => {
+    this.transaction(() => {
       const at = this.now()
       for (const reference of attachedReferences) {
         this.deleteSchemaReferenceWithAudit(actor, reference, at, 'attestation.delete')
@@ -526,6 +554,7 @@ export class Registry {
         entityId: existing.id,
         detail: { rulebookId: rulebook.id, name: existing.name },
       })
+      this.store.touchRulebook(rulebook.id, at)
     })()
   }
 
@@ -541,13 +570,19 @@ export class Registry {
     const rulebook = this.requireOwnedDraft(actor, rulebookId)
     const reference = this.buildSchemaReference(rulebook.id, input, this.now())
 
-    if (this.store.findSchemaReferenceByFormat(rulebook.id, reference.formatIdentifier) !== null) {
+    if (
+      this.store.findSchemaReferenceByFormat(
+        rulebook.id,
+        reference.attestationId,
+        reference.formatIdentifier,
+      ) !== null
+    ) {
       throw conflict(
-        `A schema reference with formatIdentifier "${reference.formatIdentifier}" already exists.`,
+        `A schema reference with formatIdentifier "${reference.formatIdentifier}" already exists in this scope.`,
       )
     }
 
-    this.database.transaction(() => {
+    this.transaction(() => {
       this.store.insertSchemaReference(reference)
       this.store.insertAudit({
         at: reference.createdAt,
@@ -557,6 +592,7 @@ export class Registry {
         entityId: reference.id,
         detail: { rulebookId: rulebook.id, formatIdentifier: reference.formatIdentifier },
       })
+      this.store.touchRulebook(rulebook.id, reference.createdAt)
     })()
 
     return reference
@@ -602,16 +638,15 @@ export class Registry {
           : requireJsonObject(input.metadata, 'metadata'),
     }
 
-    if (updated.formatIdentifier !== existing.formatIdentifier) {
-      const collision = this.store.findSchemaReferenceByFormat(
-        rulebook.id,
-        updated.formatIdentifier,
+    const collision = this.store.findSchemaReferenceByFormat(
+      rulebook.id,
+      updated.attestationId,
+      updated.formatIdentifier,
+    )
+    if (collision !== null && collision.id !== existing.id) {
+      throw conflict(
+        `A schema reference with formatIdentifier "${updated.formatIdentifier}" already exists in this scope.`,
       )
-      if (collision !== null && collision.id !== existing.id) {
-        throw conflict(
-          `A schema reference with formatIdentifier "${updated.formatIdentifier}" already exists.`,
-        )
-      }
     }
 
     const changed = changedFields(existing, updated)
@@ -619,16 +654,18 @@ export class Registry {
       return existing
     }
 
-    this.database.transaction(() => {
+    const at = this.now()
+    this.transaction(() => {
       this.store.updateSchemaReference(updated)
       this.store.insertAudit({
-        at: this.now(),
+        at,
         actorProviderId: actor.providerId,
         action: 'schema_ref.update',
         entityType: 'schema_ref',
         entityId: updated.id,
         detail: { fields: changed },
       })
+      this.store.touchRulebook(rulebook.id, at)
     })()
 
     return updated
@@ -639,8 +676,10 @@ export class Registry {
     const rulebook = this.requireOwnedDraft(actor, rulebookId)
     const existing = this.requireSchemaReference(rulebook.id, schemaReferenceId)
 
-    this.database.transaction(() => {
-      this.deleteSchemaReferenceWithAudit(actor, existing, this.now(), 'explicit')
+    this.transaction(() => {
+      const at = this.now()
+      this.deleteSchemaReferenceWithAudit(actor, existing, at, 'explicit')
+      this.store.touchRulebook(rulebook.id, at)
     })()
   }
 
@@ -650,7 +689,7 @@ export class Registry {
     actor: AuthenticatedActor,
     reference: SchemaReference,
     at: string,
-    reason: 'explicit' | 'attestation.delete',
+    reason: 'explicit' | 'attestation.delete' | 'rulebook.delete',
   ): void {
     this.store.deleteSchemaReference(reference.id)
     this.store.insertAudit({
@@ -665,6 +704,23 @@ export class Registry {
         reason,
       },
     })
+  }
+
+  /**
+   * Runs a write transaction and keeps the typed error contract if a
+   * uniqueness pre-check races with another connection.
+   */
+  private transaction(action: () => void): () => void {
+    return () => {
+      try {
+        this.database.transaction(action)()
+      } catch (error) {
+        if (isUniqueConstraintError(error)) {
+          throw conflict('A registry value must be unique and already exists.')
+        }
+        throw error
+      }
+    }
   }
 
   private requireRulebook(id: string): Rulebook {

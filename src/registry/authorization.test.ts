@@ -58,10 +58,15 @@ describe('provider ownership and cross-provider isolation', () => {
       attestationId: attestation.id,
     })
 
+    const beforeDenials = registry.getRulebook(rulebook.id)
+    if (beforeDenials === null) {
+      throw new Error('expected the created rulebook')
+    }
+
     // Public catalog reads need no actor.
-    expect(registry.getRulebook(rulebook.id)).toEqual(rulebook)
-    expect(registry.listRulebooks()).toEqual([rulebook])
-    expect(registry.listRulebooks({ providerId: owner.provider.id })).toEqual([rulebook])
+    expect(registry.getRulebook(rulebook.id)).toEqual(beforeDenials)
+    expect(registry.listRulebooks()).toEqual([beforeDenials])
+    expect(registry.listRulebooks({ providerId: owner.provider.id })).toEqual([beforeDenials])
     expect(registry.listAttestations(rulebook.id)).toHaveLength(1)
     expect(registry.listSchemaReferences(rulebook.id)).toEqual([reference])
     expect(registry.getProvider(owner.provider.id)).toEqual(owner.provider)
@@ -122,7 +127,7 @@ describe('provider ownership and cross-provider isolation', () => {
     )
 
     // Nothing changed after the denied attempts.
-    expect(registry.getRulebook(rulebook.id)).toEqual(rulebook)
+    expect(registry.getRulebook(rulebook.id)).toEqual(beforeDenials)
     expect(registry.listAttestations(rulebook.id)).toHaveLength(1)
     expect(registry.listSchemaReferences(rulebook.id)).toEqual([reference])
   })

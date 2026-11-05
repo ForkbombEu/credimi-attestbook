@@ -142,6 +142,16 @@ describe('registry migrations', () => {
           .run(FIXED_NOW),
       ).toThrow(/UNIQUE constraint/i)
 
+      // Publication authority uniqueness is case-insensitive.
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO providers (id, name, publication_authority, metadata_json, created_at)
+             VALUES ('provider-case-duplicate', 'Provider', 'ACCOUNT-1', '{}', ?)`,
+          )
+          .run(FIXED_NOW),
+      ).toThrow(/UNIQUE constraint/i)
+
       expect(() =>
         database
           .query(
@@ -213,6 +223,52 @@ describe('registry migrations', () => {
           )
           .run(FIXED_NOW),
       ).not.toThrow()
+
+      database
+        .query(
+          `INSERT INTO attestations (id, rulebook_id, name, attestation_los, binding_type, created_at)
+           VALUES ('attestation-4', 'rulebook-1', 'Other', 'iso_18045_high', 'key', ?)`,
+        )
+        .run(FIXED_NOW)
+
+      // The same format is allowed for a different attestation type...
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO schema_refs (id, rulebook_id, attestation_id, format_identifier, uri, created_at)
+             VALUES ('schema-ref-other-attestation', 'rulebook-1', 'attestation-4', 'dc+sd-jwt', 'https://example.org/other.json', ?)`,
+          )
+          .run(FIXED_NOW),
+      ).not.toThrow()
+
+      // ... but not twice for the same attestation type.
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO schema_refs (id, rulebook_id, attestation_id, format_identifier, uri, created_at)
+             VALUES ('schema-ref-same-attestation', 'rulebook-1', 'attestation-1', 'dc+sd-jwt', 'https://example.org/duplicate.json', ?)`,
+          )
+          .run(FIXED_NOW),
+      ).toThrow(/UNIQUE constraint/i)
+
+      // Rulebook-level references have their own uniqueness scope.
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO schema_refs (id, rulebook_id, attestation_id, format_identifier, uri, created_at)
+             VALUES ('schema-ref-rulebook', 'rulebook-1', NULL, 'dc+sd-jwt', 'https://example.org/rulebook.json', ?)`,
+          )
+          .run(FIXED_NOW),
+      ).not.toThrow()
+
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO schema_refs (id, rulebook_id, attestation_id, format_identifier, uri, created_at)
+             VALUES ('schema-ref-rulebook-duplicate', 'rulebook-1', NULL, 'dc+sd-jwt', 'https://example.org/rulebook-2.json', ?)`,
+          )
+          .run(FIXED_NOW),
+      ).toThrow(/UNIQUE constraint/i)
     } finally {
       database.close()
     }

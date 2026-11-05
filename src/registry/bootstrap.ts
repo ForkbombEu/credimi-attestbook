@@ -9,6 +9,7 @@
 import type { Database } from 'bun:sqlite'
 import { randomUUID } from 'node:crypto'
 
+import { conflict, isUniqueConstraintError } from './errors'
 import { RegistryStore } from './store'
 import { generateBearerToken, hashBearerToken } from './tokens'
 import type { IssuedToken, Provider, ProvisionedProvider, ProvisionProviderInput } from './types'
@@ -50,6 +51,10 @@ export function provisionProvider(
   const generateId = options.generateId ?? (() => randomUUID())
   const store = new RegistryStore(database)
 
+  if (store.findProviderByPublicationAuthority(publicationAuthority) !== null) {
+    throw conflict('A provider with this publication authority already exists.')
+  }
+
   const providerId = generateId()
   const tokenId = generateId()
   const createdAt = now()
@@ -71,7 +76,7 @@ export function provisionProvider(
     secret,
   }
 
-  database.transaction(() => {
+  const write = database.transaction(() => {
     store.insertProvider(provider)
     store.insertToken(tokenId, providerId, hashBearerToken(secret), tokenLabel, createdAt)
     store.insertAudit({
@@ -90,7 +95,16 @@ export function provisionProvider(
       entityId: tokenId,
       detail: tokenLabel === null ? null : { label: tokenLabel },
     })
-  })()
+  })
+
+  try {
+    write()
+  } catch (error) {
+    if (isUniqueConstraintError(error)) {
+      throw conflict('A provider with this publication authority already exists.')
+    }
+    throw error
+  }
 
   return { provider, token }
 }

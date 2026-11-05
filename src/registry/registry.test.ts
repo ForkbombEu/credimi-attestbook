@@ -89,6 +89,26 @@ describe('provider provisioning and authentication', () => {
     expect(registry.listProviders()).toEqual([provider])
   })
 
+  test('rejects a duplicate publication authority with a typed conflict', () => {
+    const { database } = setup()
+    provisionProvider(database, {
+      name: 'First Account',
+      publicationAuthority: 'account-shared',
+    })
+
+    expectRegistryError(
+      () =>
+        provisionProvider(database, {
+          name: 'Second Account',
+          publicationAuthority: 'ACCOUNT-SHARED',
+        }),
+      'conflict',
+    )
+    expect(
+      database.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM providers').get()?.count,
+    ).toBe(1)
+  })
+
   test('issues additional tokens and revokes them idempotently', () => {
     const { registry } = setup()
     const { token } = provision('a')
@@ -322,12 +342,28 @@ describe('rulebook persistence', () => {
       database.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM schema_refs').get()
         ?.count,
     ).toBe(0)
+    const audit = database
+      .query<{ action: string; detail_json: string | null }, []>(
+        `SELECT action, detail_json FROM audit_log
+         WHERE action IN ('attestation.delete', 'schema_ref.delete')`,
+      )
+      .all()
     expect(
-      database
-        .query<{ action: string }, []>('SELECT action FROM audit_log ORDER BY id')
-        .all()
-        .map((row) => row.action),
-    ).toContain('rulebook.delete')
+      audit.some(
+        (entry) =>
+          entry.action === 'attestation.delete' &&
+          (JSON.parse(entry.detail_json ?? '{}') as { reason?: string }).reason ===
+            'rulebook.delete',
+      ),
+    ).toBe(true)
+    expect(
+      audit.some(
+        (entry) =>
+          entry.action === 'schema_ref.delete' &&
+          (JSON.parse(entry.detail_json ?? '{}') as { reason?: string }).reason ===
+            'rulebook.delete',
+      ),
+    ).toBe(true)
   })
 
   test('records an audit entry for every mutation, with the acting provider', () => {
@@ -373,6 +409,8 @@ describe('attestation types and schema references', () => {
       supportedFormats: ['dc+sd-jwt'],
     })
     expect(registry.listAttestations(rulebook.id)).toEqual([attestation])
+    const afterAttestation = registry.getRulebook(rulebook.id)
+    expect(afterAttestation?.updatedAt).not.toBe(rulebook.updatedAt)
 
     const reference = registry.addSchemaReference(token.secret, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
@@ -407,6 +445,68 @@ describe('attestation types and schema references', () => {
     registry.removeAttestation(token.secret, rulebook.id, attestation.id)
     expect(registry.listSchemaReferences(rulebook.id)).toEqual([])
     expect(registry.listAttestations(rulebook.id)).toEqual([])
+  })
+
+  test('scopes schema-reference uniqueness to the attestation type', () => {
+    const { registry } = setup()
+    const { token } = provision('a')
+    const rulebook = registry.createRulebook(token.secret, {
+      name: 'Scoped schemas',
+      applicableSpec: 'ts11@1.0.1',
+      attestations: [
+        { name: 'PID', attestationLoS: 'iso_18045_high', bindingType: 'key' },
+        { name: 'mDL', attestationLoS: 'iso_18045_high', bindingType: 'key' },
+      ],
+    })
+    const [pid, mdl] = registry.listAttestations(rulebook.id)
+    if (pid === undefined || mdl === undefined) {
+      throw new Error('expected both attestation types')
+    }
+
+    const pidReference = registry.addSchemaReference(token.secret, rulebook.id, {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: 'https://example.org/pid.json',
+      attestationId: pid.id,
+    })
+    const mdlReference = registry.addSchemaReference(token.secret, rulebook.id, {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: 'https://example.org/mdl.json',
+      attestationId: mdl.id,
+    })
+    expect(registry.listSchemaReferences(rulebook.id)).toHaveLength(2)
+
+    // The same format is accepted at rulebook level as its own scope.
+    const rulebookReference = registry.addSchemaReference(token.secret, rulebook.id, {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: 'https://example.org/rulebook.json',
+    })
+    expect(rulebookReference.attestationId).toBeNull()
+
+    expectRegistryError(
+      () =>
+        registry.addSchemaReference(token.secret, rulebook.id, {
+          formatIdentifier: 'dc+sd-jwt',
+          uri: 'https://example.org/pid-duplicate.json',
+          attestationId: pid.id,
+        }),
+      'conflict',
+    )
+    expectRegistryError(
+      () =>
+        registry.addSchemaReference(token.secret, rulebook.id, {
+          formatIdentifier: 'dc+sd-jwt',
+          uri: 'https://example.org/rulebook-duplicate.json',
+        }),
+      'conflict',
+    )
+    expectRegistryError(
+      () =>
+        registry.updateSchemaReference(token.secret, rulebook.id, pidReference.id, {
+          attestationId: null,
+        }),
+      'conflict',
+    )
+    expect(mdlReference.attestationId).toBe(mdl.id)
   })
 
   test('audits schema references removed together with their attestation', () => {
@@ -506,6 +606,14 @@ describe('registry invalid writes', () => {
     )
     expectRegistryError(
       () => registry.createRulebook(token.secret, { ...base, sourceUrl: 'not a url' }),
+      'invalid_input',
+    )
+    expectRegistryError(
+      () =>
+        registry.createRulebook(token.secret, {
+          ...base,
+          sourceUrl: `https://example.org/${'é'.repeat(1_000)}`,
+        }),
       'invalid_input',
     )
     expectRegistryError(
