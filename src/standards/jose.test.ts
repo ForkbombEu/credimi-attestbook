@@ -638,6 +638,36 @@ describe('strict JOSE verification', () => {
     ])
   })
 
+  test('preserves unknown schema URI members through verification', async () => {
+    const document = buildOwfWire() as unknown as Record<string, unknown>
+    const references = document.schemaURIs as Record<string, unknown>[]
+    const first = references[0] ?? {}
+    references[0] = { ...first, extraMember: 'kept' }
+
+    const canonical = successValue(parseOwfSchemaMeta(document))
+    const key = await createTestKey()
+    const signed = successValue(
+      await signSchemaMetaJws({
+        schemaMeta: canonical,
+        keyId: 'kid-1',
+        certificates: [TEST_CERTIFICATE_PEM],
+        signer: key.signer,
+      }),
+    )
+    const verified = successValue(
+      await verifySchemaMetaJws({
+        jws: signed.jws,
+        verifier: key.verifier,
+        algorithm: 'ES256',
+        keyId: 'kid-1',
+      }),
+    )
+
+    expect(verified.schemaMeta.schemaURIs[0]?.unknownMembers).toEqual({
+      extraMember: 'kept',
+    })
+  })
+
   test('preserves unknown top-level members through signing and verification', async () => {
     const canonical = successValue(
       parseOwfSchemaMeta({ ...buildOwfWire(), futureMember: { revision: 2 } }),

@@ -38,6 +38,14 @@ function successValue<T>(result: AdapterResult<T>): T {
 
 const readOwf = (): CanonicalSchemaMeta => successValue(parseOwfSchemaMeta(buildOwfWire()))
 
+function owfDocumentWithSchemaUriMember(): Record<string, unknown> {
+  const document = buildOwfWire() as unknown as Record<string, unknown>
+  const references = document.schemaURIs as Record<string, unknown>[]
+  const first = references[0] ?? {}
+  references[0] = { ...first, extraMember: 'kept' }
+  return document
+}
+
 describe('OWF 0.5.4 parsing through the real package', () => {
   test('parses a builder-produced OWF document into the canonical model', () => {
     const parsed = readOwf()
@@ -298,6 +306,35 @@ describe('OWF 0.5.4 serialization through the real package', () => {
         kind: 'invalid_input',
         code: 'invalid_member_value',
         path: 'version',
+      }),
+    ])
+  })
+
+  test('preserves unknown members inside OWF schemaURIs entries', () => {
+    const document = owfDocumentWithSchemaUriMember()
+    expect(validateSchemaMeta(document).valid).toBe(true)
+
+    const result = parseOwfSchemaMeta(document)
+    const parsed = successValue(result)
+    expect(parsed.schemaURIs[0]?.unknownMembers).toEqual({ extraMember: 'kept' })
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        kind: 'preserved',
+        code: 'preserved_unknown_member',
+        path: 'schemaURIs.0.extraMember',
+      }),
+    ])
+
+    const serialized = successValue(serializeOwfSchemaMeta(parsed))
+    expect(validateSchemaMeta(serialized).valid).toBe(true)
+    const serializedReferences = serialized.schemaURIs as Record<string, unknown>[]
+    expect(serializedReferences[0]?.extraMember).toBe('kept')
+
+    expect(failureDiagnostics(validateSchemaMetaDocument(document))).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_member_value',
+        path: 'schemaURIs.0.extraMember',
       }),
     ])
   })

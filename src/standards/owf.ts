@@ -30,6 +30,8 @@ import type {
 import { isRecord, OWF_FORMAT_VALUES, OWF_FRAMEWORK_TYPE_VALUES } from './profiles'
 import { isAbsoluteUrl, isNonEmptyString, parseSri } from './wire'
 
+const OWF_SCHEMA_REFERENCE_MEMBERS = new Set(['formatIdentifier', 'uri', 'integrity', 'meta'])
+
 const OWF_KNOWN_MEMBERS = new Set([
   'id',
   'iat',
@@ -95,12 +97,49 @@ export function parseOwfSchemaMeta(
           },
   )
 
-  const schemaURIs: CanonicalSchemaReference[] = wire.schemaURIs.map((reference: SchemaURI) => ({
-    formatIdentifier: reference.formatIdentifier,
-    uri: reference.uri,
-    integrity: reference.integrity,
-    meta: reference.meta,
-  }))
+  const schemaURIs: CanonicalSchemaReference[] = wire.schemaURIs.map(
+    (reference: SchemaURI, index: number) => {
+      const referenceRecord = reference as unknown as Record<string, unknown>
+      const unknownMembers: Record<string, unknown> = {}
+      for (const key of Object.keys(referenceRecord)) {
+        if (OWF_SCHEMA_REFERENCE_MEMBERS.has(key)) {
+          continue
+        }
+        const path = `schemaURIs.${index}.${key}`
+        if (key === '__proto__') {
+          diagnostics.push(
+            invalidInput('invalid_member_value', 'the "__proto__" member is not accepted', path),
+          )
+          continue
+        }
+        if (strict) {
+          diagnostics.push(
+            invalidInput(
+              'invalid_member_value',
+              `unrecognised OWF 0.5.4 schema member "${key}"`,
+              path,
+            ),
+          )
+          continue
+        }
+        unknownMembers[key] = referenceRecord[key]
+        diagnostics.push(
+          preserved(
+            'preserved_unknown_member',
+            `preserved unrecognised OWF schema member "${key}" for forward compatibility`,
+            path,
+          ),
+        )
+      }
+      return {
+        formatIdentifier: reference.formatIdentifier,
+        uri: reference.uri,
+        integrity: reference.integrity,
+        meta: reference.meta,
+        ...(Object.keys(unknownMembers).length > 0 ? { unknownMembers } : {}),
+      }
+    },
+  )
 
   const supportedFormats = [...new Set(schemaURIs.map((reference) => reference.formatIdentifier))]
 
@@ -298,23 +337,41 @@ function buildOwfSchemaUri(
     )
     return undefined
   }
-  if (reference.unknownMembers !== undefined && Object.keys(reference.unknownMembers).length > 0) {
-    diagnostics.push(
-      unsupportedOperation(
-        'unsupported_schema_meta_member',
-        'OWF 0.5.4 Schema is strict and has no members beyond uri/integrity/formatIdentifier/meta',
-        path,
-      ),
-    )
-    return undefined
+  if (reference.unknownMembers !== undefined) {
+    for (const key of Object.keys(reference.unknownMembers)) {
+      if (key === '__proto__') {
+        diagnostics.push(
+          invalidInput(
+            'invalid_member_value',
+            'the "__proto__" member is not accepted',
+            `${path}.${key}`,
+          ),
+        )
+        return undefined
+      }
+      if (OWF_SCHEMA_REFERENCE_MEMBERS.has(key)) {
+        diagnostics.push(
+          invalidInput(
+            'invalid_member_value',
+            `preserved member "${key}" collides with an OWF schema member`,
+            `${path}.${key}`,
+          ),
+        )
+        return undefined
+      }
+    }
   }
 
-  return {
+  const wire: Record<string, unknown> = {
     formatIdentifier: reference.formatIdentifier,
     uri: reference.uri,
     integrity: reference.integrity,
     meta: reference.meta,
-  } as unknown as SchemaURI
+  }
+  if (reference.unknownMembers !== undefined) {
+    Object.assign(wire, reference.unknownMembers)
+  }
+  return wire as unknown as SchemaURI
 }
 
 /**

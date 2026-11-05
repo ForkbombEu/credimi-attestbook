@@ -74,9 +74,10 @@ Rules:
 - Enumerated values are stored as **strings**, not closed TypeScript unions, so a future
   value is preserved and reported rather than rejected or coerced (decision D-5).
 - `parseSchemaMetaDocument` preserves unknown top-level and nested members and reports a
-  `preserved` diagnostic. For the OWF profile, nested objects are strict in the real
-  package, so nested preservation applies to TS11 v1.0.1 only.
-  `validateSchemaMetaDocument` is the strict baseline variant and rejects them.
+  `preserved` diagnostic. `validateSchemaMetaDocument` is the strict baseline variant and
+  rejects them. For OWF 0.5.4 the nested `schemaURIs` entries are non-strict and their
+  unknown members are preserved; `trustedAuthorities`, `meta` and `issuanceProfile` remain
+  strict in the package, so nested preservation there applies to TS11 v1.0.1 only.
 - OWF `supportedFormats` does not exist; the canonical value is derived from the unique
   `schemaURIs[*].formatIdentifier` values.
 
@@ -125,7 +126,7 @@ The adapter never silently drops data; it reports the reason.
 | Conversion | Result |
 | --- | --- |
 | TS11 → canonical → TS11 | supported, including unknown-member preservation |
-| OWF → canonical → OWF | supported; OWF validates the rebuilt document |
+| OWF → canonical → OWF | supported, including unknown top-level members and unknown members inside `schemaURIs` entries; OWF validates the rebuilt document |
 | TS11 → OWF | supported only when the TS11 document can satisfy OWF requirements |
 | OWF → TS11 | supported only when the OWF document uses TS11-representable values |
 
@@ -188,7 +189,13 @@ silently approximated:
   server/client.
 - Certificate-chain, trust-anchor, trusted-list and `trustedAuthorities` verification
   (reported `trust_not_tested`).
-- `sha384`/`sha512` SRI verification or resolution through OWF (sha256 only).
+- `sha384`/`sha512` SRI verification or resolution through OWF (sha256 only). The SRI
+  parser accepts one `sha256-`/`sha384-`/`sha512-` base64 digest and does not implement W3C
+  SRI options or multiple-digest lists; those are unknown limits for a later slice.
+- Network access. The adapter performs no fetches itself: callers pass the `resolve`
+  callback to OWF. That callback **must** enforce the untrusted-input controls required by
+  specification §15 and AGENTS.md — scheme allowlist, SSRF protection, redirect policy,
+  response-size and time limits — before the import slice (#30) wires a real fetcher.
 - Fetching or verifying the **rulebook** document itself. The adapter parses and
   round-trips `rulebookURI#integrity=`, but bytes are fetched and checked by the bounded
   import slice ([#30](https://github.com/ForkbombEu/credimi-attestbook/issues/30)), not here.
@@ -209,7 +216,9 @@ silently approximated:
   values;
 - OWF parsing/serialization through the real package, agreement with `validateSchemaMeta`
   on valid and invalid documents, real-package validation errors, baseline-strict unknown
-  members, `__proto__` rejection and preserved-member collisions;
+  members, `__proto__` rejection and preserved-member collisions, and lossless round trips
+  for unknown top-level members and unknown `schemaURIs` entry members (including through
+  signing/verification);
 - JOSE positive and negative flows with a real ES256 key: tampered signature, wrong key,
   wrong `kid`, wrong algorithm, missing `x5c`, wrong `typ`, `crit`/`b64`/`jwk`/`jku`/`x5u`,
   multi-certificate entries, `alg: none`, a synthesised `iat` that OWF accepts but the

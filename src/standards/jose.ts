@@ -438,10 +438,10 @@ export async function verifySchemaMetaJws(
     verified = await verifySchemaMeta({ jws: options.jws, verifier: options.verifier })
   } catch (error) {
     const message = errorMessage(error)
-    if (message.includes('Invalid signature')) {
+    if (message === 'Invalid signature') {
       return fail([...diagnostics, invalidInput('invalid_signature', message, 'jws')])
     }
-    if (message.includes('Invalid SchemaMeta payload')) {
+    if (message.startsWith('Invalid SchemaMeta payload')) {
       // OWF verifies the signature before it parses the payload, so this branch
       // is reached only for a valid signature. Apply the header policy first,
       // then decide whether the payload is unsupported or simply invalid.
