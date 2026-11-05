@@ -679,9 +679,19 @@ export function serializeTs11SchemaMeta(
   }
 
   if (schemaMeta.id !== undefined && !isUuid(schemaMeta.id)) {
-    diagnostics.push(
-      invalidInput('invalid_ts11_id', 'TS11 v1.0.1 requires a UUID when "id" is present', 'id'),
-    )
+    if (isAbsoluteUrl(schemaMeta.id)) {
+      diagnostics.push(
+        unsupportedOperation(
+          'unsupported_schema_meta_member',
+          'TS11 v1.0.1 requires a UUID id; this canonical URL id came from the OWF profile',
+          'id',
+        ),
+      )
+    } else {
+      diagnostics.push(
+        invalidInput('invalid_ts11_id', 'TS11 v1.0.1 requires a UUID when "id" is present', 'id'),
+      )
+    }
   }
 
   if (!isNonEmptyString(schemaMeta.version) || !isSemVer(schemaMeta.version)) {

@@ -314,7 +314,20 @@ describe('TS11 v1.0.1 serialization limits', () => {
     expect(isTs11Representable(owfCanonical)).toBe(false)
     expect(diagnostics.some((entry) => entry.kind === 'unsupported_operation')).toBe(true)
     expect(diagnostics.map((entry) => entry.code)).toContain('unsupported_schema_meta_member')
-    expect(diagnostics.some((entry) => entry.code === 'invalid_ts11_id')).toBe(true)
+    expect(
+      diagnostics.some(
+        (entry) =>
+          entry.kind === 'unsupported_operation' &&
+          entry.code === 'unsupported_schema_meta_member' &&
+          entry.path === 'id',
+      ),
+    ).toBe(true)
+    expect(diagnostics.some((entry) => entry.code === 'invalid_ts11_id')).toBe(false)
+  })
+
+  test('reports a malformed canonical id as invalid input', () => {
+    const canonical: CanonicalSchemaMeta = { ...readTs11(), id: 'not-a-uuid-or-url' }
+    expect(codes(serializeTs11SchemaMeta(canonical))).toContain('invalid_ts11_id')
   })
 
   test('owf-only members are reported as unsupported operations', () => {

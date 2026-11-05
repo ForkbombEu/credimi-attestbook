@@ -74,8 +74,9 @@ Rules:
 - Enumerated values are stored as **strings**, not closed TypeScript unions, so a future
   value is preserved and reported rather than rejected or coerced (decision D-5).
 - `parseSchemaMetaDocument` preserves unknown top-level and nested members and reports a
-  `preserved` diagnostic. `validateSchemaMetaDocument` is the strict baseline variant and
-  rejects them.
+  `preserved` diagnostic. For the OWF profile, nested objects are strict in the real
+  package, so nested preservation applies to TS11 v1.0.1 only.
+  `validateSchemaMetaDocument` is the strict baseline variant and rejects them.
 - OWF `supportedFormats` does not exist; the canonical value is derived from the unique
   `schemaURIs[*].formatIdentifier` values.
 
