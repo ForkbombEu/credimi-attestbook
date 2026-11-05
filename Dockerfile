@@ -6,6 +6,7 @@ COPY package.json bun.lock ./
 RUN bun install --frozen-lockfile
 COPY tsconfig.json ./
 COPY src ./src
+COPY migrations ./migrations
 RUN bun run build
 
 FROM oven/bun:1.3.1 AS runtime

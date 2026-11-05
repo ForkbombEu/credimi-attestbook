@@ -2,8 +2,8 @@
 
 AttestBook is a standalone, API-first platform for managing, validating and testing
 Attestation Rulebooks in the European Digital Identity Wallet ecosystem. This repository
-currently contains the Phase 0 research and architecture documents plus the Phase 1
-application scaffold.
+currently contains the Phase 0 research and architecture documents, the Phase 1 application
+scaffold and the persistent provider/rulebook registry slice.
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -58,9 +58,27 @@ bun run docs:check   # Phase 0 documentation consistency, plain Node
 - `src/standards/` — canonical model, TS11 v1.0.1 and OWF 0.5.4 codecs, strict JOSE policy
   and SRI reference resolution, all exercised against the real package; see
   [`docs/standards-adapter.md`](docs/standards-adapter.md);
+- `src/db/migrations.test.ts` — ordered SQL migrations apply from an empty database,
+  checksums reject edited/unknown migrations and the schema enforces foreign keys,
+  uniqueness and JSON-column constraints;
+- `src/registry/` — provider provisioning, hashed bearer tokens, rulebook/attestation/schema
+  reference CRUD, persistence across a database reopen, cross-provider authorization denial
+  and immutable published/historical state; see [`docs/registry.md`](docs/registry.md);
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
-  the Phase 0 verification gate for the persistence decision (D-7) before issue #28 builds
-  the registry.
+  the Phase 0 verification gate for the persistence decision (D-7).
+
+## Registry persistence
+
+The registry services in `src/registry/` store providers, rulebooks, attestation types, schema
+references, provisional write tokens and an audit trail in a SQLite database. Writes are
+authenticated with provider-scoped bearer tokens whose raw value is never stored, and every
+mutation enforces provider ownership. Migrations live in `migrations/` and are applied by the
+runner in `src/db/migrations.ts`; editing an already-applied migration is rejected by its
+checksum.
+
+The HTTP API is not wired to the registry yet (issue #34). The service contract, stable
+identifier rules, standards-metadata boundary and authorization model are documented in
+[`docs/registry.md`](docs/registry.md).
 
 ## Build and run
 
@@ -86,9 +104,10 @@ docker compose up --build --wait
 ```
 
 The image is multi-stage, runs as the non-root `bun` user and defines a `HEALTHCHECK` against
-`/health`. It bakes in no secrets and runs no migration step yet; persistence arrives with
-issue #28. CI builds the image, starts a container and verifies the `/health` and unknown-route
-API round-trip, so the image is exercised on every pull request.
+`/health`. It bakes in no secrets. The registry persistence layer is implemented and tested
+but not yet opened by the HTTP server; issue #34 wires the API to it and adds the migration
+entrypoint. CI builds the image, starts a container and verifies the `/health` and
+unknown-route API round-trip, so the image is exercised on every pull request.
 
 ## Configuration
 
@@ -137,8 +156,9 @@ No job deploys, publishes an image or needs a secret or a live external service.
 ## Repository layout
 
 ```text
-src/                application code and Bun tests
-docs/               specification, architecture and Phase 0 documents
+src/                application code and Bun tests (including the registry module)
+migrations/         ordered SQL schema migrations
+docs/               specification, architecture, registry and Phase 0 documents
 research/owf-audit/ reproducible audit probe for the pinned OWF package
 scripts/            dependency-free documentation checker
 Dockerfile          multi-stage runtime image
