@@ -1,9 +1,18 @@
-// Public surface of the AttestBook untrusted-import pipeline (issue #30).
+// Public surface of the AttestBook untrusted-import pipeline (issues #30 and
+// #31).
 //
 // See docs/import.md for the supported sources, §15 controls, limits,
-// conformance classification, provenance and limitations.
+// conformance classification, provenance, re-import identity and limitations.
 
-export { RulebookImporter, type ImportResult, type RulebookImporterOptions } from './importer'
+export {
+  RulebookImporter,
+  type ImportConflict,
+  type ImportConflictCode,
+  type ImportEntryDisposition,
+  type ImportEntryResult,
+  type ImportResult,
+  type RulebookImporterOptions,
+} from './importer'
 
 export {
   previewImport,

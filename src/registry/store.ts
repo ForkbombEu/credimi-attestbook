@@ -47,6 +47,7 @@ interface RulebookRow {
   readonly source_url: string | null
   readonly applicable_spec: string
   readonly publication_status: string
+  readonly import_key: string | null
   readonly provenance_json: string
   readonly metadata_json: string
   readonly created_at: string
@@ -168,6 +169,7 @@ function toRulebook(row: RulebookRow): Rulebook {
     // The CHECK constraint restricts this column; the cast keeps the domain
     // type honest without reselecting the row.
     publicationStatus: row.publication_status as PublicationStatus,
+    importKey: row.import_key,
     provenance: parseJsonObject(row.provenance_json),
     metadata: parseJsonObject(row.metadata_json),
     createdAt: row.created_at,
@@ -332,8 +334,9 @@ export class RegistryStore {
       .query(
         `INSERT INTO rulebooks (
           id, provider_id, name, description, source_url, applicable_spec,
-          publication_status, provenance_json, metadata_json, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          publication_status, import_key, provenance_json, metadata_json,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         rulebook.id,
@@ -343,6 +346,7 @@ export class RegistryStore {
         rulebook.sourceUrl,
         rulebook.applicableSpec,
         rulebook.publicationStatus,
+        rulebook.importKey,
         JSON.stringify(rulebook.provenance),
         JSON.stringify(rulebook.metadata),
         rulebook.createdAt,
@@ -354,6 +358,16 @@ export class RegistryStore {
     const row = this.database
       .query<RulebookRow, [string]>('SELECT * FROM rulebooks WHERE id = ?')
       .get(id)
+    return row === null ? null : toRulebook(row)
+  }
+
+  /** Finds the rulebook created from one external entry identity (#31). */
+  findRulebookByImportKey(providerId: string, importKey: string): Rulebook | null {
+    const row = this.database
+      .query<RulebookRow, [string, string]>(
+        'SELECT * FROM rulebooks WHERE provider_id = ? AND import_key = ?',
+      )
+      .get(providerId, importKey)
     return row === null ? null : toRulebook(row)
   }
 

@@ -2,13 +2,15 @@
 
 **Status:** Phase 1 registry and versioning slices implemented by
 [issue #28](https://github.com/ForkbombEu/credimi-attestbook/issues/28),
-[issue #29](https://github.com/ForkbombEu/credimi-attestbook/issues/29) and the initial
-bounded import slice by
-[issue #30](https://github.com/ForkbombEu/credimi-attestbook/issues/30).
+[issue #29](https://github.com/ForkbombEu/credimi-attestbook/issues/29), the initial
+bounded import slice by [issue #30](https://github.com/ForkbombEu/credimi-attestbook/issues/30)
+and the idempotent re-import slice by
+[issue #31](https://github.com/ForkbombEu/credimi-attestbook/issues/31).
 They provide a persistent SQLite registry for providers, rulebooks, attestation types, schema
 references, write credentials and an audit trail, plus draft/published/historical rulebook
 versions with content-addressed artifacts, SHA-256 digests, provenance and immutable
-publication. They are **not** the HTTP contract, credential validation or a conformance
+publication, and a provider-scoped import identity that makes re-import idempotent. They are
+**not** the HTTP contract, credential validation or a conformance
 claim; see [`docs/import.md`](import.md) for the import pipeline.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) (FR-001, FR-002, FR-003,
@@ -55,9 +57,25 @@ Implemented by #30:
   attestation type and its references are written atomically; the references' OWF
   `meta`/unknown members are retained as registry-internal metadata.
 
-Deliberately **not** in #28/#29/#30:
+Implemented by #31:
 
-- re-import idempotency, duplicate detection and conflict diagnostics — issue #31;
+- `migrations/0003_import_identity.sql` adds `rulebooks.import_key` and a partial unique
+  index on `(provider_id, import_key)`, so an external entry can map to at most one rulebook
+  per provider even under a concurrent write;
+- `createRulebook`/`createRulebooks` accept an optional, validated `importKey`;
+- `Registry.findImportedRulebook` looks an entry identity up **only** for the authenticated
+  provider, which is the service seam for idempotent re-import;
+- the identity is product metadata: it is never included in a version snapshot or a
+  standards document, and the import pipeline stores the per-entry content fingerprint in
+  provenance.
+
+Deliberately **not** in #28/#29/#30/#31:
+
+- automatic application of a changed source to an existing draft (the importer reports
+  conflicts instead; resolution uses the version lifecycle) — see [`docs/import.md`](import.md)
+  §5;
+- scheduled synchronization, conditional fetching and source-availability diagnostics —
+  later FR-005 slices;
 - credential validation against a version — issues #32/#33;
 - the versioned REST API and generated OpenAPI — issue #34;
 - protected HTTP write routes, rate limits and API security documentation — issue #35;
@@ -90,13 +108,14 @@ SHA-256 checksum. The runner:
 - refuses a database that records a migration this build does not know, instead of silently
   running a downgraded schema.
 
-Initial tables (`0001_registry`) and version tables (`0002_versions_artifacts`):
+Initial tables (`0001_registry`), version tables (`0002_versions_artifacts`) and the import
+identity column added by `0003_import_identity`:
 
 | Table | Purpose | Integrity rules |
 | --- | --- | --- |
 | `providers` | Attestation Scheme Provider and publication-authority account binding | unique, operator-assigned, non-empty authority; JSON-object metadata |
 | `auth_tokens` | Provisional write credentials | only a SHA-256 token hash is stored; provider-scoped, revocable |
-| `rulebooks` | Stable rulebook identity and product metadata | provider foreign key; status ∈ draft/published/historical; JSON-object provenance/metadata |
+| `rulebooks` | Stable rulebook identity and product metadata | provider foreign key; status ∈ draft/published/historical; JSON-object provenance/metadata; optional 64-hex `import_key`, unique per provider through a partial index |
 | `rulebook_versions` | Draft/published/historical snapshots of a rulebook | unique `(rulebook_id, version)`; digest required; artifact foreign key; status and `published_at` must agree |
 | `artifacts` | Content-addressed exact snapshot bytes | `digest` primary key; bytes never updated or deleted |
 | `attestations` | Attestation types owned by a rulebook | unique `(rulebook_id, name)`; formats stored as JSON array |
@@ -111,6 +130,11 @@ when a newer version is published. The initial schema deliberately keeps stable 
 identity and product metadata in `rulebooks`; versioned content is stored beside it in
 `rulebook_versions` and `artifacts`, never merged into the product columns.
 
+Migration `0003_import_identity` only adds the nullable `import_key` column and the partial
+unique index; existing local rulebooks keep `NULL` and are excluded from the index. SQLite
+adds the column with a `length(import_key) = 64` check, so a malformed key cannot be written
+even by a caller that bypasses the service.
+
 ## 3. Stable identifiers
 
 All AttestBook identifiers are **server-generated, opaque and stable for the lifetime of the
@@ -124,13 +148,17 @@ resource**:
 | Artifact | `artifacts.digest` | The SHA-256 of the exact bytes; content-addressed, so the identity *is* the content |
 | Attestation type | `attestations.id` | Stable within its rulebook; name changes do not create a new identity |
 | Schema reference | `schema_refs.id` | Stable within its rulebook; URI/integrity updates do not create a new identity |
+| Import identity | `rulebooks.import_key` | Deterministic, not opaque: SHA-256 of the source and entry identity; unique per provider; never changes after creation and is never a public resource id |
 | Write token | `auth_tokens.id` | Stable public token handle; the raw bearer secret is separate and shown only once |
 
 The default generator is UUID v4 (`crypto.randomUUID()`), created inside the service, and
 callers cannot supply or override provider/rulebook/attestation/schema-reference/version IDs.
 Database primary keys are the only identity authority; SQLite row ids are insertion order and
 are not exposed. Version labels are caller-supplied but validated and unique per rulebook; a
-content digest is not a label, it identifies exact bytes.
+content digest is not a label, it identifies exact bytes. The import key is the one
+deterministic identity: it is computed by the import service (not a user id), scoped to the
+provider, and exists only to recognise the rulebook created from the same external entry on a
+later import ([`docs/import.md`](import.md) §5).
 
 The TS11 v1.0.1 `SchemaMeta.id` is a **per-version wire value** (server-assigned UUID, TS11
 §4.3.1) and is not the same thing as the AttestBook rulebook id. The standards adapter in
@@ -152,6 +180,7 @@ stores three classes of data separately:
 | `schema_refs.format_identifier`, `uri`, `integrity` | TS11 `Schema` values / W3C SRI | typed columns | Yes, only through the standards adapter |
 | `applicableSpec` (e.g. `ts11@1.0.1`) | AttestBook profile baseline | column | No: it identifies which profile a version is written against |
 | `sourceUrl`, `provenance_json` (rulebook and version) | AttestBook provenance | column / JSON | No |
+| `rulebooks.import_key`, provenance `contentFingerprint` | Import identity and change detection | column / JSON | No: import-internal product metadata |
 | version snapshot bytes (`artifacts.bytes`) | Versioned content artifact (internal, deterministic JSON) | content-addressed BLOB | No: it is not a TS11/OWF document and is never exported as one |
 | `content_digest`, `published_at`, `rulebook_versions.status` | AttestBook product state | typed columns | No |
 | `metadata_json` on providers, rulebooks, attestations and schema references | AttestBook-internal metadata | JSON column | No |
@@ -164,8 +193,9 @@ Rules enforced by the implementation and its tests:
   make that boundary explicit;
 - enumerated TS11/ETSI values are validated as bounded strings, not closed TypeScript unions,
   so a later ETSI value does not require a registry migration (D-5);
-- import/provenance information (`sourceUrl`, `provenance`) is product data and does not
-  become a TS11 member; `sourceUrl` also does not confer publication authority (FR-003);
+- import/provenance information (`sourceUrl`, `provenance`, `import_key`) is product data and
+  does not become a TS11 member; `sourceUrl` also does not confer publication authority
+  (FR-003);
 - JSON columns are constrained by SQLite `json_valid`/`json_type` checks, so malformed
   metadata cannot be written even by a caller that bypasses the service.
 
@@ -190,7 +220,9 @@ provisional product model of D-10. The service enforces it, not the UI or a rout
    attempts fail with `forbidden`, and token management is scoped to the actor's provider.
 4. **Reads are public.** Provider and rulebook catalogue reads (including attestations,
    schema references, versions, version content and digest verification) require no token,
-   mirroring the public-read requirement of TS11 §5.2.1.
+   mirroring the public-read requirement of TS11 §5.2.1. The import-identity lookup is the
+   exception: `findImportedRulebook` requires the authenticated provider's token and only
+   returns that provider's rulebook, because the key is import-internal.
 5. **Draft-only rulebook content.** Rulebook, attestation and schema-reference mutations
    require the rulebook to be `draft`; `published` and `historical` rulebooks reject them with
    `immutable`. Publishing a version sets the rulebook to `published`; creating the next draft
@@ -338,7 +370,7 @@ parsing messages:
 | `unauthorized` | missing, unknown or revoked bearer token |
 | `forbidden` | authenticated provider does not own the resource |
 | `not_found` | resource does not exist (or is not part of the named rulebook) |
-| `conflict` | duplicate attestation name, schema format or version label; stale draft snapshot at publication; provider still owns rulebooks |
+| `conflict` | duplicate attestation name, schema format, version label or import identity; stale draft snapshot at publication; provider still owns rulebooks |
 | `immutable` | mutation of a published or historical rulebook/version, or of a stored artifact |
 
 Messages never include token values, hashes or raw payloads.
@@ -366,12 +398,17 @@ The implementation is covered by real temporary SQLite files (not in-memory fake
 - `src/registry/create-rulebook-refs.test.ts` — transactional creation of attestation schema
   references, duplicate-format and per-attestation fan-out rejection, and rollback when a
   reference is invalid.
-- `src/import/` — the bounded URL/JSON import preview and authenticated draft import; see
-  [`docs/import.md`](import.md).
+- `src/registry/import-identity.test.ts` — import key persistence and lookup, per-provider
+  uniqueness enforced by the service and by the database index, cross-provider isolation,
+  invalid-key rejection, update preservation and exclusion of the identity from a version
+  snapshot.
+- `src/import/` — the bounded URL/JSON import preview and authenticated draft import,
+  including idempotent re-import and conflict detection; see [`docs/import.md`](import.md).
 
 Run the suite with `bun run check` (format, lint, strict typecheck and tests). The tests cover
-the #28/#29 acceptance criteria; they do **not** claim HTTP contract coverage (#34), URL/JSON
-import security (#30) or credential validation (#32). The UI slice (#37) still needs to expose
+the #28/#29/#30/#31 acceptance criteria; they do **not** claim HTTP contract coverage (#34),
+URL/JSON import security beyond the #30 controls, automatic source updates, scheduled
+synchronization or credential validation (#32). The UI slice (#37) still needs to expose
 version history and comparison.
 
 ## 9. Related work
@@ -385,7 +422,8 @@ version history and comparison.
   product-metadata boundary used by future version storage.
 - Issues [#30](https://github.com/ForkbombEu/credimi-attestbook/issues/30) (initial import,
   documented in [`docs/import.md`](import.md)),
-  [#31](https://github.com/ForkbombEu/credimi-attestbook/issues/31) (idempotent re-import),
+  [#31](https://github.com/ForkbombEu/credimi-attestbook/issues/31) (idempotent re-import and
+  conflict detection, documented in [`docs/import.md`](import.md) §5),
   [#32](https://github.com/ForkbombEu/credimi-attestbook/issues/32) (validation against a
   pinned version), [#34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) (REST
   API), [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) (secure write APIs)

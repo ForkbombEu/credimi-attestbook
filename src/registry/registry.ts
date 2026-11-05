@@ -284,6 +284,20 @@ export class Registry {
     return this.store.getRulebook(requireIdentifier(id, 'rulebookId'))
   }
 
+  /**
+   * Looks up the rulebook created from one external import entry identity
+   * (#31). Scoped to the authenticated provider, so one provider cannot
+   * discover another provider's import identities. Import-internal; the public
+   * read API remains `getRulebook`/`listRulebooks`.
+   */
+  findImportedRulebook(accessToken: string, importKey: string): Rulebook | null {
+    const actor = this.authenticate(accessToken)
+    return this.store.findRulebookByImportKey(
+      actor.providerId,
+      requireSha256Digest(importKey, 'importKey'),
+    )
+  }
+
   listAttestations(rulebookId: string): readonly AttestationType[] {
     const id = requireIdentifier(rulebookId, 'rulebookId')
     this.requireRulebook(id)
@@ -925,6 +939,8 @@ export class Registry {
     const provenance =
       input.provenance === undefined ? {} : requireJsonObject(input.provenance, 'provenance')
     const applicableSpec = requireText(input.applicableSpec, 'applicableSpec', MAX_SPEC_LENGTH)
+    const importKey =
+      input.importKey === undefined ? null : requireSha256Digest(input.importKey, 'importKey')
     const metadata =
       input.metadata === undefined ? {} : requireJsonObject(input.metadata, 'metadata')
 
@@ -982,6 +998,7 @@ export class Registry {
       name,
       description,
       sourceUrl,
+      importKey,
       provenance,
       applicableSpec,
       publicationStatus: 'draft',

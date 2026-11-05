@@ -53,8 +53,12 @@ export interface ImportedSchemaReference {
   readonly metadata?: Readonly<Record<string, unknown>>
 }
 
-/** Diagnostic kind used by the import pipeline; `limit` marks a bound breach. */
-export type ImportDiagnosticKind = AdapterDiagnostic['kind'] | 'limit'
+/**
+ * Diagnostic kind used by the import pipeline; `limit` marks a bound breach and
+ * `change` marks a re-import finding that changed the source but not the
+ * normalized content (#31).
+ */
+export type ImportDiagnosticKind = AdapterDiagnostic['kind'] | 'limit' | 'change'
 
 export interface ImportDiagnostic {
   readonly kind: ImportDiagnosticKind
