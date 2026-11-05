@@ -43,7 +43,10 @@ export const DEFAULT_JWS_ALGORITHM: JwsAlgorithm = 'ES256'
 
 const JOSE_TYPE = 'attestation-schema+jwt'
 
-const PEM_CERTIFICATE_PATTERN = /-----BEGIN CERTIFICATE-----[\s\S]+-----END CERTIFICATE-----/
+const PEM_CERTIFICATE_PATTERN =
+  /^-----BEGIN CERTIFICATE-----\s*[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----\s*$/
+
+const FORBIDDEN_JOSE_HEADER_MEMBERS = ['crit', 'b64', 'jwk', 'jku', 'x5u'] as const
 
 export interface JwsHeader {
   readonly alg: string
@@ -222,6 +225,22 @@ function checkHeader(
   return diagnostics
 }
 
+function checkForbiddenHeaderMembers(header: Record<string, unknown>): AdapterDiagnostic[] {
+  const diagnostics: AdapterDiagnostic[] = []
+  for (const member of FORBIDDEN_JOSE_HEADER_MEMBERS) {
+    if (member in header) {
+      diagnostics.push(
+        invalidInput(
+          'invalid_jose_header',
+          `the "${member}" JOSE header member is not accepted by the AttestBook policy`,
+          `header.${member}`,
+        ),
+      )
+    }
+  }
+  return diagnostics
+}
+
 /**
  * Signs a canonical SchemaMeta document through OWF `signSchemaMeta`, after
  * serializing it to the OWF profile and enforcing the strict JOSE policy.
@@ -296,6 +315,10 @@ export async function signSchemaMetaJws(
   const decoded = decodeCompactJws(signed.jws)
   if (!decoded.ok) {
     return fail([...diagnostics, ...decoded.diagnostics])
+  }
+  const forbiddenHeaderMembers = checkForbiddenHeaderMembers(decoded.value.header)
+  if (forbiddenHeaderMembers.length > 0) {
+    return fail([...diagnostics, ...forbiddenHeaderMembers])
   }
   const payloadIat = decoded.value.payload.iat
   if (typeof payloadIat !== 'number' || !Number.isInteger(payloadIat) || payloadIat <= 0) {
@@ -375,10 +398,13 @@ export async function verifySchemaMetaJws(
     return fail([...diagnostics, invalidInput(code, message, 'jws')])
   }
 
-  const headerDiagnostics = checkHeader(verified.header, {
-    algorithm: options.algorithm,
-    keyId: options.keyId,
-  })
+  const headerDiagnostics = [
+    ...checkForbiddenHeaderMembers(decoded.value.header),
+    ...checkHeader(verified.header, {
+      algorithm: options.algorithm,
+      keyId: options.keyId,
+    }),
+  ]
   if (headerDiagnostics.length > 0) {
     return fail([...diagnostics, ...headerDiagnostics])
   }

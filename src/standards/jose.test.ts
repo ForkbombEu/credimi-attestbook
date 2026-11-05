@@ -137,6 +137,25 @@ describe('strict JOSE signing', () => {
     ])
   })
 
+  test('rejects a certificate entry with more than one certificate', async () => {
+    const key = await createTestKey()
+    const diagnostics = failureDiagnostics(
+      await signSchemaMetaJws({
+        schemaMeta: readOwf(),
+        keyId: 'kid-1',
+        certificates: [[TEST_CERTIFICATE_PEM, TEST_CERTIFICATE_PEM].join('\n')],
+        signer: key.signer,
+      }),
+    )
+
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_signing_certificate',
+      }),
+    ])
+  })
+
   test('rejects a non-PEM certificate', async () => {
     const key = await createTestKey()
     const diagnostics = failureDiagnostics(
@@ -260,6 +279,22 @@ describe('strict JOSE verification', () => {
         }),
       ).map((entry) => entry.code),
     ).toContain('invalid_signature')
+  })
+
+  test('rejects unsupported JOSE header members', async () => {
+    const key = await createTestKey()
+    const jws = await craftJws(headerWith({ crit: ['exp'] }), payloadWithIat(), key.signer)
+
+    expect(
+      failureDiagnostics(
+        await verifySchemaMetaJws({
+          jws,
+          verifier: key.verifier,
+          algorithm: 'ES256',
+          keyId: 'kid-1',
+        }),
+      ).map((entry) => entry.code),
+    ).toContain('invalid_jose_header')
   })
 
   test('rejects a mismatched expected key id', async () => {

@@ -94,7 +94,7 @@ Test categories (spec §16): **standards**, **registry**, **validation**, **capt
 | SR-12/13 | Versioning & maintenance | registry | version comparison; immutable published artefacts | STR |
 | SR-14 | Registration ownership | registry | provider ownership enforcement | GOV |
 | SR-16 | JWS-signed responses | standards / integration | Implemented in #27 for the OWF-profile compact JWS (`src/standards/jose.test.ts`); the TS11 catalogue list envelope `{iss, iat, data}` remains unimplemented and is reported as an unsupported operation | CRYPTO (metadata) |
-| SR-19 | `#integrity` SRI | standards / validation | Implemented in #27 for sha256 schema-reference SRI through OWF (`src/standards/references.test.ts`); rulebook `#integrity` byte verification and non-sha256 SRI remain unimplemented (#30) | CRYPTO (integrity) |
+| SR-19 | `#integrity` SRI | standards / validation | Implemented in #27 for sha256 schema-reference SRI through OWF; disabling verification is reported `not_tested` (`src/standards/references.test.ts`); rulebook `#integrity` byte verification and non-sha256 SRI remain unimplemented (#30) | CRYPTO (integrity) |
 | SR-15/17 | API methods + public read | integration | OpenAPI contract; GET filters/pagination | PROTO |
 | SR-18 | DDoS/misuse limits | integration | §5.4 SHALL consideration; §5.5–§5.6 rate/query limits (SHOULD) | SEC |
 | FR-002 | Versioning/digest reproducibility | registry | version mismatch detection; digest verification | STR |

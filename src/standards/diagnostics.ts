@@ -34,6 +34,7 @@ export type DiagnosticCode =
   | 'invalid_signature'
   | 'invalid_reference'
   | 'integrity_mismatch'
+  | 'integrity_not_verified'
   | 'trust_not_tested'
 
 /** A single adapter finding. */

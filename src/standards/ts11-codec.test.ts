@@ -263,6 +263,14 @@ describe('TS11 v1.0.1 negative inputs', () => {
       path: 'supportedFormats',
     },
     {
+      name: 'rejects the OWF x509 trust framework',
+      mutate: (document) => {
+        document.trustedAuthorities = [{ frameworkType: 'x509', value: 'base64-der' }]
+      },
+      code: 'invalid_member_value',
+      path: 'trustedAuthorities.0.frameworkType',
+    },
+    {
       name: 'rejects isLOTE on a non-etsi_tl framework',
       mutate: (document) => {
         document.trustedAuthorities = [{ frameworkType: 'aki', value: 'abc', isLOTE: true }]

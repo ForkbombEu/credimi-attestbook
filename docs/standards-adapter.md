@@ -43,7 +43,7 @@ wire modules remain an implementation detail.
 | Strict baseline validation | `validateSchemaMetaDocument` rejects additions | OWF validates, then the adapter baseline-strict check rejects unknown top-level members | `ts11-codec.test.ts`, `owf-codec.test.ts` |
 | JWS signing | **unsupported** (see §7) | real `signSchemaMeta` behind the JOSE policy | `jose.test.ts` |
 | JWS verification | **unsupported** for the TS11 list envelope | real `verifySchemaMeta` behind the JOSE policy | `jose.test.ts` |
-| SRI reference resolution | only for OWF-representable documents, sha256 only | real `resolveSchemaReferences` | `references.test.ts` |
+| SRI reference resolution | only for OWF-representable documents, sha256 only; disabling verification is reported `not_tested` | real `resolveSchemaReferences` | `references.test.ts` |
 
 The tests execute the real pinned package under Bun. Browser-style mocks are not used for
 `validateSchemaMeta`, `signSchemaMeta`, `verifySchemaMeta` or `resolveSchemaReferences`.
@@ -107,7 +107,7 @@ Representative codes:
 - unsupported operation: `unsupported_profile`, `unsupported_format`,
   `unsupported_trust_authority`, `unsupported_sri_algorithm`,
   `unsupported_schema_meta_member`, `unsupported_jose_algorithm`.
-- not tested: `trust_not_tested`.
+- not tested: `trust_not_tested`, `integrity_not_verified`.
 - preserved: `preserved_unknown_member`, `preserved_unknown_value`,
   `signing_time_stamped`.
 
@@ -135,6 +135,7 @@ Concrete unsupported cases:
 | OWF `issuanceProfile` has no TS11 member | `unsupported_schema_meta_member` | `issuanceProfile` |
 | OWF `iat` has no TS11 `SchemaMeta` member | `unsupported_schema_meta_member` | `iat` |
 | OWF `x509` direct anchor is not a TS11 framework | `unsupported_trust_authority` | `trustedAuthorities.0.frameworkType` |
+| `x509` framework inside a TS11 document | `invalid_member_value` | `trustedAuthorities.0.frameworkType` |
 | OWF `verificationMethod` has no TS11 member | `unsupported_trust_authority` | `trustedAuthorities.0.verificationMethod` |
 | OWF requires per-schema `integrity`/`meta`, TS11 does not carry them | `unsupported_schema_meta_member` | `schemaURIs.0.integrity`, `schemaURIs.0.meta` |
 | OWF requires `rulebookIntegrity`, TS11 allows a fragment-free URI | `unsupported_schema_meta_member` | `rulebookIntegrity` |
@@ -143,7 +144,8 @@ Concrete unsupported cases:
 | TS11 format not supported by OWF (`jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc`) | `unsupported_format` | `schemaURIs.0.formatIdentifier` |
 | TS11 `aki`/`openid_federation` trust framework | `unsupported_trust_authority` | `trustedAuthorities.0.frameworkType` |
 | `sha384`/`sha512` SRI | `unsupported_sri_algorithm` | `schemaURIs.0.integrity` |
-| OWF URL `id` exported as TS11 | `invalid_ts11_id` | `id` |
+| OWF URL `id` exported as TS11 | `unsupported_schema_meta_member` | `id` |
+| Malformed canonical `id` (neither UUID nor URL) | `invalid_ts11_id` | `id` |
 | OWF requires a URL `id`; TS11 marks `id` optional or carries a UUID | `unsupported_schema_meta_member` | `id` |
 
 ## 6. Strict JOSE policy
@@ -158,7 +160,8 @@ of the real package:
 | Algorithm allowlist | `ES256`, `ES384`, `ES512`, `RS256`, `RS384`, `RS512`; ES256 is the default. Other values are `unsupported_operation`. |
 | Key binding | The header `alg` must equal the algorithm the caller expects and the header `kid` must equal the expected key id; signing uses a single caller-declared algorithm for both key and header. |
 | `typ` | Must be `attestation-schema+jwt`. |
-| `x5c` | Signing requires at least one certificate; verification requires a non-empty chain. |
+| `x5c` | Signing requires one PEM certificate per entry; verification requires a non-empty chain of non-empty entries. |
+| Header extensions | `crit`, `b64`, `jwk`, `jku` and `x5u` are rejected. |
 | `iat` | Must be a positive integer present in the signed payload and equal to the value OWF returns. A synthesised value is rejected (`synthetic_iat`). |
 | Signature | Delegated to OWF `verifySchemaMeta`; a failure is `invalid_signature` or `invalid_schema_meta`. |
 | `iat` on signing | OWF `signSchemaMeta` always stamps the current time and replaces a canonical `iat`; the replacement is reported with `signing_time_stamped` (`preserved`), not hidden. |
@@ -200,9 +203,11 @@ silently approximated:
   on valid and invalid documents, real-package validation errors, baseline-strict unknown
   members, `__proto__` rejection and preserved-member collisions;
 - JOSE positive and negative flows with a real ES256 key: tampered signature, wrong key,
-  wrong `kid`, wrong algorithm, missing `x5c`, wrong `typ`, `alg: none`, and a synthesised
-  `iat` that OWF accepts but the adapter rejects;
-- SRI resolution through OWF: matching content, mismatching content, sha384 unsupported,
+  wrong `kid`, wrong algorithm, missing `x5c`, wrong `typ`, `crit` and other extensions,
+  multi-certificate entries, `alg: none`, and a synthesised `iat` that OWF accepts but
+  the adapter rejects;
+- SRI resolution through OWF: matching content, mismatching content, `verifyIntegrity:
+  false` reported `not_tested`, the `maxExtendsDepth` ceiling, sha384 unsupported,
   unsupported formats and resolver failures;
 - diagnostics that separate `invalid_input` from `unsupported_operation`, and product
   metadata that never reaches a serialized document.

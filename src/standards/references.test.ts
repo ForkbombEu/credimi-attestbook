@@ -103,6 +103,42 @@ describe('OWF-backed schema reference resolution', () => {
     ])
   })
 
+  test('reports disabled SRI verification as not tested', async () => {
+    const result = await resolveSchemaMetaReferences({
+      schemaMeta: readOwf(),
+      verifyIntegrity: false,
+      resolve: resolveFromContent('{"type":"string"}'),
+    })
+    const resolved = successValue(result)
+
+    expect(resolved).toHaveLength(1)
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({
+        kind: 'not_tested',
+        code: 'integrity_not_verified',
+        path: 'schemaURIs',
+      }),
+    ])
+  })
+
+  test('caps maxExtendsDepth at the adapter limit', async () => {
+    const diagnostics = failureDiagnostics(
+      await resolveSchemaMetaReferences({
+        schemaMeta: readOwf(),
+        maxExtendsDepth: 11,
+        resolve: resolveFromContent(TEST_SCHEMA_DOCUMENT),
+      }),
+    )
+
+    expect(diagnostics).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_member_value',
+        path: 'maxExtendsDepth',
+      }),
+    ])
+  })
+
   test('wraps resolver failures as invalid input', async () => {
     const diagnostics = failureDiagnostics(
       await resolveSchemaMetaReferences({

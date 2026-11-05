@@ -16,6 +16,7 @@ import {
 import {
   fail,
   invalidInput,
+  notTested,
   ok,
   unsupportedOperation,
   type AdapterDiagnostic,
@@ -25,6 +26,8 @@ import type { CanonicalSchemaMeta } from './model'
 import { buildOwfSchemaMeta } from './owf'
 import { OWF_FORMAT_VALUES } from './profiles'
 import { parseSri } from './wire'
+
+const MAX_EXTENDS_DEPTH = 10
 
 export interface ResolveSchemaMetaReferencesOptions {
   readonly schemaMeta: CanonicalSchemaMeta
@@ -83,6 +86,30 @@ export async function resolveSchemaMetaReferences(
         )
       }
     }
+  } else if (options.schemaMeta.schemaURIs.some((reference) => reference.integrity !== undefined)) {
+    diagnostics.push(
+      notTested(
+        'integrity_not_verified',
+        'SRI verification was disabled; schemaURI integrity values were not checked against the fetched bytes',
+        'schemaURIs',
+      ),
+    )
+  }
+
+  if (
+    options.maxExtendsDepth !== undefined &&
+    (!Number.isInteger(options.maxExtendsDepth) ||
+      options.maxExtendsDepth < 0 ||
+      options.maxExtendsDepth > MAX_EXTENDS_DEPTH)
+  ) {
+    return fail([
+      ...diagnostics,
+      invalidInput(
+        'invalid_member_value',
+        `maxExtendsDepth must be an integer between 0 and ${MAX_EXTENDS_DEPTH}`,
+        'maxExtendsDepth',
+      ),
+    ])
   }
 
   if (diagnostics.some((entry) => entry.kind !== 'preserved' && entry.kind !== 'not_tested')) {
@@ -112,7 +139,7 @@ export async function resolveSchemaMetaReferences(
     return ok(resolved, diagnostics)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
-    const code = /integrit/i.test(message) ? 'integrity_mismatch' : 'invalid_reference'
+    const code = /integrity mismatch/i.test(message) ? 'integrity_mismatch' : 'invalid_reference'
     return fail([...diagnostics, invalidInput(code, message, 'schemaURIs')])
   }
 }

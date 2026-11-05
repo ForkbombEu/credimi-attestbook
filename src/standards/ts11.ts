@@ -186,7 +186,15 @@ function parseTrustAuthorities(
     )
     const frameworkType = readRequiredString(entry, 'frameworkType', path, diagnostics)
     const authorityValue = readRequiredString(entry, 'value', path, diagnostics)
-    if (frameworkType !== undefined) {
+    if (frameworkType === 'x509') {
+      diagnostics.push(
+        invalidInput(
+          'invalid_member_value',
+          'the "x509" direct anchor is an OWF 0.5.4 value, not a TS11 v1.0.1 trust framework',
+          `${path}.frameworkType`,
+        ),
+      )
+    } else if (frameworkType !== undefined) {
       checkBaselineValue(
         frameworkType,
         TS11_FRAMEWORK_TYPE_VALUES,
@@ -526,6 +534,16 @@ function buildTrustAuthorityWire(
   }
   if (authority.unknownMembers !== undefined) {
     for (const key of Object.keys(authority.unknownMembers)) {
+      if (key === '__proto__') {
+        diagnostics.push(
+          invalidInput(
+            'invalid_member_value',
+            'the "__proto__" member is not accepted',
+            `${path}.${key}`,
+          ),
+        )
+        return undefined
+      }
       if (TS11_TRUST_AUTHORITY_MEMBERS.has(key)) {
         diagnostics.push(
           invalidInput(
@@ -598,6 +616,16 @@ function buildSchemaReferenceWire(
   }
   if (reference.unknownMembers !== undefined) {
     for (const key of Object.keys(reference.unknownMembers)) {
+      if (key === '__proto__') {
+        diagnostics.push(
+          invalidInput(
+            'invalid_member_value',
+            'the "__proto__" member is not accepted',
+            `${path}.${key}`,
+          ),
+        )
+        return undefined
+      }
       if (TS11_SCHEMA_REFERENCE_MEMBERS.has(key)) {
         diagnostics.push(
           invalidInput(
@@ -791,6 +819,12 @@ export function serializeTs11SchemaMeta(
 
   if (schemaMeta.unknownMembers !== undefined) {
     for (const key of Object.keys(schemaMeta.unknownMembers)) {
+      if (key === '__proto__') {
+        diagnostics.push(
+          invalidInput('invalid_member_value', 'the "__proto__" member is not accepted', key),
+        )
+        continue
+      }
       if (TS11_KNOWN_MEMBERS.has(key)) {
         diagnostics.push(
           invalidInput(

@@ -460,6 +460,12 @@ export function buildOwfSchemaMeta(schemaMeta: CanonicalSchemaMeta): AdapterResu
   }
 
   for (const key of Object.keys(schemaMeta.unknownMembers)) {
+    if (key === '__proto__') {
+      diagnostics.push(
+        invalidInput('invalid_member_value', 'the "__proto__" member is not accepted', key),
+      )
+      continue
+    }
     if (OWF_KNOWN_MEMBERS.has(key)) {
       diagnostics.push(
         invalidInput(
