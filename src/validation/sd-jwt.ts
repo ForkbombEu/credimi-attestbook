@@ -289,6 +289,20 @@ export async function parseSdJwtVc(credential: string): Promise<SdJwtParseOutcom
     return invalid([finding('invalid_sd_jwt', describeParseFailure(error), 'error', '/credential')])
   }
 
+  if (
+    exceedsDepth(decoded.jwt.payload, MAX_CLAIM_DEPTH) ||
+    decoded.disclosures.some((disclosure) => exceedsDepth(disclosure.value, MAX_CLAIM_DEPTH))
+  ) {
+    return invalid([
+      finding(
+        'claim_depth_exceeded',
+        `The credential claims exceed the ${MAX_CLAIM_DEPTH}-level nesting bound.`,
+        'error',
+        '/credential',
+      ),
+    ])
+  }
+
   let claims: Record<string, unknown>
   try {
     const unpacked = await getClaims(decoded.jwt.payload, decoded.disclosures, hasher)
@@ -318,17 +332,6 @@ export async function parseSdJwtVc(credential: string): Promise<SdJwtParseOutcom
   } catch (error) {
     return invalid([
       finding('invalid_disclosures', describeParseFailure(error), 'error', '/credential'),
-    ])
-  }
-
-  if (exceedsDepth(claims, MAX_CLAIM_DEPTH) || exceedsDepth(decoded.jwt.payload, MAX_CLAIM_DEPTH)) {
-    return invalid([
-      finding(
-        'claim_depth_exceeded',
-        `The credential claims exceed the ${MAX_CLAIM_DEPTH}-level nesting bound.`,
-        'error',
-        '/credential',
-      ),
     ])
   }
 

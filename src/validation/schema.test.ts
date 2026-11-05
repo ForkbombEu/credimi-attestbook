@@ -349,7 +349,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
     expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
   })
 
-  test('reports an unpinned reference as inconclusive, not PASS', async () => {
+  test('does not execute an unpinned reference', async () => {
     const reference = {
       formatIdentifier: 'dc+sd-jwt',
       uri: TYPE_METADATA_URI,
@@ -361,9 +361,107 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       parsed: await parseOrThrow(await issueTestCredential()),
     })
 
-    expect(outcome.status).toBe('INCONCLUSIVE')
+    expect(outcome.status).toBe('NOT_TESTED')
     expect(outcome.findings.map((entry) => entry.code)).toContain('schema_document_unpinned')
-    expect(outcome.schemaReferences[0]?.applied).toBe(true)
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
+  })
+
+  test('rejects every $ref route that could hide a regex keyword', async () => {
+    const parsed = await parseOrThrow(await issueTestCredential())
+    const schemas = [
+      {
+        'x-hidden': { pattern: '^(a+)+$' },
+        properties: { given_name: { $ref: '#/x-hidden' } },
+      },
+      {
+        enum: [{ pattern: '^(a+)+$' }],
+        properties: { given_name: { $ref: '#/enum/0' } },
+      },
+      {
+        $defs: { hidden: { $anchor: 'hidden', pattern: '^(a+)+$' } },
+        properties: { given_name: { $ref: '#hidden' } },
+      },
+    ]
+
+    for (const schema of schemas) {
+      const content = JSON.stringify(schema)
+      const reference = {
+        formatIdentifier: 'dc+sd-jwt',
+        uri: JSON_SCHEMA_URI,
+        integrity: sha256Sri(content),
+      }
+      const outcome = validateSchemaDocuments({
+        references: [reference],
+        documents: [{ uri: JSON_SCHEMA_URI, content }],
+        parsed,
+      })
+
+      expect(outcome.status).toBe('NOT_TESTED')
+      expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+      expect(outcome.findings.some((entry) => entry.code === 'schema_violation')).toBe(false)
+    }
+  })
+
+  test('reports a non-2020-12 schema dialect as not tested', async () => {
+    const schema = JSON.stringify({
+      $schema: 'https://json-schema.org/draft/2019-09/schema',
+      type: 'object',
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_dialect')
+  })
+
+  test('reports unknown schema keywords as not tested instead of ignoring them', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      propertyRequires: { given_name: 'x' },
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+  })
+
+  test('reports an unresolved type metadata extends chain as inconclusive', async () => {
+    const metadata = JSON.stringify({
+      ...PID_TYPE_METADATA,
+      extends: 'https://example.org/vct/parent',
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: TYPE_METADATA_URI,
+      integrity: sha256Sri(metadata),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: TYPE_METADATA_URI, content: metadata }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('INCONCLUSIVE')
+    expect(outcome.findings.map((entry) => entry.code)).toContain(
+      'type_metadata_extends_unsupported',
+    )
   })
 
   test('reports an unsupported integrity algorithm as inconclusive, not PASS', async () => {

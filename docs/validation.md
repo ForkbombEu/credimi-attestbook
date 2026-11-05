@@ -45,16 +45,19 @@ therefore carries `schemaDocuments` with the **exact UTF-8 document text**. The 
 
 - requires every supplied URI to match a schema reference of the selected attestation type in
   that exact rulebook version (otherwise `400 invalid_request`);
-- verifies `sha256-...` SRI over the exact supplied bytes when the reference carries one;
-  a mismatch is `FAIL` and the document is **not compiled or applied**; an invalid or
-  `sha384`/`sha512` pin is `INCONCLUSIVE` and is also not applied; a reference with no
-  `#integrity` is applied but reported `INCONCLUSIVE` with `schema_document_unpinned`;
+- verifies `sha256-...` SRI over the UTF-8 encoding of the exact supplied text when the
+  reference carries one; a mismatch is `FAIL` and the document is **not compiled or applied**;
+  an invalid or `sha384`/`sha512` pin is `INCONCLUSIVE` and is also not applied; a reference
+  with no `#integrity` is `NOT_TESTED` and is not applied;
 - treats a document with a string `vct` as SD-JWT VC Type Metadata and any other object as
-  JSON Schema 2020-12;
-- rejects JSON Schema keywords that would run unbounded JavaScript regular expressions or
-  super-linear comparisons over caller-controlled claims (`format`, `pattern`,
-  `patternProperties`, `uniqueItems`) as `NOT_TESTED` with `unsupported_schema_keyword`
-  instead of executing them or silently ignoring them.
+  JSON Schema 2020-12; type metadata with an `extends` parent is applied for its own claims
+  but reported `INCONCLUSIVE` with `type_metadata_extends_unsupported` because the parent
+  chain is not resolved yet;
+- executes JSON Schema only when it declares JSON Schema 2020-12 (or no `$schema`) and uses
+  no keyword AttestBook cannot bound safely. `format`, `pattern`, `patternProperties`,
+  `uniqueItems` and the `$ref`/`$dynamicRef`/`$recursiveRef` family are reported `NOT_TESTED`
+  with `unsupported_schema_keyword`; unknown keywords and other dialects are also
+  `NOT_TESTED` instead of being ignored and reported as validated.
 
 A reference with no supplied document makes schema validation `NOT_TESTED`. Supplying an
 unrelated schema cannot widen validation silently.
@@ -133,8 +136,8 @@ The engine never logs or persists the credential, disclosures or claim values. T
 error handler logs only the method, path and error class. Results expose claim paths and
 constraints, not values. Request and document sizes, document count, schema and claim nesting
 depth and enum vocabulary are bounded, and at most 50 JSON Schema violations are returned per
-document. Each JSON Schema document is compiled with a fresh Ajv instance so caller-supplied
-`$id` state cannot leak between requests.
+document. Claim depth is checked before disclosures are unpacked. Each JSON Schema document is
+compiled with a fresh Ajv instance so caller-supplied `$id` state cannot leak between requests.
 
 ## 7. Verification
 
@@ -144,7 +147,8 @@ Tests execute the real pinned libraries and a real migrated SQLite registry:
   claims, unsupported hash algorithm, key-binding detection, claim-depth bound;
 - `src/validation/schema.test.ts` — Type Metadata positive/negative attribute checks, JSON
   Schema positive/negative checks, SRI mismatch/unsupported algorithm/missing pin, rejection
-  of catastrophic-regex, format and uniqueItems keywords, missing documents;
+  of catastrophic-regex, format, uniqueItems and `$ref` routes, unsupported dialects and
+  unknown keywords, unresolved Type Metadata `extends`, missing documents;
 - `src/validation/engine.test.ts` — pinned version/digest evidence, dimension statuses,
   unsupported formats, key binding, digest-tamper abort, version pinning;
 - `src/app.validation.test.ts` — typed HTTP contract, 400/404/413/503 cases, no credential or

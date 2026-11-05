@@ -43,15 +43,25 @@ const MAX_SCHEMA_ERRORS = 50
  * Keywords whose evaluation AttestBook cannot bound yet. `pattern`/`format`
  * run JavaScript regular expressions or format validators over attacker
  * controlled strings (catastrophic backtracking), and `uniqueItems` is
- * super-linear. They are reported unsupported instead of executed or silently
- * ignored.
+ * super-linear. `$ref`/`$dynamicRef`/`$recursiveRef` can reach a hidden
+ * `pattern` anywhere in the document, including unknown members and `enum`
+ * values, so references are rejected until a safe resolver is pinned. All of
+ * them are reported unsupported instead of executed or silently ignored.
  */
 const UNSUPPORTED_SCHEMA_KEYWORDS = [
+  '$dynamicRef',
+  '$recursiveRef',
+  '$ref',
   'format',
   'pattern',
   'patternProperties',
   'uniqueItems',
 ] as const
+
+const SUPPORTED_SCHEMA_DIALECTS = new Set([
+  'https://json-schema.org/draft/2020-12/schema',
+  'https://json-schema.org/draft/2020-12/schema#',
+])
 
 const SINGLE_SCHEMA_KEYWORDS = new Set([
   'additionalProperties',
@@ -81,6 +91,9 @@ function createAjv(): Ajv2020 {
   return new Ajv2020({
     allErrors: true,
     strict: false,
+    // Reject unknown keywords instead of silently ignoring them: ignoring a
+    // constraint would report PASS without evaluating it.
+    strictSchema: true,
     validateFormats: false,
     allowUnionTypes: true,
   })
@@ -243,7 +256,7 @@ function verifyIntegrity(
       findings: [
         finding(
           'schema_document_unpinned',
-          'The rulebook schema reference has no integrity value, so the supplied document could not be pinned; the result is inconclusive.',
+          'The rulebook schema reference has no integrity value, so the supplied document was not applied and schema validation was not tested.',
           'warning',
           `/schemaReferences/${index}/integrity`,
         ),
@@ -346,6 +359,17 @@ function validateTypeMetadata(
     }
   }
 
+  if (typeMetadata.extends !== undefined || typeMetadata['extends#integrity'] !== undefined) {
+    findings.push(
+      finding(
+        'type_metadata_extends_unsupported',
+        'The supplied type metadata extends a parent type. AttestBook does not resolve the parent chain yet, so inherited mandatory and selective-disclosure constraints were not verified.',
+        'warning',
+        `/schemaReferences/${index}`,
+      ),
+    )
+  }
+
   const verification = verifyClaimsAgainstTypeMetadata(
     typeMetadata,
     parsed.packedPayload,
@@ -437,7 +461,7 @@ function validateJsonSchema(
     return {
       reference,
       kind: 'json_schema',
-      applied: true,
+      applied: false,
       status: 'FAIL',
       findings: [
         finding(
@@ -450,14 +474,51 @@ function validateJsonSchema(
     }
   }
 
+  if (isRecord(document) && '$schema' in document) {
+    const dialect = document.$schema
+    if (typeof dialect !== 'string' || !SUPPORTED_SCHEMA_DIALECTS.has(dialect)) {
+      return {
+        reference,
+        kind: 'json_schema',
+        applied: false,
+        status: 'NOT_TESTED',
+        findings: [
+          finding(
+            'unsupported_schema_dialect',
+            'The supplied JSON Schema declares a dialect other than JSON Schema 2020-12; schema validation was not executed.',
+            'warning',
+            `/schemaReferences/${index}`,
+          ),
+        ],
+      }
+    }
+  }
+
   let validate: ReturnType<Ajv2020['compile']>
   try {
     validate = createAjv().compile(document)
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : ''
+    if (message.includes('strict mode: unknown keyword')) {
+      return {
+        reference,
+        kind: 'json_schema',
+        applied: false,
+        status: 'NOT_TESTED',
+        findings: [
+          finding(
+            'unsupported_schema_keyword',
+            'The supplied JSON Schema uses a keyword AttestBook does not evaluate; schema validation was not executed.',
+            'warning',
+            `/schemaReferences/${index}`,
+          ),
+        ],
+      }
+    }
     return {
       reference,
       kind: 'json_schema',
-      applied: true,
+      applied: false,
       status: 'FAIL',
       findings: [
         finding(
@@ -573,12 +634,17 @@ export function validateSchemaDocuments(
     }
 
     const integrity = verifyIntegrity(reference, supplied.content, index)
-    if (integrity.status === 'mismatch' || integrity.status === 'unverified') {
+    if (integrity.status !== 'verified') {
       applications.push({
         reference,
         kind: null,
         applied: false,
-        status: integrity.status === 'mismatch' ? 'FAIL' : 'INCONCLUSIVE',
+        status:
+          integrity.status === 'mismatch'
+            ? 'FAIL'
+            : integrity.status === 'unverified'
+              ? 'INCONCLUSIVE'
+              : 'NOT_TESTED',
         findings: integrity.findings,
       })
       schemaReferences.push({
@@ -656,12 +722,6 @@ export function validateSchemaDocuments(
     applications.push({
       ...application,
       findings,
-      status:
-        application.status === 'FAIL'
-          ? 'FAIL'
-          : integrity.status === 'unpinned'
-            ? 'INCONCLUSIVE'
-            : application.status,
     })
     schemaReferences.push({
       formatIdentifier: reference.formatIdentifier,
