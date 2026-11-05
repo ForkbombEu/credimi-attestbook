@@ -1,13 +1,15 @@
 # AttestBook — Capture Integration Contracts (Phase 0, proposed)
 
-**Status:** Phase 0 research draft — **explicitly proposed**, not implemented, not a TS11
-normative structure, and not an operational claim about `capture-issuer` or
-`capture-verifier`. These contracts are designed early (spec §11) so the validation engine
-and registry can later consume capture evidence **without a redesign**, but nothing here
-declares an integration to be working.
+**Status:** Phase 0 consolidated contract proposal — **explicitly proposed**, not
+implemented, not a TS11 normative structure, and not an operational claim about
+`capture-issuer` or `capture-verifier`. These contracts are designed early (spec §11) so the
+validation engine and registry can later consume capture evidence **without a redesign**,
+but nothing here declares an integration to be working. The Phase 1 plan
+([`docs/implementation-plan.md`](implementation-plan.md)) treats these as Phase 4 work.
 
-**Ticket:** [#4 — Design standalone architecture, data model and capture contracts](https://github.com/ForkbombEu/credimi-attestbook/issues/4)
+**Ticket:** [#4 — Design standalone architecture, data model and capture contracts](https://github.com/ForkbombEu/credimi-attestbook/issues/4) · **Consolidated by:** [#25](https://github.com/ForkbombEu/credimi-attestbook/issues/25)
 **Companion:** [`docs/architecture.md`](architecture.md) (modules, validation engine, security outline)
+**Related:** [`docs/standards.md`](standards.md) · [`docs/requirements.md`](requirements.md) · [`docs/traceability.md`](traceability.md)
 **Authoritative spec:** [`docs/specification.md`](specification.md) §11 (FR-015 … FR-019)
 
 ## 1. Purpose and scope
@@ -187,7 +189,11 @@ is provided, clearly identified as such (FR-018, UI-006, AC-13):
   remain Phase 4 work (spec §11.4) gated on the components' actual contracts.
 - **Not a broker:** no message queue or event bus is part of this design.
 
-## 10. Open decisions for approval
+## 10. Deferred Phase 4 decisions
+
+These decisions are **not open approvals** for Phase 1; they are deliberately deferred until
+real `capture-issuer`/`capture-verifier` contracts or a Phase 4 design exist. They are
+recorded as open findings in [`docs/implementation-plan.md`](implementation-plan.md) §11.
 
 | ID | Decision | Source |
 | --- | --- | --- |
@@ -202,4 +208,8 @@ is provided, clearly identified as such (FR-018, UI-006, AC-13):
 
 - [`docs/specification.md`](specification.md) §11, §15, §16 (capture tests)
 - [`docs/architecture.md`](architecture.md) §3, §7, §8, §11
+- [`docs/implementation-plan.md`](implementation-plan.md) — Phase 1 non-goals and Phase 4 deferral
+- [`docs/requirements.md`](requirements.md) — requirement index (FR-015–FR-019)
+- [`docs/traceability.md`](traceability.md) — requirements-to-test mapping
+- [`docs/standards.md`](standards.md) — dimension separation and standards context
 - Issue [#4](https://github.com/ForkbombEu/credimi-attestbook/issues/4), [#17](https://github.com/ForkbombEu/credimi-attestbook/issues/17) (Phase 4 roadmap)

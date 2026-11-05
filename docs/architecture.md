@@ -1,35 +1,31 @@
 # AttestBook — Architecture, Data Model and Security Outline (Phase 0)
 
-**Status:** Phase 0 research draft — proposed architecture, **not final** and **not an
-implementation or conformance claim**. Final decisions are deferred until the research
-findings of [#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1),
-[#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) and
-[#3](https://github.com/ForkbombEu/credimi-attestbook/issues/3) are reviewed and the
-architecture is consolidated in
-[#5](https://github.com/ForkbombEu/credimi-attestbook/issues/5). This document does not
-authorize Phase 1 implementation, merge or deployment.
+**Status:** Phase 0 consolidated architecture. The decisions in §12 are adopted in
+[`docs/implementation-plan.md`](implementation-plan.md) and form the Phase 1 baseline. This
+document is not an implementation or conformance claim; each implementation issue supplies
+its own tests. [Issue #25](https://github.com/ForkbombEu/credimi-attestbook/issues/25)
+consolidated the research from #1–#4, and there is **no separate human approval gate**.
 
-**Ticket:** [#4 — Design standalone architecture, data model and capture contracts](https://github.com/ForkbombEu/credimi-attestbook/issues/4)
+**Ticket:** [#4 — Design standalone architecture, data model and capture contracts](https://github.com/ForkbombEu/credimi-attestbook/issues/4) · **Consolidated by:** [#25](https://github.com/ForkbombEu/credimi-attestbook/issues/25)
 
 **Authoritative spec:** [`docs/specification.md`](specification.md). Where this document
 and the specification conflict, the specification wins.
 
-## 0. Coordination with the other Phase 0 drafts
+## 0. Coordination with the other Phase 0 documents
 
-This draft is authored on a separate branch from the research drafts it depends on, to
-avoid overwriting them. It **reads** but does **not modify** the following documents
-produced by sibling Phase 0 tickets (all currently draft PRs):
+The research drafts that this architecture depends on are merged. Issue #25 consolidated
+their findings without overwriting them:
 
-| Document | Owned by | Relation to this draft |
+| Document | Owned by | Relation to this architecture |
 | --- | --- | --- |
-| `docs/standards.md` | [#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1) (OWF audit) and [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) (TS11/ETSI) — two sections to be combined | Source for the standards-adapter boundary (§4) and the versioning/digest model (§9) |
-| `docs/traceability.md` | [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) | Source for the validation-dimension model (§8) |
-| `docs/catalog-research.md`, `docs/requirements.md` (import domain) | [#3](https://github.com/ForkbombEu/credimi-attestbook/issues/3) | Source for the import/discovery adapter family (§5) and the security outline (§11) |
-| `docs/capture-integration.md` | this ticket (#4) | Companion document for capture contracts |
-| `docs/implementation-plan.md` | [#5](https://github.com/ForkbombEu/credimi-attestbook/issues/5) | Will consolidate and order the decisions listed here |
+| [`docs/standards.md`](standards.md) | [#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1) (OWF audit) and [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) (TS11/ETSI) — combined | Source for the standards-adapter boundary (§4), OWF compatibility and the versioning/digest model (§9) |
+| [`docs/traceability.md`](traceability.md) | [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) | Source for the validation-dimension model (§8) |
+| [`docs/catalog-research.md`](catalog-research.md), [`docs/requirements.md`](requirements.md) (import domain and requirement index) | [#3](https://github.com/ForkbombEu/credimi-attestbook/issues/3) | Source for the import/discovery adapter family (§5) and the security outline (§11) |
+| [`docs/capture-integration.md`](capture-integration.md) | this ticket (#4) | Companion document for capture contracts |
+| [`docs/implementation-plan.md`](implementation-plan.md) | [#25](https://github.com/ForkbombEu/credimi-attestbook/issues/25) | Consolidated decisions, tested baselines, risks and the dependency-ordered Phase 1 plan |
 
-These cross-references will only resolve once the sibling draft PRs are merged or
-consolidated; that is expected for Phase 0 and is not an inconsistency in this document.
+All five Phase 0 documents cross-reference each other and the authoritative
+[`docs/specification.md`](specification.md).
 
 ## 1. Architecture principles
 
@@ -108,8 +104,9 @@ not deployment units.
 **Acceptance item: OWF adapter boundary and TS11-specific vs proprietary fields separated.**
 
 The OWF audit ([#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1)) established
-that `@owf/eudi-attestation-schema` 0.5.4 is a useful primitives library but **not** a
-TS11 v1.0.1 codec. Its `SchemaMeta` model diverges from TS11 v1.0.1 in `id`
+that `@owf/eudi-attestation-schema` 0.5.4, pinned exactly (D-1), is a useful primitives
+library but **not** a TS11 v1.0.1 codec. Its `SchemaMeta` model diverges from TS11 v1.0.1 in
+`id`
 (URL vs UUID), integrity placement (`rulebookIntegrity` member vs `#integrity` suffix),
 trust frameworks (`etsi_tl` + `x509` vs `aki`/`etsi_tl`/`openid_federation`/`isLoTE`),
 `supportedFormats` (removed vs required 1..*), `schemaURIs` item shape, the supported
@@ -271,11 +268,12 @@ Rules:
 - **Versioning:** SemVer, new rulebook starts at `1.0` (TS11 §4.5.1). Draft → published →
   historical lifecycle; a published version is **immutable** and any change creates a new
   version (FR-002, FR-008, AC-05, AC-06).
-- **Content digest:** AttestBook computes a SHA-256 digest over the canonicalized published
-  artifact and stores it with the version. Because OWF 0.5.4 has no canonicalization API
-  (its only serialization is `JSON.stringify`), the canonical form (e.g. RFC 8785 JCS or
-  sorted-key stable serialization) is an **open decision** (AD-6). Until fixed, digest is
-  computed over the byte-exact stored representation.
+- **Content digest:** AttestBook computes a SHA-256 digest over the **exact stored artifact
+  bytes** and stores it with the version (D-6). Published bytes are immutable and
+  content-addressed, so the digest is reproducible without a canonicalization library.
+  OWF 0.5.4 has no canonicalization API (its only serialization is `JSON.stringify`), so
+  semantic normalization is not assumed; if a canonical form is ever needed, RFC 8785 JCS
+  is the recorded fallback rather than an implicit representation.
 - **W3C SRI (`#integrity`):** when `rulebookURI` or `schemaURIs[].uri` carry a
   `#integrity` fragment, the consumer SHALL verify it (TS11 §4.3.1/§4.3.2, SR-19); AttestBook
   reuses OWF's SRI verification (sha256 only today) and records verification status honestly.
@@ -288,8 +286,10 @@ Rules:
 
 ## 10. Persistence tradeoffs
 
-**Acceptance item: persistence tradeoffs.** Recommendation is provisional and is an open
-decision for [#5](https://github.com/ForkbombEu/credimi-attestbook/issues/5)/#8.
+**Acceptance item: persistence tradeoffs.** The Phase 1 engine is decided in D-7: a single
+SQLite database file behind a repository layer. PostgreSQL is not a Phase 1 dependency;
+adopting it later needs its own decision and migration plan
+([`docs/implementation-plan.md`](implementation-plan.md) §5).
 
 Requirements that shape the choice (spec §17, FR-002, FR-003): immutable published
 versions, content digests, provider ownership, reproducibility, portability, Docker,
@@ -297,16 +297,19 @@ versions, content digests, provider ownership, reproducibility, portability, Doc
 
 | Option | Strengths | Weaknesses vs requirements |
 | --- | --- | --- |
-| **Relational (SQLite for dev/test, PostgreSQL for production)** | Strong integrity/ACID for immutable-version + ownership invariants; mature migrations; well-understood; SQLite gives zero-config local dev and reproducible CI | Schema migrations are explicit; JSON-in-column for documents needs a JSON column type; two engines to keep compatible |
-| **Single embedded store (e.g. SQLite only, or libSQL)** | One engine everywhere; very portable; no external service | Less headroom for concurrent multi-provider production workload; operational concerns (backup/replication) pushed to operator |
-| **Document store (MongoDB/CouchDB)** | Schema-less document mapping is natural for JSON artifacts | Adds a mandatory external service (conflicts with "no mandatory cloud services"); weaker cross-entity integrity (provider→rulebook→version) |
+| **Relational, single SQLite file (adopted for Phase 1)** | Strong integrity/ACID for immutable-version + ownership invariants; mature migrations; zero-config local dev and reproducible CI; no external service | Single-writer Phase 1 deployment; backup/replication are operator concerns; a later move to PostgreSQL is a separate decision |
+| **Relational split: SQLite dev/test + PostgreSQL production (deferred)** | Production concurrency headroom while keeping local development simple | Two engines and dialects to keep compatible; adds a mandatory service for production; not needed to demonstrate the MVP |
+| **Document store (MongoDB/CouchDB) (not adopted)** | Schema-less document mapping is natural for JSON artifacts | Adds a mandatory external service (conflicts with "no mandatory cloud services"); weaker cross-entity integrity (provider→rulebook→version) |
 
-**Proposed direction:** relational persistence with a JSON/JSONB column for the
-profile-specific document (TS11 or OWF wire object) alongside typed columns for the fields
-AttestBook must query (provider id, version, status, digest, spec version). Immutable
-published artifacts are additionally stored **content-addressed** (digest → bytes) so
-publication and validation are byte-reproducible. The store engine (SQLite vs PostgreSQL
-vs single embedded engine) is deferred to [#5](https://github.com/ForkbombEu/credimi-attestbook/issues/5) — flagged, not decided here.
+**Adopted direction (D-7):** relational persistence in a single SQLite database, with a
+JSON column for the profile-specific document (TS11 or OWF wire object) alongside typed
+columns for the fields AttestBook must query (provider id, version, status, digest, spec
+version). Immutable published artifacts are additionally stored **content-addressed**
+(digest → exact bytes) so publication and validation are byte-reproducible. SQLite gives
+zero-config local development, a temporary-file test database and no mandatory external
+service; the repository interface keeps a later PostgreSQL adoption possible without
+changing the domain model. The single-writer limitation is documented as a Phase 1
+deployment constraint, not hidden.
 
 ## 11. Security threat/risk outline
 
@@ -328,46 +331,54 @@ Synthesizes spec §15 with the observed import risks from
 | T8 | **Code execution from imported documents** | spec §15 | JSON Schema/Markdown treated as data only; never `eval`/`Function`/dynamic import | proposed |
 | T9 | **Data preservation / round-trip loss** (adapter strips unknown fields) | OWF 0.5.4 strips unknown top-level members | Adapter preserves unknown normative members; lossless codec design | proposed |
 
-## 12. Open decisions for approval
+## 12. Decisions adopted
 
-**Acceptance item: open decisions flagged for approval.** These are the decisions that must
-be settled (in [#5](https://github.com/ForkbombEu/credimi-attestbook/issues/5) or by a
-human reviewer) before Phase 1 can build on this architecture. Nothing below is decided.
+**Acceptance item: architecture decisions recorded.** AD-1–AD-12 are no longer open. They
+are adopted as D-1–D-12 in
+[`docs/implementation-plan.md`](implementation-plan.md) §3, which is the authoritative
+decision register with rationale, traceability, risks and the implementation issue that
+verifies each decision. The table below preserves the original architecture context; if
+the wording differs, the consolidated decision register wins.
 
-| ID | Decision | Rationale / source |
+| ID | Decision | Consolidated as |
 | --- | --- | --- |
-| AD-1 | Pin `@owf/eudi-attestation-schema` **0.5.4** exactly for the Phase 1 spike | [#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1) §9.2; 0.6.0-alpha is a prerelease on `@owf/*` 0.7.0-alpha |
-| AD-2 | **Do not expose OWF `SchemaMeta` as the TS11 v1.0.1 public contract**; a version-aware codec with a canonical domain model is required | [#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1) §6, §9 |
-| AD-3 | **Wrap JOSE verification** behind a strict header/trust policy | [#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1) §5.4, §9 |
-| AD-4 | **Pin TS11 v1.0.1** as the Phase 1 baseline and treat EN 319 482-3 as an evolving, UNVERIFIED target | [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) §6, §9 |
-| AD-5 | Treat TS11/OWF **enumerated values as extensible data**, not closed unions | [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) §9 |
-| AD-6 | **Content-digest canonicalization** algorithm (JCS / RFC 8785 vs sorted-key) for reproducible digests | §9; OWF has no canonicalization API |
-| AD-7 | **Persistence engine** (SQLite-only vs SQLite/PostgreSQL split vs embedded store) | §10 |
-| AD-8 | **Overall validation aggregation rule** across the eight dimensions | §8 |
-| AD-9 | Which `attestationLoS`/`bindingType` values the Phase 1 validator **enforces** vs merely surfaces | [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) OQ-2 |
-| AD-10 | Catalogue API **authorisation mechanism** — stub vs provisional OAuth2/OIDC (TS11 §5.2.2 unspecified) | [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) OQ-3 |
-| AD-11 | How to **verify `#integrity` (SRI) safely** against untrusted remote content (SSRF/limits) | [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) OQ-4 |
-| AD-12 | How to reflect the **ARF-vs-TS11 registration-obligation discrepancy** in import/registration UX | [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2) OQ-1 |
+| AD-1 | Pin `@owf/eudi-attestation-schema` **0.5.4** exactly for the Phase 1 spike | D-1: adopted; 0.6.0-alpha is a prerelease on `@owf/*` 0.7.0-alpha |
+| AD-2 | **Do not expose OWF `SchemaMeta` as the TS11 v1.0.1 public contract**; a version-aware codec with a canonical domain model is required | D-2: adopted |
+| AD-3 | **Wrap JOSE verification** behind a strict header/trust policy | D-3: adopted, with ES256 first and no synthetic `iat` |
+| AD-4 | **Pin TS11 v1.0.1** as the Phase 1 baseline and treat EN 319 482-3 as an evolving, UNVERIFIED target | D-4: adopted |
+| AD-5 | Treat TS11/OWF **enumerated values as extensible data**, not closed unions | D-5: adopted |
+| AD-6 | **Content-digest canonicalization** for reproducible digests | D-6: SHA-256 over exact stored bytes; RFC 8785 JCS only if semantic canonicalization is later required |
+| AD-7 | **Persistence engine** (SQLite-only vs split vs embedded store) | D-7: SQLite single engine for Phase 1; PostgreSQL later needs a new decision |
+| AD-8 | **Overall validation aggregation rule** across the eight dimensions | D-8: conservative aggregation, PASS only when every applicable dimension PASSed |
+| AD-9 | Which `attestationLoS`/`bindingType` values the validator **enforces** vs merely surfaces | D-9: validate vocabulary/consistency only; no issuer-side enforcement (OQ-2) |
+| AD-10 | Catalogue API **authorisation mechanism** (TS11 §5.2.2 unspecified) | D-10: provisional product bearer-token auth; no TS11 catalogue write API in Phase 1 (OQ-3) |
+| AD-11 | How to **verify `#integrity` (SRI) safely** against untrusted remote content | D-11: SRI over SSRF-safe fetched bytes; sha256 only, other algorithms reported unsupported (OQ-4) |
+| AD-12 | How to reflect the **ARF-vs-TS11 registration-obligation discrepancy** in import/registration UX | D-12: separate conformance/registration metadata, no inferred hard rule (OQ-1) |
 
 ## 13. Assumptions, unknowns and non-claims
 
-- This is a **proposal**, not an approved design. It must not be read as authorizing
-  Phase 1 code, a conformance claim, or a production deployment.
+- Phase 0 is consolidated; Phase 1 proceeds through issues #26–#39 under
+  [`docs/implementation-plan.md`](implementation-plan.md). This document is not a
+  conformance claim and does not authorize a production deployment.
 - The OWF package version and its divergences are taken from the #1 audit; the TS11 field
-  semantics from the #2 research; the import risks from the #3 survey. Each of those is
-  itself a draft and subject to review.
+  semantics from the #2 research; the import risks from the #3 survey. Those findings are
+  the adopted baseline and are traceable from the implementation plan.
 - **ETSI EN 319 482-3 draft v0.0.6 is UNVERIFIED** (not publicly accessible). No migration
-  delta is claimed; only a version-aware adapter is proposed to absorb it later.
+  delta is claimed; only a version-aware adapter is adopted to absorb it later.
 - **Credential validation is not executed in Phase 0**: the dimensions in §8 define the
   reporting model, not any tested capability.
 - **Capture integration is not implemented**; see the companion
   [`docs/capture-integration.md`](capture-integration.md), which is explicitly *proposed*.
+- The single-instance SQLite decision and the Bun 1.3.1 baseline are Phase 1 choices with
+  documented limitations, not claims of production readiness.
 
 ## 14. References
 
 - [`docs/specification.md`](specification.md) — authoritative requirements (spec §2, §4–§15, §17)
+- [`docs/implementation-plan.md`](implementation-plan.md) — consolidated decisions and Phase 1 plan (#25)
 - [`docs/standards.md`](standards.md) — OWF audit (#1) and TS11/ETSI research (#2)
+- [`docs/requirements.md`](requirements.md) — requirement index and Phase 1 scope
 - [`docs/traceability.md`](traceability.md) — requirements-to-clause/test matrix (#2)
-- [`docs/catalog-research.md`](catalog-research.md), [`docs/requirements.md`](requirements.md) — external catalog survey (#3)
+- [`docs/catalog-research.md`](catalog-research.md) — external catalog survey (#3)
 - [`docs/capture-integration.md`](capture-integration.md) — capture contracts (this ticket)
-- Issues: [#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1), [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2), [#3](https://github.com/ForkbombEu/credimi-attestbook/issues/3), [#5](https://github.com/ForkbombEu/credimi-attestbook/issues/5)
+- Issues: [#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1), [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2), [#3](https://github.com/ForkbombEu/credimi-attestbook/issues/3), [#4](https://github.com/ForkbombEu/credimi-attestbook/issues/4), [#25](https://github.com/ForkbombEu/credimi-attestbook/issues/25)

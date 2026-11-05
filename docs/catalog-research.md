@@ -1,6 +1,10 @@
 # External Catalog & Discovery/Import Interoperability — Phase 0 Research
 
-**Status:** Draft (Phase 0 research only — no implementation, no merge)  
+**Status:** Phase 0 research, consolidated into the Phase 1 plan — no implementation, no
+merge, no conformance claim. The derived requirements are in
+[`docs/requirements.md`](requirements.md) §2; the adopted decisions and dependency-ordered
+Phase 1 slices are in [`docs/implementation-plan.md`](implementation-plan.md).
+
 **Ticket:** [Issue #3 — Survey external catalogs and discovery/import interoperability](https://github.com/ForkbombEu/credimi-attestbook/issues/3)  
 **Survey date:** 2026-11-02 (UTC)  
 **Method:** Read-only inspection of public Git repositories (`gh`), public web pages and live machine-readable endpoints (`curl`). No external system was modified.
