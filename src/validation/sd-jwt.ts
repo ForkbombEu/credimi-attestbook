@@ -29,6 +29,9 @@ const PROTECTED_CLAIMS = ['iss', 'nbf', 'exp', 'cnf', 'vct', 'vct#integrity', 's
 
 const RESERVED_MEMBERS = new Set(['_sd', '_sd_alg', '_sd_decoy', '...'])
 
+/** Depth bound for recursive claim inspection. */
+const MAX_CLAIM_DEPTH = 64
+
 const NODE_HASH_ALGORITHMS: Readonly<Record<string, string>> = {
   'sha-256': 'sha256',
   'sha-384': 'sha384',
@@ -91,6 +94,19 @@ export function createSdJwtHasher(): Hasher {
     const bytes = typeof data === 'string' ? data : new Uint8Array(data)
     return createHash(nodeAlgorithm).update(bytes).digest()
   }
+}
+
+function exceedsDepth(value: unknown, limit: number, depth = 0): boolean {
+  if (depth > limit) {
+    return true
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => exceedsDepth(entry, limit, depth + 1))
+  }
+  if (isRecord(value)) {
+    return Object.values(value).some((entry) => exceedsDepth(entry, limit, depth + 1))
+  }
+  return false
 }
 
 function hasSelectivelyDisclosableParts(value: unknown): boolean {
@@ -302,6 +318,17 @@ export async function parseSdJwtVc(credential: string): Promise<SdJwtParseOutcom
   } catch (error) {
     return invalid([
       finding('invalid_disclosures', describeParseFailure(error), 'error', '/credential'),
+    ])
+  }
+
+  if (exceedsDepth(claims, MAX_CLAIM_DEPTH) || exceedsDepth(decoded.jwt.payload, MAX_CLAIM_DEPTH)) {
+    return invalid([
+      finding(
+        'claim_depth_exceeded',
+        `The credential claims exceed the ${MAX_CLAIM_DEPTH}-level nesting bound.`,
+        'error',
+        '/credential',
+      ),
     ])
   }
 

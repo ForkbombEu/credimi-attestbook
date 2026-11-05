@@ -119,8 +119,10 @@ The structural dimensions (`credential_parsing`, `format_recognition`,
 `schema_validation`, `attestation_constraints`) can pass; `cryptographic_verification` and
 `issuer_trust` are returned `NOT_TESTED` and protocol/interoperability `NOT_APPLICABLE`, so a
 structurally valid credential is never reported as fully valid or interoperable. Unsupported
-formats are recognised and reported `NOT_TESTED` rather than mocked. Credential contents and
-claim values are never logged or returned. See [`docs/validation.md`](docs/validation.md) for
+formats are recognised and reported `NOT_TESTED` rather than mocked; JSON Schema keywords that
+need unbounded regex/format evaluation (`format`, `pattern`, `patternProperties`,
+`uniqueItems`) are reported `NOT_TESTED` instead of executed. Credential contents and claim
+values are never logged or returned. See [`docs/validation.md`](docs/validation.md) for
 the contract, statuses, limits and non-claims.
 
 ## Build and run

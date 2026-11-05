@@ -10,7 +10,7 @@ import { requireIdentifier, requireSemanticVersion, requireText } from '../regis
 
 import type { CredentialArtifactInput, SchemaDocumentInput, ValidateCredentialInput } from './types'
 
-/** Maximum credential artifact length accepted by the API (bytes of UTF-16 text). */
+/** Maximum credential artifact length accepted by the API (UTF-16 code units). */
 export const MAX_CREDENTIAL_LENGTH = 512 * 1024
 /** Maximum number of schema documents in one request. */
 export const MAX_SCHEMA_DOCUMENTS = 4

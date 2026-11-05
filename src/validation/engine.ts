@@ -253,16 +253,19 @@ export class CredentialValidator {
           }
     const recognition = recognizeCredentialFormat(artifact)
 
-    const matchingReferences = attestation.schemaReferences.filter(
+    const attestationReferences = attestation.schemaReferences
+    const matchingReferences = attestationReferences.filter(
       (reference) =>
         recognition.format !== null && reference.formatIdentifier === recognition.format,
     )
 
     // A supplied document must belong to the selected attestation type in this
     // exact version; otherwise a caller could silently validate against an
-    // unrelated schema.
+    // unrelated schema. The URI is checked against every reference of the
+    // attestation, so an unrecognised credential still gets a FAIL report
+    // instead of a 400.
     for (const document of request.schemaDocuments ?? []) {
-      if (!matchingReferences.some((reference) => reference.uri === document.uri)) {
+      if (!attestationReferences.some((reference) => reference.uri === document.uri)) {
         throw invalidInput(
           'schemaDocuments contains a URI that the selected attestation type does not reference in this rulebook version.',
         )

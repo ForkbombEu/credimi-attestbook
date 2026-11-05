@@ -259,7 +259,111 @@ describe('validateSchemaDocuments integrity and coverage', () => {
     })
 
     expect(outcome.status).toBe('FAIL')
-    expect(outcome.findings.map((entry) => entry.code)).toContain('integrity_mismatch')
+    expect(outcome.findings.map((entry) => entry.code)).toEqual(['integrity_mismatch'])
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
+  })
+
+  test('does not compile or apply a schema when the pinned integrity mismatches', async () => {
+    const parsed = await parseOrThrow(await issueTestCredential())
+    const schema = JSON.stringify({
+      type: 'object',
+      properties: { given_name: { type: 'number' } },
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(`${schema} `),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+      parsed,
+    })
+
+    expect(outcome.status).toBe('FAIL')
+    expect(outcome.findings.map((entry) => entry.code)).toEqual(['integrity_mismatch'])
+    expect(outcome.findings.some((entry) => entry.code === 'schema_violation')).toBe(false)
+  })
+
+  test('does not evaluate a regex keyword that could backtrack catastrophically', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      properties: {
+        given_name: { type: 'string', pattern: '^(a+)+$' },
+      },
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+    expect(outcome.findings.some((entry) => entry.code === 'schema_violation')).toBe(false)
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
+  })
+
+  test('does not silently ignore a format keyword', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      properties: { birthdate: { type: 'string', format: 'date' } },
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+  })
+
+  test('does not silently ignore uniqueItems', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      properties: { nicknames: { type: 'array', uniqueItems: true } },
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+  })
+
+  test('reports an unpinned reference as inconclusive, not PASS', async () => {
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: TYPE_METADATA_URI,
+      integrity: null,
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: TYPE_METADATA_URI, content: PID_TYPE_METADATA_TEXT }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('INCONCLUSIVE')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('schema_document_unpinned')
+    expect(outcome.schemaReferences[0]?.applied).toBe(true)
   })
 
   test('reports an unsupported integrity algorithm as inconclusive, not PASS', async () => {

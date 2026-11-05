@@ -137,6 +137,26 @@ describe('parseSdJwtVc', () => {
     expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_hash_algorithm')
   })
 
+  test('rejects claims nested beyond the depth bound', async () => {
+    const nested: Record<string, unknown> = {}
+    let node = nested
+    for (let depth = 0; depth < 80; depth += 1) {
+      const child: Record<string, unknown> = {}
+      node.child = child
+      node = child
+    }
+    const credential = await issueTestCredential({
+      claims: defaultCredentialClaims({ nested }),
+      selectiveClaims: [],
+    })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    expect(outcome.findings.map((entry) => entry.code)).toContain('claim_depth_exceeded')
+  })
+
   test('detects a trailing key-binding JWT without verifying it', async () => {
     const credential = await issueTestCredential()
     const header = encodeSegment({ typ: 'kb+jwt', alg: 'ES256' })

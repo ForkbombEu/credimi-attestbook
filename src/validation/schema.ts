@@ -36,6 +36,43 @@ const SRI_PATTERN = /^(sha256|sha384|sha512)-([A-Za-z0-9+/=_-]+)$/
 /** Defensive bound before a caller-supplied document reaches Ajv compilation. */
 const MAX_SCHEMA_DEPTH = 64
 
+/** Cap on rendered JSON Schema errors from a single document. */
+const MAX_SCHEMA_ERRORS = 50
+
+/**
+ * Keywords whose evaluation AttestBook cannot bound yet. `pattern`/`format`
+ * run JavaScript regular expressions or format validators over attacker
+ * controlled strings (catastrophic backtracking), and `uniqueItems` is
+ * super-linear. They are reported unsupported instead of executed or silently
+ * ignored.
+ */
+const UNSUPPORTED_SCHEMA_KEYWORDS = [
+  'format',
+  'pattern',
+  'patternProperties',
+  'uniqueItems',
+] as const
+
+const SINGLE_SCHEMA_KEYWORDS = new Set([
+  'additionalProperties',
+  'additionalItems',
+  'contains',
+  'contentSchema',
+  'dependencies',
+  'else',
+  'if',
+  'items',
+  'not',
+  'propertyNames',
+  'then',
+  'unevaluatedItems',
+  'unevaluatedProperties',
+])
+
+const MAP_SCHEMA_KEYWORDS = new Set(['$defs', 'definitions', 'dependentSchemas', 'properties'])
+
+const ARRAY_SCHEMA_KEYWORDS = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems'])
+
 /**
  * A fresh Ajv instance per document: caller-supplied schemas are untrusted and
  * may reuse `$id` values, so compiled state must not leak between requests.
@@ -88,6 +125,67 @@ function exceedsDepth(value: unknown, limit: number, depth = 0): boolean {
   return false
 }
 
+export interface UnsupportedSchemaKeyword {
+  readonly keyword: string
+  readonly path: readonly string[]
+}
+
+function scanSchemaNode(schema: unknown, path: readonly string[]): UnsupportedSchemaKeyword | null {
+  if (typeof schema === 'boolean' || !isRecord(schema)) {
+    return null
+  }
+  for (const keyword of UNSUPPORTED_SCHEMA_KEYWORDS) {
+    if (keyword in schema) {
+      return { keyword, path: [...path, keyword] }
+    }
+  }
+  for (const [key, value] of Object.entries(schema)) {
+    if (SINGLE_SCHEMA_KEYWORDS.has(key)) {
+      const found = scanSchemaValue(value, [...path, key])
+      if (found !== null) {
+        return found
+      }
+    } else if (MAP_SCHEMA_KEYWORDS.has(key) && isRecord(value)) {
+      for (const [name, subSchema] of Object.entries(value)) {
+        const found = scanSchemaNode(subSchema, [...path, key, name])
+        if (found !== null) {
+          return found
+        }
+      }
+    } else if (ARRAY_SCHEMA_KEYWORDS.has(key) && Array.isArray(value)) {
+      for (const [position, subSchema] of value.entries()) {
+        const found = scanSchemaNode(subSchema, [...path, key, String(position)])
+        if (found !== null) {
+          return found
+        }
+      }
+    }
+  }
+  return null
+}
+
+function scanSchemaValue(value: unknown, path: readonly string[]): UnsupportedSchemaKeyword | null {
+  if (Array.isArray(value)) {
+    for (const [position, subSchema] of value.entries()) {
+      const found = scanSchemaNode(subSchema, [...path, String(position)])
+      if (found !== null) {
+        return found
+      }
+    }
+    return null
+  }
+  return scanSchemaNode(value, path)
+}
+
+/**
+ * Finds JSON Schema keywords AttestBook must not execute over untrusted input.
+ * The walk is schema-aware: a *data property* named `pattern` under
+ * `properties` is a property name, not the `pattern` keyword.
+ */
+export function findUnsupportedSchemaKeyword(schema: unknown): UnsupportedSchemaKeyword | null {
+  return scanSchemaNode(schema, [])
+}
+
 function escapePointerSegment(segment: string): string {
   return segment.replaceAll('~', '~0').replaceAll('/', '~1')
 }
@@ -136,11 +234,21 @@ function verifyIntegrity(
   content: string,
   index: number,
 ): {
-  readonly status: 'verified' | 'unverified' | 'mismatch'
+  readonly status: 'verified' | 'unpinned' | 'unverified' | 'mismatch'
   readonly findings: readonly ValidationFinding[]
 } {
   if (reference.integrity === null) {
-    return { status: 'verified', findings: [] }
+    return {
+      status: 'unpinned',
+      findings: [
+        finding(
+          'schema_document_unpinned',
+          'The rulebook schema reference has no integrity value, so the supplied document could not be pinned; the result is inconclusive.',
+          'warning',
+          `/schemaReferences/${index}/integrity`,
+        ),
+      ],
+    }
   }
   const match = SRI_PATTERN.exec(reference.integrity)
   if (match === null) {
@@ -366,7 +474,8 @@ function validateJsonSchema(
     return { reference, kind: 'json_schema', applied: true, status: 'PASS', findings: [] }
   }
 
-  const findings = (validate.errors ?? []).map((error: AjvErrorLike) => {
+  const errors = validate.errors ?? []
+  const findings = errors.slice(0, MAX_SCHEMA_ERRORS).map((error: AjvErrorLike) => {
     const path =
       error.instancePath === undefined || error.instancePath === '' ? '/' : error.instancePath
     const keyword = error.keyword ?? 'schema'
@@ -378,6 +487,16 @@ function validateJsonSchema(
       keyword,
     )
   })
+  if (errors.length > MAX_SCHEMA_ERRORS) {
+    findings.push(
+      finding(
+        'schema_errors_truncated',
+        `The JSON Schema reported ${errors.length} violations; only the first ${MAX_SCHEMA_ERRORS} are returned.`,
+        'warning',
+        '/claims',
+      ),
+    )
+  }
   return {
     reference,
     kind: 'json_schema',
@@ -432,7 +551,7 @@ export function validateSchemaDocuments(
       applications.push({
         reference,
         kind: null,
-        applied: true,
+        applied: false,
         status: 'FAIL',
         findings: [
           finding(
@@ -448,16 +567,38 @@ export function validateSchemaDocuments(
         uri: reference.uri,
         integrity: reference.integrity,
         kind: null,
-        applied: true,
+        applied: false,
       })
       return
     }
 
-    if (exceedsDepth(document, MAX_SCHEMA_DEPTH)) {
+    const integrity = verifyIntegrity(reference, supplied.content, index)
+    if (integrity.status === 'mismatch' || integrity.status === 'unverified') {
       applications.push({
         reference,
         kind: null,
-        applied: true,
+        applied: false,
+        status: integrity.status === 'mismatch' ? 'FAIL' : 'INCONCLUSIVE',
+        findings: integrity.findings,
+      })
+      schemaReferences.push({
+        formatIdentifier: reference.formatIdentifier,
+        uri: reference.uri,
+        integrity: reference.integrity,
+        kind: null,
+        applied: false,
+      })
+      return
+    }
+
+    const kind: 'type_metadata' | 'json_schema' =
+      isRecord(document) && typeof document.vct === 'string' ? 'type_metadata' : 'json_schema'
+
+    if (exceedsDepth(document, MAX_SCHEMA_DEPTH)) {
+      applications.push({
+        reference,
+        kind,
+        applied: false,
         status: 'FAIL',
         findings: [
           finding(
@@ -472,15 +613,39 @@ export function validateSchemaDocuments(
         formatIdentifier: reference.formatIdentifier,
         uri: reference.uri,
         integrity: reference.integrity,
-        kind: null,
-        applied: true,
+        kind,
+        applied: false,
       })
       return
     }
 
-    const integrity = verifyIntegrity(reference, supplied.content, index)
-    const kind: 'type_metadata' | 'json_schema' =
-      isRecord(document) && typeof document.vct === 'string' ? 'type_metadata' : 'json_schema'
+    if (kind === 'json_schema') {
+      const unsupported = findUnsupportedSchemaKeyword(document)
+      if (unsupported !== null) {
+        applications.push({
+          reference,
+          kind,
+          applied: false,
+          status: 'NOT_TESTED',
+          findings: [
+            finding(
+              'unsupported_schema_keyword',
+              `The supplied JSON Schema uses "${unsupported.keyword}", which AttestBook cannot evaluate safely over untrusted input; schema validation was not executed.`,
+              'warning',
+              `/schemaReferences/${index}`,
+            ),
+          ],
+        })
+        schemaReferences.push({
+          formatIdentifier: reference.formatIdentifier,
+          uri: reference.uri,
+          integrity: reference.integrity,
+          kind,
+          applied: false,
+        })
+        return
+      }
+    }
 
     const application =
       kind === 'type_metadata'
@@ -494,11 +659,9 @@ export function validateSchemaDocuments(
       status:
         application.status === 'FAIL'
           ? 'FAIL'
-          : integrity.status === 'mismatch'
-            ? 'FAIL'
-            : integrity.status === 'unverified'
-              ? 'INCONCLUSIVE'
-              : application.status,
+          : integrity.status === 'unpinned'
+            ? 'INCONCLUSIVE'
+            : application.status,
     })
     schemaReferences.push({
       formatIdentifier: reference.formatIdentifier,

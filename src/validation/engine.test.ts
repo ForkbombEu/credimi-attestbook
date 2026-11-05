@@ -358,6 +358,15 @@ describe('CredentialValidator with a pinned rulebook version', () => {
     expect(result.rulebook.digest).not.toBe(next.contentDigest)
   })
 
+  test('returns a FAIL report for an unrecognized credential with schema documents', async () => {
+    const { seeded, validator } = setup()
+    const result = await validator.validate(request(seeded, 'not-a-credential'))
+
+    expect(result.overallStatus).toBe('FAIL')
+    expect(dimension(result, 'format_recognition').status).toBe('FAIL')
+    expect(dimension(result, 'schema_validation').status).toBe('NOT_TESTED')
+  })
+
   test('reports an unrecognized credential artifact as a format failure', async () => {
     const { seeded, validator } = setup()
     const result = await validator.validate(request(seeded, 'not-a-credential', []))
