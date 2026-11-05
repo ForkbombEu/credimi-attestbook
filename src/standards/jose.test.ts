@@ -283,18 +283,25 @@ describe('strict JOSE verification', () => {
 
   test('rejects unsupported JOSE header members', async () => {
     const key = await createTestKey()
-    const jws = await craftJws(headerWith({ crit: ['exp'] }), payloadWithIat(), key.signer)
-
-    expect(
-      failureDiagnostics(
+    for (const member of ['crit', 'b64', 'jwk', 'jku', 'x5u'] as const) {
+      const jws = await craftJws(
+        headerWith({ [member]: member === 'crit' ? ['exp'] : 'value' }),
+        payloadWithIat(),
+        key.signer,
+      )
+      const diagnostics = failureDiagnostics(
         await verifySchemaMetaJws({
           jws,
           verifier: key.verifier,
           algorithm: 'ES256',
           keyId: 'kid-1',
         }),
-      ).map((entry) => entry.code),
-    ).toContain('invalid_jose_header')
+      )
+      expect({ member, codes: diagnostics.map((entry) => entry.code) }).toEqual({
+        member,
+        codes: ['invalid_jose_header'],
+      })
+    }
   })
 
   test('rejects a mismatched expected key id', async () => {
@@ -442,6 +449,62 @@ describe('strict JOSE verification', () => {
     ])
   })
 
+  test('reports a TS11 catalogue envelope as an unsupported operation', async () => {
+    const key = await createTestKey()
+    const jws = await craftJws(
+      headerWith(),
+      {
+        iss: 'https://catalogue.example',
+        iat: 1_700_000_000,
+        data: [buildTs11Document()],
+      },
+      key.signer,
+    )
+
+    expect(
+      failureDiagnostics(
+        await verifySchemaMetaJws({
+          jws,
+          verifier: key.verifier,
+          algorithm: 'ES256',
+          keyId: 'kid-1',
+        }),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'unsupported_operation',
+        code: 'unsupported_ts11_envelope',
+        path: 'payload',
+      }),
+    ])
+  })
+
+  test('reports a signed bare TS11 document as an unsupported operation', async () => {
+    const key = await createTestKey()
+    const jws = await craftJws(
+      headerWith(),
+      { ...buildTs11Document(), iat: 1_700_000_000 },
+      key.signer,
+    )
+
+    expect(
+      failureDiagnostics(
+        await verifySchemaMetaJws({
+          jws,
+          verifier: key.verifier,
+          algorithm: 'ES256',
+          keyId: 'kid-1',
+        }),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'unsupported_operation',
+        code: 'unsupported_profile',
+        path: 'payload',
+      }),
+    ])
+  })
+
   test('rejects a payload that is not a valid OWF SchemaMeta', async () => {
     const key = await createTestKey()
     const jws = await craftJws(
@@ -458,8 +521,13 @@ describe('strict JOSE verification', () => {
           algorithm: 'ES256',
           keyId: 'kid-1',
         }),
-      ).length,
-    ).toBeGreaterThan(0)
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_schema_meta',
+      }),
+    ])
   })
 
   test('preserves unknown top-level members through signing and verification', async () => {
@@ -493,6 +561,7 @@ describe('strict JOSE verification', () => {
     expect(decodeCompactJws('a..c').ok).toBe(false)
     expect(decodeCompactJws('..').ok).toBe(false)
     expect(decodeCompactJws('!!!.!!!.!!!').ok).toBe(false)
+    expect(decodeCompactJws('a+b.c.d').ok).toBe(false)
   })
 
   test('sign options type accepts the OWF signer contract', () => {

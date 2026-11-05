@@ -22,6 +22,7 @@ export type DiagnosticCode =
   | 'invalid_member_value'
   | 'invalid_ts11_id'
   | 'unsupported_profile'
+  | 'unsupported_ts11_envelope'
   | 'unsupported_format'
   | 'unsupported_trust_authority'
   | 'unsupported_sri_algorithm'

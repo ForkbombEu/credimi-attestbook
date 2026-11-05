@@ -105,7 +105,8 @@ Representative codes:
   `invalid_ts11_id`, `unknown_profile`, `ambiguous_profile`, `invalid_jose_header`,
   `invalid_signature`, `synthetic_iat`, `invalid_signing_certificate`, `signing_failed`,
   `invalid_reference`, `integrity_mismatch`.
-- unsupported operation: `unsupported_profile`, `unsupported_format`,
+- unsupported operation: `unsupported_profile`, `unsupported_ts11_envelope`,
+  `unsupported_format`,
   `unsupported_trust_authority`, `unsupported_sri_algorithm`,
   `unsupported_schema_meta_member`, `unsupported_jose_algorithm`.
 - not tested: `trust_not_tested`, `integrity_not_verified`.
@@ -145,6 +146,7 @@ Concrete unsupported cases:
 | TS11 format not supported by OWF (`jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc`) | `unsupported_format` | `schemaURIs.0.formatIdentifier` |
 | TS11 `aki`/`openid_federation` trust framework | `unsupported_trust_authority` | `trustedAuthorities.0.frameworkType` |
 | `sha384`/`sha512` SRI | `unsupported_sri_algorithm` | `schemaURIs.0.integrity` |
+| TS11 catalogue envelope or signed bare TS11 document | `unsupported_ts11_envelope` / `unsupported_profile` | `payload` |
 | OWF URL `id` exported as TS11 | `unsupported_schema_meta_member` | `id` |
 | Malformed canonical `id` (neither UUID nor URL) | `invalid_ts11_id` | `id` |
 | OWF requires a URL `id`; TS11 marks `id` optional or carries a UUID | `unsupported_schema_meta_member` | `id` |
@@ -170,7 +172,10 @@ of the real package:
 
 TS11 catalogue response signing uses a `{ iss, iat, data }` list envelope that OWF does not
 implement. It is an unsupported operation in this adapter; only bare OWF-profile
-`SchemaMeta` JWS is supported.
+`SchemaMeta` JWS is supported. On verification, a payload that is not a valid OWF
+`SchemaMeta` is checked for the TS11 envelope shape and then for the TS11 profile: those
+cases return `unsupported_ts11_envelope` or `unsupported_profile`, while a payload that
+matches neither remains `invalid_schema_meta`.
 
 ## 7. Unsupported functions
 
@@ -204,9 +209,10 @@ silently approximated:
   on valid and invalid documents, real-package validation errors, baseline-strict unknown
   members, `__proto__` rejection and preserved-member collisions;
 - JOSE positive and negative flows with a real ES256 key: tampered signature, wrong key,
-  wrong `kid`, wrong algorithm, missing `x5c`, wrong `typ`, `crit` and other extensions,
-  multi-certificate entries, `alg: none`, and a synthesised `iat` that OWF accepts but
-  the adapter rejects;
+  wrong `kid`, wrong algorithm, missing `x5c`, wrong `typ`, `crit`/`b64`/`jwk`/`jku`/`x5u`,
+  multi-certificate entries, `alg: none`, a synthesised `iat` that OWF accepts but the
+  adapter rejects, a signed TS11 catalogue envelope and a signed bare TS11 document
+  reported as unsupported, and an invalid OWF payload reported as invalid input;
 - SRI resolution through OWF: matching content, mismatching content, `verifyIntegrity:
   false` reported `not_tested`, the `maxExtendsDepth` ceiling, sha384 unsupported,
   unsupported formats and resolver failures;

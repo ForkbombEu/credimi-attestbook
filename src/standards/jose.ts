@@ -9,6 +9,7 @@
 
 import {
   signSchemaMeta,
+  validateSchemaMeta,
   verifySchemaMeta,
   type SignOptions,
   type VerifyOptions,
@@ -24,8 +25,9 @@ import {
   type AdapterDiagnostic,
   type AdapterResult,
 } from './diagnostics'
-import { OWF_PROFILE, type CanonicalSchemaMeta } from './model'
+import { OWF_PROFILE, TS11_PROFILE, type CanonicalSchemaMeta } from './model'
 import { buildOwfSchemaMeta, parseOwfSchemaMeta } from './owf'
+import { detectProfile } from './profiles'
 
 /** Algorithms the wrapper allows. ES256 is the default and the preferred one. */
 export const ALLOWED_JWS_ALGORITHMS = [
@@ -47,6 +49,10 @@ const PEM_CERTIFICATE_PATTERN =
   /^-----BEGIN CERTIFICATE-----\s*[A-Za-z0-9+/=\s]+-----END CERTIFICATE-----\s*$/
 
 const FORBIDDEN_JOSE_HEADER_MEMBERS = ['crit', 'b64', 'jwk', 'jku', 'x5u'] as const
+
+const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/
+
+const utf8Decoder = new TextDecoder('utf-8', { fatal: true })
 
 export interface JwsHeader {
   readonly alg: string
@@ -113,14 +119,46 @@ export interface CompactJwsParts {
 }
 
 function decodeJsonPart(part: string): Record<string, unknown> | undefined {
+  if (!BASE64URL_PATTERN.test(part)) {
+    return undefined
+  }
   try {
-    const decoded: unknown = JSON.parse(Buffer.from(part, 'base64url').toString('utf8'))
+    const decoded: unknown = JSON.parse(utf8Decoder.decode(Buffer.from(part, 'base64url')))
     return typeof decoded === 'object' && decoded !== null && !Array.isArray(decoded)
       ? (decoded as Record<string, unknown>)
       : undefined
   } catch {
     return undefined
   }
+}
+
+/**
+ * Recognises a signed payload that is TS11-shaped rather than an OWF
+ * `SchemaMeta`. OWF verifies only its own profile, so these payloads must be
+ * reported as an unsupported operation, not as malformed input.
+ */
+function classifyUnsupportedPayload(
+  payload: Record<string, unknown>,
+): AdapterDiagnostic | undefined {
+  if (validateSchemaMeta(payload).valid) {
+    return undefined
+  }
+  if (Array.isArray(payload.data) && typeof payload.iss === 'string') {
+    return unsupportedOperation(
+      'unsupported_ts11_envelope',
+      'the TS11 v1.0.1 catalogue list envelope {iss, iat, data} is not supported; OWF verifies only the OWF SchemaMeta compact JWS',
+      'payload',
+    )
+  }
+  const detected = detectProfile(payload)
+  if (detected.ok && detected.value === TS11_PROFILE) {
+    return unsupportedOperation(
+      'unsupported_profile',
+      'TS11 v1.0.1 SchemaMeta JWS verification is not supported; OWF verifies only its own SchemaMeta profile',
+      'payload',
+    )
+  }
+  return undefined
 }
 
 /** Decodes a compact JWS without verifying it. Never use the result as evidence. */
@@ -385,6 +423,11 @@ export async function verifySchemaMetaJws(
   const decoded = decodeCompactJws(options.jws)
   if (!decoded.ok) {
     return fail(decoded.diagnostics)
+  }
+
+  const unsupportedPayload = classifyUnsupportedPayload(decoded.value.payload)
+  if (unsupportedPayload !== undefined) {
+    return fail([...diagnostics, unsupportedPayload])
   }
 
   let verified: Awaited<ReturnType<typeof verifySchemaMeta>>
