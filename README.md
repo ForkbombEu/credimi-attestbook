@@ -55,6 +55,9 @@ bun run docs:check   # Phase 0 documentation consistency, plain Node
 - `src/dependencies.test.ts` — no Credimi/Temporal/StepCI/PocketBase runtime dependency;
 - `src/owf.test.ts` — the real pinned `@owf/eudi-attestation-schema` package builds and
   structurally validates a `SchemaMeta` document;
+- `src/standards/` — canonical model, TS11 v1.0.1 and OWF 0.5.4 codecs, strict JOSE policy
+  and SRI reference resolution, all exercised against the real package; see
+  [`docs/standards-adapter.md`](docs/standards-adapter.md);
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
   the Phase 0 verification gate for the persistence decision (D-7) before issue #28 builds
   the registry.

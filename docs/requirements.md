@@ -67,9 +67,9 @@ split from the closed duplicates #15–#19.
 | ID | Criterion | Phase / issue |
 | --- | --- | --- |
 | AC-01 | Runs independently from Credimi | Phase 1: #26 (`src/dependencies.test.ts`), #39 |
-| AC-02 | Actual OWF package installed, used and integration-tested | Phase 1: #26 (`src/owf.test.ts`), #27, #39 |
+| AC-02 | Actual OWF package installed, used and integration-tested | Phase 1: #26 (`src/owf.test.ts`), #27 (`src/standards/owf-codec.test.ts`, `src/standards/jose.test.ts`, `src/standards/references.test.ts`), #39 |
 | AC-03 | Supported TS11 rulebooks imported and inspected | Phase 1: #30, #31, #36, #39 |
-| AC-04 | Metadata managed/exported without losing normative information | Phase 1: #27, #29, #37 |
+| AC-04 | Metadata managed/exported without losing normative information | Phase 1: #27 (`src/standards/ts11-codec.test.ts`, `src/standards/owf-codec.test.ts`; lossless unknown-member round-trip), #29, #37 |
 | AC-05 | Reproducible versioning | Phase 1: #29 |
 | AC-06 | Published versions immutable | Phase 1: #29, #37 |
 | AC-07 | Credential validated against a selected rulebook version | Phase 1: #32, #38 |

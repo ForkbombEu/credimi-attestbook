@@ -29,7 +29,8 @@ than replacing it.
 **Key finding:** OWF 0.5.4 is a useful primitives library, but it is not a
 TS11 v1.0.1 codec. Pin it exactly; put a version-aware translation boundary and
 a strict JOSE wrapper around it; do not claim TS11 conformance from its schema
-validation alone.
+validation alone. The Phase 1 adapter built on these findings is documented in
+[`standards-adapter.md`](standards-adapter.md).
 
 ### Coordination with the other Phase 0 standards work
 
