@@ -226,6 +226,39 @@ describe('schema-reference controls', () => {
     })
   })
 
+  test('marks duplicate formatIdentifiers incompatible before the registry sees them', async () => {
+    const document = ts11WithSchemaReferences([
+      { formatIdentifier: 'dc+sd-jwt', uri: 'https://example.com/a.json' },
+      { formatIdentifier: 'dc+sd-jwt', uri: 'https://example.com/b.json' },
+    ])
+    const { preview } = await previewUrl(document)
+
+    const entry = preview.entries[0]
+    expect(entry?.compatible).toBe(false)
+    expect(
+      entry?.diagnostics.find((diagnostic) => diagnostic.code === 'registry_field_invalid'),
+    ).toMatchObject({
+      path: 'schemaURIs.1.formatIdentifier',
+      message: 'schema references repeat the formatIdentifier "dc+sd-jwt"',
+    })
+    expect(preview.compatibility.compatible).toBe(false)
+    expect(preview.compatibility.incompatibleEntries).toBe(1)
+  })
+
+  test('marks a formatIdentifier over the registry limit incompatible', async () => {
+    const document = ts11WithSchemaReferences([
+      { formatIdentifier: 'x'.repeat(300), uri: 'https://example.com/a.json' },
+    ])
+    const { preview } = await previewUrl(document)
+
+    expect(preview.entries[0]?.compatible).toBe(false)
+    expect(
+      preview.entries[0]?.diagnostics.find(
+        (diagnostic) => diagnostic.code === 'registry_field_limit',
+      ),
+    ).toBeDefined()
+  })
+
   test('rejects a schema-reference URI over the length limit', async () => {
     const document = ts11WithSchemaReferences([
       {

@@ -14,6 +14,7 @@ import {
   jsonBytes,
   owfDocument,
   publicResolver,
+  ts11WithSchemaReferences,
   validTs11Document,
   type FakeTransport,
 } from './test/fixtures'
@@ -145,6 +146,30 @@ describe('authenticated rulebook import', () => {
     const fake = createFakeTransport({
       [IMPORT_URL]: {
         body: jsonBytes({ data: [validTs11Document, invalidTs11Document] }),
+      },
+    })
+    const { fixture, token, importer } = setup(fake.transport)
+
+    let caught: unknown
+    try {
+      await importer.import(token.secret, { kind: 'url', url: IMPORT_URL })
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(ImportError)
+    expect((caught as ImportError).code).toBe('import_rejected')
+    expect(fixture.registry.listRulebooks()).toHaveLength(0)
+  })
+
+  test('refuses a catalog with an entry the registry would reject, writing nothing', async () => {
+    const duplicateReferences = ts11WithSchemaReferences([
+      { formatIdentifier: 'dc+sd-jwt', uri: 'https://example.com/a.json' },
+      { formatIdentifier: 'dc+sd-jwt', uri: 'https://example.com/b.json' },
+    ])
+    const fake = createFakeTransport({
+      [IMPORT_URL]: {
+        body: jsonBytes({ data: [validTs11Document, duplicateReferences] }),
       },
     })
     const { fixture, token, importer } = setup(fake.transport)

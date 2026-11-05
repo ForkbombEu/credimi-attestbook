@@ -22,6 +22,12 @@ export interface HostAddress {
 /** Injectable DNS resolver; the default uses the operating system resolver. */
 export type HostResolver = (hostname: string) => Promise<readonly HostAddress[]>
 
+/** Options for resolving an import hostname. */
+export interface ResolveImportTargetOptions {
+  /** Bound on the DNS lookup; the caller's total fetch deadline may be tighter. */
+  readonly timeoutMs?: number
+}
+
 /** A validated URL pinned to one public address. */
 export interface ResolvedImportTarget {
   readonly url: URL
@@ -244,8 +250,9 @@ function isBlockedIpv6(address: string): boolean {
     }
   }
 
-  // 64:ff9b::/96 NAT64 maps an arbitrary IPv4 address; block it rather than
-  // relying on the embedded address's representation.
+  // 64:ff9b::/32 (the well-known and local-use NAT64 prefixes) maps an
+  // arbitrary IPv4 address; block it rather than relying on the embedded
+  // address's representation.
   if (first === 0x0064 && second === 0xff9b) return true
 
   return false
@@ -264,6 +271,29 @@ export function isBlockedAddress(address: string): boolean {
   return true
 }
 
+async function resolveWithTimeout(
+  resolver: HostResolver,
+  hostname: string,
+  timeoutMs: number,
+): Promise<readonly HostAddress[]> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await new Promise<readonly HostAddress[]>((resolve, reject) => {
+      timer = setTimeout(
+        () => reject(importError('timeout', 'the import hostname lookup timed out')),
+        Math.max(1, timeoutMs),
+      )
+      Promise.resolve()
+        .then(() => resolver(hostname))
+        .then(resolve, reject)
+    })
+  } finally {
+    if (timer !== undefined) {
+      clearTimeout(timer)
+    }
+  }
+}
+
 /**
  * Resolves a validated URL to one public address. Every resolved address must
  * be public: a hostname with a mixed public/private answer is rejected instead
@@ -272,6 +302,7 @@ export function isBlockedAddress(address: string): boolean {
 export async function resolveImportTarget(
   url: URL,
   resolver: HostResolver = systemHostResolver,
+  options: ResolveImportTargetOptions = {},
 ): Promise<ResolvedImportTarget> {
   const hostname = stripBrackets(url.hostname)
   const port = url.port === '' ? 443 : Number(url.port)
@@ -292,7 +323,10 @@ export async function resolveImportTarget(
 
   let addresses: readonly HostAddress[]
   try {
-    addresses = await resolver(hostname)
+    addresses =
+      options.timeoutMs === undefined
+        ? await resolver(hostname)
+        : await resolveWithTimeout(resolver, hostname, options.timeoutMs)
   } catch (error) {
     if (error instanceof ImportError) {
       throw error

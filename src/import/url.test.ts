@@ -167,6 +167,15 @@ describe('target resolution', () => {
     )
   })
 
+  test('bounds a slow DNS resolver by the caller timeout', async () => {
+    await expectResolveError(
+      resolveImportTarget(new URL('https://catalog.example.test/x'), () => new Promise(() => {}), {
+        timeoutMs: 10,
+      }),
+      'timeout',
+    )
+  })
+
   test('rejects an empty and a failed DNS answer', async () => {
     await expectResolveError(
       resolveImportTarget(new URL('https://catalog.example.test/x'), () => Promise.resolve([])),

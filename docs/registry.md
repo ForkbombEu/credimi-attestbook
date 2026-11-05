@@ -46,13 +46,14 @@ Implemented by #29 (`migrations/0002_versions_artifacts.sql`):
 
 Implemented by #30:
 
-- `RulebookImporter` creates drafts from a compatible, bounded URL/JSON preview and stores
+- `RulebookImporter` creates drafts from a compatible, bounded URL/JSON preview through
+  `createRulebooks`, which writes the whole source in one transaction, and stores
   `sourceUrl` plus provenance (adapter, retrieval time, byte length, exact-bytes SHA-256
   digest, envelope, profile, conformance and the source's own conformance signal);
-- `createRulebook` accepts an attestation's schema references in the same call, so an
-  imported rulebook, its attestation type and its references are written in one
-  transaction; the references' OWF `meta`/unknown members are retained as registry-internal
-  metadata.
+- `createRulebook` accepts an attestation's schema references in the same call, and
+  `createRulebooks` batches several creates in one transaction, so an imported rulebook, its
+  attestation type and its references are written atomically; the references' OWF
+  `meta`/unknown members are retained as registry-internal metadata.
 
 Deliberately **not** in #28/#29/#30:
 

@@ -16,6 +16,15 @@ import {
   type SupportedProfile,
 } from '../standards'
 import { isRecord } from '../standards/profiles'
+import {
+  MAX_DESCRIPTION_LENGTH,
+  MAX_INTEGRITY_LENGTH,
+  MAX_METADATA_BYTES,
+  MAX_NAME_LENGTH,
+  MAX_SCHEMA_REFERENCES_PER_ATTESTATION,
+  MAX_STRING_ARRAY_ITEMS,
+  MAX_URL_LENGTH,
+} from '../registry/validation'
 
 import type { ImportLimits } from './limits'
 
@@ -216,6 +225,140 @@ interface SchemaReferenceRead {
   readonly compatible: boolean
 }
 
+function hasControlCharacter(value: string, allowLayoutWhitespace: boolean): boolean {
+  for (const character of value) {
+    const code = character.codePointAt(0) ?? 0
+    if (code !== 127 && code >= 32) {
+      continue
+    }
+    if (allowLayoutWhitespace && (code === 9 || code === 10 || code === 13)) {
+      continue
+    }
+    return true
+  }
+  return false
+}
+
+const INTEGRITY_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9+/=_-]+$/
+
+/** Mirrors the registry's attestation-field limits so the preview cannot
+ * report an entry as compatible when `createRulebooks` would refuse it. */
+function checkAttestationFields(
+  canonical: CanonicalSchemaMeta,
+  diagnostics: ImportDiagnostic[],
+): boolean {
+  let compatible = true
+  const boundedField = (value: string, path: string): void => {
+    if (value.trim() === '' || value.length > MAX_NAME_LENGTH) {
+      diagnostics.push(
+        entryDiagnostic(
+          'limit',
+          'registry_field_limit',
+          `the field must be non-empty and at most ${MAX_NAME_LENGTH} characters`,
+          path,
+        ),
+      )
+      compatible = false
+    } else if (hasControlCharacter(value, false)) {
+      diagnostics.push(
+        entryDiagnostic(
+          'invalid_input',
+          'registry_field_invalid',
+          'the field contains a control character',
+          path,
+        ),
+      )
+      compatible = false
+    }
+  }
+
+  boundedField(canonical.attestationLoS, 'attestationLoS')
+  boundedField(canonical.bindingType, 'bindingType')
+
+  if (canonical.supportedFormats.length > MAX_STRING_ARRAY_ITEMS) {
+    diagnostics.push(
+      entryDiagnostic(
+        'limit',
+        'registry_field_limit',
+        `supportedFormats exceeds the registry's ${MAX_STRING_ARRAY_ITEMS}-item limit`,
+        'supportedFormats',
+      ),
+    )
+    compatible = false
+  }
+  const seenFormats = new Set<string>()
+  canonical.supportedFormats.forEach((format, index) => {
+    boundedField(format, `supportedFormats.${index}`)
+    if (seenFormats.has(format)) {
+      diagnostics.push(
+        entryDiagnostic(
+          'invalid_input',
+          'registry_field_invalid',
+          `supportedFormats repeats "${format}"`,
+          `supportedFormats.${index}`,
+        ),
+      )
+      compatible = false
+    }
+    seenFormats.add(format)
+  })
+
+  return compatible
+}
+
+function checkDerivedFields(
+  name: string,
+  description: string,
+  diagnostics: ImportDiagnostic[],
+): boolean {
+  let compatible = true
+  if (name.length > MAX_NAME_LENGTH) {
+    diagnostics.push(
+      entryDiagnostic(
+        'limit',
+        'registry_field_limit',
+        `the derived rulebook name exceeds the registry's ${MAX_NAME_LENGTH}-character limit`,
+        'name',
+      ),
+    )
+    compatible = false
+  }
+  if (hasControlCharacter(name, false)) {
+    diagnostics.push(
+      entryDiagnostic(
+        'invalid_input',
+        'registry_field_invalid',
+        'the derived rulebook name contains a control character',
+        'name',
+      ),
+    )
+    compatible = false
+  }
+  if (description.length > MAX_DESCRIPTION_LENGTH) {
+    diagnostics.push(
+      entryDiagnostic(
+        'limit',
+        'registry_field_limit',
+        `the derived description exceeds the registry's ${MAX_DESCRIPTION_LENGTH}-character limit`,
+        'description',
+      ),
+    )
+    compatible = false
+  }
+  if (hasControlCharacter(description, true)) {
+    diagnostics.push(
+      entryDiagnostic(
+        'invalid_input',
+        'registry_field_invalid',
+        'the derived description contains a control character',
+        'description',
+      ),
+    )
+    compatible = false
+  }
+  return compatible
+}
+
 function readSchemaReferences(
   canonical: CanonicalSchemaMeta,
   limits: ImportLimits,
@@ -224,26 +367,73 @@ function readSchemaReferences(
   const references: ImportedSchemaReference[] = []
   let compatible = true
 
-  if (canonical.schemaURIs.length > limits.maxSchemaReferencesPerEntry) {
+  const maxReferences = Math.min(
+    limits.maxSchemaReferencesPerEntry,
+    MAX_SCHEMA_REFERENCES_PER_ATTESTATION,
+  )
+  if (canonical.schemaURIs.length > maxReferences) {
     diagnostics.push(
       entryDiagnostic(
         'limit',
         'schema_reference_limit',
-        `the entry has more than ${limits.maxSchemaReferencesPerEntry} schema references`,
+        `the entry has more than ${maxReferences} schema references`,
         'schemaURIs',
       ),
     )
     compatible = false
   }
 
-  canonical.schemaURIs.slice(0, limits.maxSchemaReferencesPerEntry).forEach((reference, index) => {
+  const maxReferenceLength = Math.min(limits.maxSchemaReferenceLength, MAX_URL_LENGTH)
+  const seenFormats = new Set<string>()
+  canonical.schemaURIs.slice(0, maxReferences).forEach((reference, index) => {
     const path = `schemaURIs.${index}.uri`
-    if (reference.uri.length > limits.maxSchemaReferenceLength) {
+    if (
+      reference.formatIdentifier.trim() === '' ||
+      reference.formatIdentifier.length > MAX_NAME_LENGTH ||
+      hasControlCharacter(reference.formatIdentifier, false)
+    ) {
+      diagnostics.push(
+        entryDiagnostic(
+          'limit',
+          'registry_field_limit',
+          `formatIdentifier must be non-empty, control-free and at most ${MAX_NAME_LENGTH} characters`,
+          `schemaURIs.${index}.formatIdentifier`,
+        ),
+      )
+      compatible = false
+      return
+    }
+    if (seenFormats.has(reference.formatIdentifier)) {
+      diagnostics.push(
+        entryDiagnostic(
+          'invalid_input',
+          'registry_field_invalid',
+          `schema references repeat the formatIdentifier "${reference.formatIdentifier}"`,
+          `schemaURIs.${index}.formatIdentifier`,
+        ),
+      )
+      compatible = false
+      return
+    }
+    seenFormats.add(reference.formatIdentifier)
+    if (hasControlCharacter(reference.uri, false)) {
+      diagnostics.push(
+        entryDiagnostic(
+          'invalid_input',
+          'schema_reference_invalid',
+          'the schema reference must not contain control characters',
+          path,
+        ),
+      )
+      compatible = false
+      return
+    }
+    if (reference.uri.length > maxReferenceLength) {
       diagnostics.push(
         entryDiagnostic(
           'limit',
           'schema_reference_limit',
-          `the schema reference exceeds the ${limits.maxSchemaReferenceLength}-character limit`,
+          `the schema reference exceeds the ${maxReferenceLength}-character limit`,
           path,
         ),
       )
@@ -291,6 +481,23 @@ function readSchemaReferences(
       compatible = false
       return
     }
+    if (reference.integrity !== undefined) {
+      if (
+        reference.integrity.length > MAX_INTEGRITY_LENGTH ||
+        !INTEGRITY_PATTERN.test(reference.integrity)
+      ) {
+        diagnostics.push(
+          entryDiagnostic(
+            'invalid_input',
+            'registry_field_invalid',
+            'the schema reference integrity is not a bounded W3C SRI value',
+            `schemaURIs.${index}.integrity`,
+          ),
+        )
+        compatible = false
+        return
+      }
+    }
 
     const metadata: Record<string, unknown> = {}
     if (reference.meta !== undefined) {
@@ -299,6 +506,27 @@ function readSchemaReferences(
     if (reference.unknownMembers !== undefined) {
       metadata.unknownMembers = reference.unknownMembers
     }
+    if (Object.keys(metadata).length > 0) {
+      let serialized: string | undefined
+      try {
+        serialized = JSON.stringify(metadata)
+      } catch {
+        serialized = undefined
+      }
+      if (serialized === undefined || Buffer.byteLength(serialized, 'utf8') > MAX_METADATA_BYTES) {
+        diagnostics.push(
+          entryDiagnostic(
+            'limit',
+            'registry_field_limit',
+            `the schema reference metadata exceeds the registry's ${MAX_METADATA_BYTES}-byte limit`,
+            `schemaURIs.${index}.metadata`,
+          ),
+        )
+        compatible = false
+        return
+      }
+    }
+
     references.push({
       formatIdentifier: reference.formatIdentifier,
       uri: parsed.href,
@@ -430,18 +658,22 @@ export function previewCatalogEntry(
   const conformance = applySourceConformance(baseConformance, sourceConformance)
 
   const schemaReferences = readSchemaReferences(canonical, limits, diagnostics)
+  const fieldsCompatible = checkAttestationFields(canonical, diagnostics)
+  const name = deriveName(entry, canonical)
+  const description = deriveDescription(entry, canonical)
+  const productCompatible = checkDerivedFields(name, description, diagnostics)
 
   return {
     index,
     structuralStatus: 'valid',
-    compatible: schemaReferences.compatible,
+    compatible: schemaReferences.compatible && fieldsCompatible && productCompatible,
     profile,
     conformance,
     sourceConformance,
     diagnostics,
     schemaReferences: schemaReferences.references,
-    name: deriveName(entry, canonical),
-    description: deriveDescription(entry, canonical),
+    name,
+    description,
     id: canonical.id ?? null,
     version: canonical.version,
     canonical,

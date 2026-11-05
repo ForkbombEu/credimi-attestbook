@@ -119,8 +119,10 @@ export function createHttpsTransport(): ImportHttpTransport {
         }
       }
 
+      const hostnameForHeader =
+        isIP(request.hostname) === 6 ? `[${request.hostname}]` : request.hostname
       const hostHeader =
-        request.port === 443 ? request.hostname : `${request.hostname}:${request.port}`
+        request.port === 443 ? hostnameForHeader : `${hostnameForHeader}:${request.port}`
       const client = httpsRequest(
         {
           method: 'GET',
@@ -238,7 +240,11 @@ export async function fetchImportDocument(
   const deadline = monotonicNow() + limits.totalTimeoutMs
 
   for (;;) {
-    const target = await resolveImportTarget(current, resolver)
+    const beforeResolve = deadline - monotonicNow()
+    if (beforeResolve <= 0) {
+      throw importError('timeout', 'the remote document request exceeded its total time budget')
+    }
+    const target = await resolveImportTarget(current, resolver, { timeoutMs: beforeResolve })
     const remaining = deadline - monotonicNow()
     if (remaining <= 0) {
       throw importError('timeout', 'the remote document request exceeded its total time budget')

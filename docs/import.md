@@ -31,7 +31,7 @@ Implemented by #30:
   (`sourceUrl`, retrieval time, adapter kind, byte length, SHA-256 of the exact source
   bytes, envelope shape, profile, conformance and a separate source conformance claim);
 - authenticated import of a compatible preview as draft rulebooks, including their
-  attestation type and schema references, in one registry transaction per rulebook.
+  attestation type and schema references, in one registry transaction for the whole source.
 
 Deliberately **not** in #30:
 
@@ -65,8 +65,11 @@ const result = await importer.import(bearerToken, source)
 - `preview(source)` is read-only and returns `ImportPreview`.
 - `import(token, source)` authenticates the bearer token **before** any network request,
   re-runs the preview, refuses the whole source if any entry is incompatible, and then
-  creates one draft rulebook per entry through `Registry.createRulebook`. Source URL and
-  provenance are stored on the rulebook; provenance never enters a standards document.
+  creates one draft rulebook per entry through `Registry.createRulebooks`, which wraps the
+  whole source in one transaction. The preview applies the registry's input limits too, so
+  an entry the registry would refuse is already marked incompatible and nothing is written.
+  Source URL and provenance are stored on the rulebook; provenance never enters a standards
+  document.
 
 `ImportPreview` contains:
 
@@ -114,7 +117,7 @@ in code before any registry write:
 | Control | Implementation |
 | --- | --- |
 | Safe URL validation | absolute `https` only, default port 443, no embedded credentials, bounded length; fragments are stripped |
-| SSRF prevention | IP literals are checked; DNS names are resolved once and **every** answer must be public (loopback, private, link-local, CGNAT, multicast, reserved, documentation, 6to4/NAT64 ranges are blocked, including IPv4-mapped IPv6); a mixed public/private answer is rejected |
+| SSRF prevention | IP literals are checked; DNS names are resolved once under the total fetch deadline and **every** answer must be public (loopback, private, link-local, CGNAT, multicast, reserved, documentation, 6to4/NAT64 ranges are blocked, including IPv4-mapped IPv6); a mixed public/private answer is rejected |
 | DNS rebinding | the transport connects to the resolved address and uses the original hostname only for TLS SNI and the `Host` header; it does not let the HTTP stack resolve the hostname a second time |
 | Redirect policy | manual redirects, at most 3, each target re-validated and re-resolved under the same rules; a non-https or private redirect is refused before it is fetched |
 | Network timeouts | 10 s per request and 15 s total across redirects |

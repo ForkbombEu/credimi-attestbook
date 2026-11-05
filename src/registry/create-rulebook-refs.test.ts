@@ -81,6 +81,50 @@ describe('createRulebook with attestation schema references', () => {
     expect(auditActions).toContain('schema_ref.create')
   })
 
+  test('creates several rulebooks in one transaction', () => {
+    const { fixture, token } = setup()
+
+    const rulebooks = fixture.registry.createRulebooks(token.secret, [
+      input({ name: 'First Rulebook' }),
+      input({ name: 'Second Rulebook' }),
+    ])
+
+    expect(rulebooks).toHaveLength(2)
+    expect(fixture.registry.listRulebooks()).toHaveLength(2)
+    expect(rulebooks.map((rulebook) => rulebook.name)).toEqual([
+      'First Rulebook',
+      'Second Rulebook',
+    ])
+  })
+
+  test('refuses the whole batch when a later entry is invalid', () => {
+    const { fixture, token } = setup()
+
+    expectRegistryError(
+      () =>
+        fixture.registry.createRulebooks(token.secret, [
+          input({ name: 'First Rulebook' }),
+          input({
+            name: 'Second Rulebook',
+            attestations: [
+              {
+                name: 'Gym Membership Card',
+                attestationLoS: 'iso_18045_basic',
+                bindingType: 'key',
+                schemaReferences: [
+                  { formatIdentifier: 'dc+sd-jwt', uri: 'https://example.org/a.json' },
+                  { formatIdentifier: 'dc+sd-jwt', uri: 'https://example.org/b.json' },
+                ],
+              },
+            ],
+          }),
+        ]),
+      'invalid_input',
+    )
+
+    expect(fixture.registry.listRulebooks()).toHaveLength(0)
+  })
+
   test('refuses duplicate format identifiers and leaves no rulebook', () => {
     const { fixture, token } = setup()
 

@@ -11,6 +11,7 @@
 // Re-import idempotency and conflict detection are issue #31; this slice only
 // creates the initial draft.
 
+import { isRegistryError } from '../registry/errors'
 import type { Registry } from '../registry/registry'
 import type { JsonObject, Rulebook } from '../registry/types'
 
@@ -140,9 +141,22 @@ export class RulebookImporter {
     }
 
     const importedAt = this.now()
-    const rulebooks = preview.entries.map((entry) =>
-      this.registry.createRulebook(accessToken, toCreateRulebookInput(entry, preview, importedAt)),
-    )
+    const inputs = preview.entries.map((entry) => toCreateRulebookInput(entry, preview, importedAt))
+
+    let rulebooks
+    try {
+      // One transaction for the whole source: a registry refusal cannot leave
+      // earlier entries behind as partial drafts.
+      rulebooks = this.registry.createRulebooks(accessToken, inputs)
+    } catch (error) {
+      if (isRegistryError(error) && (error.code === 'invalid_input' || error.code === 'conflict')) {
+        throw importError(
+          'import_rejected',
+          'the registry refused the imported rulebook content; no rulebook was written',
+        )
+      }
+      throw error
+    }
 
     return { preview, rulebooks }
   }
