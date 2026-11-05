@@ -5,6 +5,8 @@
 // time, redirect chain, parsed JSON shape and schema-reference fan-out before
 // the document reaches the standards adapter or the registry.
 
+import { MAX_RULEBOOKS_PER_BATCH } from '../registry/validation'
+
 /** Complete set of limits applied to one import. */
 export interface ImportLimits {
   /** Maximum accepted document size in bytes, before JSON parsing. */
@@ -85,5 +87,10 @@ export function resolveImportLimits(overrides: ImportLimitOverrides = {}): Impor
     throw new RangeError('import limit requestTimeoutMs must not exceed totalTimeoutMs')
   }
 
-  return limits
+  // The registry's atomic batch is the ceiling for one import; clamping here
+  // keeps the preview's compatibility report consistent with the commit.
+  return {
+    ...limits,
+    maxCatalogEntries: Math.min(limits.maxCatalogEntries, MAX_RULEBOOKS_PER_BATCH),
+  }
 }

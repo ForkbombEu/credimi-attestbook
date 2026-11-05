@@ -45,6 +45,7 @@ export {
 
 export {
   createHttpsTransport,
+  type CreateHttpsTransportOptions,
   type ImportHttpRequest,
   type ImportHttpResponse,
   type ImportHttpTransport,

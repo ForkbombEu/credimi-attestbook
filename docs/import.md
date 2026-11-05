@@ -181,6 +181,9 @@ Offline fixtures and injected transport/resolver keep the suite deterministic:
 - `src/import/http.test.ts` — JSON content type, oversized body, public redirects, private
   and non-https redirect refusal, redirect limit, HTTP status, timeout, blocked initial URL
   never reaching the transport;
+- `src/import/http-transport.test.ts` — the real TLS transport against a local self-signed
+  server: pinned address/`Host`, certificate mismatch rejection, streaming byte cap,
+  per-request timeout and redirects returned without being followed;
 - `src/import/json.test.ts` — invalid JSON/UTF-8, byte/depth/node/string limits,
   `__proto__` rejection, UTF-8 BOM;
 - `src/import/preview.test.ts` — valid TS11 and OWF documents, SIROS `data` / FIDES

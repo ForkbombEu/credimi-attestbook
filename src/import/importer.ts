@@ -71,7 +71,10 @@ function toCreateRulebookInput(
     throw importError('import_rejected', 'the import entry has no validated document')
   }
 
-  const name = entry.name ?? `Imported rulebook ${entry.version ?? entry.index}`.slice(0, 200)
+  if (entry.name === null) {
+    throw importError('import_rejected', 'the import entry has no derived rulebook name')
+  }
+  const name = entry.name
 
   return {
     name,

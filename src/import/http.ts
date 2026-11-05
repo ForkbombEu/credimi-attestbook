@@ -1,42 +1,28 @@
 // Bounded HTTPS retrieval for untrusted rulebook imports.
 //
 // Fetching has its own transport seam so tests can exercise redirect, size,
-// timeout and content-type policy offline. The production transport connects to
-// the address resolved and validated by `url.ts` and passes the original
-// hostname only as TLS SNI/Host, which prevents a second DNS lookup from
-// reaching an internal address (DNS rebinding).
+// timeout and content-type policy offline. The production transport lives in
+// `transport.ts`: it connects to the address resolved and validated by
+// `url.ts` and passes the original hostname only as TLS SNI, which prevents a
+// second DNS lookup from reaching an internal address (DNS rebinding).
 
-import type { IncomingHttpHeaders } from 'node:http'
-import { request as httpsRequest } from 'node:https'
-import { isIP } from 'node:net'
-
-import { ImportError, importError, isImportError } from './errors'
 import type { ImportLimits } from './limits'
+import {
+  createHttpsTransport,
+  type ImportHttpResponse,
+  type ImportHttpTransport,
+} from './transport'
 import { resolveImportTarget, validateImportUrl, type HostResolver } from './url'
+import { importError, isImportError } from './errors'
 
-/** One already-validated HTTP request handed to a transport. */
-export interface ImportHttpRequest {
-  readonly url: URL
-  readonly hostname: string
-  readonly address: string
-  readonly family: 4 | 6
-  readonly port: number
-  readonly timeoutMs: number
-  readonly maxBytes: number
-}
+export type {
+  CreateHttpsTransportOptions,
+  ImportHttpRequest,
+  ImportHttpResponse,
+  ImportHttpTransport,
+} from './transport'
+export { createHttpsTransport }
 
-/** A bounded HTTP response; redirects are returned, never followed here. */
-export interface ImportHttpResponse {
-  readonly status: number
-  readonly headers: Readonly<Record<string, string>>
-  readonly body: Uint8Array
-  readonly url: URL
-}
-
-/** Injectable HTTP transport used by the fetcher. */
-export type ImportHttpTransport = (request: ImportHttpRequest) => Promise<ImportHttpResponse>
-
-/** A successfully retrieved import document. */
 export interface FetchedImportDocument {
   readonly requestedUrl: string
   readonly finalUrl: string
@@ -65,139 +51,6 @@ const ACCEPTED_CONTENT_TYPES = new Set([
   'text/json',
   'text/plain',
 ])
-
-function normalizeHeaders(headers: IncomingHttpHeaders): Record<string, string> {
-  const normalized: Record<string, string> = {}
-  for (const [name, value] of Object.entries(headers)) {
-    if (value === undefined) {
-      continue
-    }
-    normalized[name.toLowerCase()] = Array.isArray(value) ? value.join(', ') : value
-  }
-  return normalized
-}
-
-function mapTransportError(error: unknown): ImportError {
-  if (isImportError(error)) {
-    return error
-  }
-  const code = (error as NodeJS.ErrnoException | undefined)?.code
-  if (code === 'ETIMEDOUT' || code === 'ESOCKETTIMEDOUT' || code === 'ABORT_ERR') {
-    return importError('timeout', 'the remote document request timed out')
-  }
-  return importError('fetch_failed', 'the remote document could not be retrieved')
-}
-
-/**
- * Production transport. It connects to the pinned `address`, presents the
- * original hostname for certificate validation and SNI, and enforces the
- * per-request timeout and byte cap while streaming the body.
- */
-export function createHttpsTransport(): ImportHttpTransport {
-  return (request) =>
-    new Promise<ImportHttpResponse>((resolve, reject) => {
-      let settled = false
-      let timer: ReturnType<typeof setTimeout> | undefined
-      const clearTimer = (): void => {
-        if (timer !== undefined) {
-          clearTimeout(timer)
-          timer = undefined
-        }
-      }
-      const fail = (error: ImportError): void => {
-        if (!settled) {
-          settled = true
-          clearTimer()
-          reject(error)
-        }
-      }
-      const succeed = (response: ImportHttpResponse): void => {
-        if (!settled) {
-          settled = true
-          clearTimer()
-          resolve(response)
-        }
-      }
-
-      const hostnameForHeader =
-        isIP(request.hostname) === 6 ? `[${request.hostname}]` : request.hostname
-      const hostHeader =
-        request.port === 443 ? hostnameForHeader : `${hostnameForHeader}:${request.port}`
-      const client = httpsRequest(
-        {
-          method: 'GET',
-          hostname: request.address,
-          family: request.family,
-          port: request.port,
-          path: `${request.url.pathname}${request.url.search}`,
-          ...(isIP(request.hostname) === 0 ? { servername: request.hostname } : {}),
-          headers: {
-            Host: hostHeader,
-            Accept: 'application/json, application/*+json;q=0.9, text/plain;q=0.8, */*;q=0.1',
-            'User-Agent': 'AttestBook/0.1 (+https://github.com/ForkbombEu/credimi-attestbook)',
-            'Accept-Encoding': 'identity',
-            Connection: 'close',
-          },
-          timeout: request.timeoutMs,
-        },
-        (response) => {
-          const status = response.statusCode ?? 0
-          const headers = normalizeHeaders(response.headers)
-          const declaredLength = headers['content-length']
-          if (declaredLength !== undefined && Number(declaredLength) > request.maxBytes) {
-            response.destroy()
-            fail(
-              importError(
-                'response_too_large',
-                `the remote document exceeds the ${request.maxBytes}-byte limit`,
-              ),
-            )
-            return
-          }
-
-          const chunks: Buffer[] = []
-          let total = 0
-          response.on('data', (chunk: Buffer) => {
-            total += chunk.length
-            if (total > request.maxBytes) {
-              response.destroy()
-              fail(
-                importError(
-                  'response_too_large',
-                  `the remote document exceeds the ${request.maxBytes}-byte limit`,
-                ),
-              )
-              return
-            }
-            chunks.push(chunk)
-          })
-          response.on('end', () => {
-            succeed({
-              status,
-              headers,
-              body: Buffer.concat(chunks),
-              url: request.url,
-            })
-          })
-          response.on('error', (error: Error) => fail(mapTransportError(error)))
-        },
-      )
-
-      // The socket timeout below covers a stalled transfer; this timer also
-      // covers a connect/TLS handshake that never assigns a socket deadline.
-      timer = setTimeout(() => {
-        client.destroy()
-        fail(importError('timeout', 'the remote document request timed out'))
-      }, request.timeoutMs)
-
-      client.on('timeout', () => {
-        client.destroy()
-        fail(importError('timeout', 'the remote document request timed out'))
-      })
-      client.on('error', (error: Error) => fail(mapTransportError(error)))
-      client.end()
-    })
-}
 
 function isAcceptedContentType(raw: string | null): boolean {
   if (raw === null || raw.trim() === '') {
@@ -275,7 +128,7 @@ export async function fetchImportDocument(
       try {
         next = validateImportUrl(new URL(location, current).href, limits)
       } catch (error) {
-        if (error instanceof ImportError) {
+        if (isImportError(error)) {
           throw error
         }
         throw importError('invalid_url', 'a redirect target is not a valid https URL')

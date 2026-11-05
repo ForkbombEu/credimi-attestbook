@@ -653,6 +653,9 @@ export function previewCatalogEntry(
 
   const canonical = parsed.value
   const strict = validateSchemaMetaDocument(entry, { profile })
+  // Keep the adapter's own preserved/not-tested findings so a downgraded
+  // classification names what was preserved outside the pinned baseline.
+  diagnostics.push(...parsed.diagnostics.map(toDiagnostic))
   const baseConformance: ConformanceClassification =
     profile === TS11_PROFILE && strict.ok ? 'conformant_subset' : 'partial'
   const conformance = applySourceConformance(baseConformance, sourceConformance)

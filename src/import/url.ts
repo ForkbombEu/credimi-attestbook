@@ -224,6 +224,11 @@ function isBlockedIpv6(address: string): boolean {
   if (first !== undefined && (first & 0xffc0) === 0xfec0) return true
   if (first !== undefined && (first & 0xff00) === 0xff00) return true
 
+  // 100::/64 discard, 3fff::/20 documentation, 5f00::/16.
+  if (first === 0x0100 && second === 0) return true
+  if (first !== undefined && (first & 0xfff0) === 0x3ff0) return true
+  if (first === 0x5f00) return true
+
   // 2001:db8::/32 documentation, 2002::/16 6to4, 2001::/32 Teredo and the
   // 2001:10::/28 / 2001:20::/28 ORCHID ranges (not public unicast targets).
   if (first === 0x2001 && second === 0x0db8) return true
@@ -343,7 +348,9 @@ export async function resolveImportTarget(
     }
   }
 
-  const chosen = addresses[0]
+  // Prefer a validated IPv4 answer when one exists; a host without an IPv6
+  // route would otherwise fail even though a public IPv4 path is available.
+  const chosen = addresses.find((record) => record.family === 4) ?? addresses[0]
   if (chosen === undefined) {
     throw importError('dns_failure', 'the import hostname resolved to no addresses')
   }
