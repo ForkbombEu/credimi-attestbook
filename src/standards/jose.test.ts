@@ -449,6 +449,114 @@ describe('strict JOSE verification', () => {
     ])
   })
 
+  test('a forged signature with a TS11 payload is invalid, not unsupported', async () => {
+    const signerKey = await createTestKey()
+    const verifierKey = await createTestKey()
+    const jws = await craftJws(
+      headerWith(),
+      { ...buildTs11Document(), iat: 1_700_000_000 },
+      signerKey.signer,
+    )
+
+    expect(
+      failureDiagnostics(
+        await verifySchemaMetaJws({
+          jws,
+          verifier: verifierKey.verifier,
+          algorithm: 'ES256',
+          keyId: 'kid-1',
+        }),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_signature',
+      }),
+    ])
+  })
+
+  test('a forged signature with an envelope payload is invalid, not unsupported', async () => {
+    const signerKey = await createTestKey()
+    const verifierKey = await createTestKey()
+    const jws = await craftJws(
+      headerWith(),
+      { iss: 'https://catalogue.example', iat: 1_700_000_000, data: [] },
+      signerKey.signer,
+    )
+
+    expect(
+      failureDiagnostics(
+        await verifySchemaMetaJws({
+          jws,
+          verifier: verifierKey.verifier,
+          algorithm: 'ES256',
+          keyId: 'kid-1',
+        }),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_signature',
+      }),
+    ])
+  })
+
+  test('a forbidden header with a TS11 payload is invalid, not unsupported', async () => {
+    const key = await createTestKey()
+    const jws = await craftJws(
+      headerWith({ crit: ['exp'] }),
+      { ...buildTs11Document(), iat: 1_700_000_000 },
+      key.signer,
+    )
+
+    expect(
+      failureDiagnostics(
+        await verifySchemaMetaJws({
+          jws,
+          verifier: key.verifier,
+          algorithm: 'ES256',
+          keyId: 'kid-1',
+        }),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_jose_header',
+        path: 'header.crit',
+      }),
+    ])
+  })
+
+  test('an OWF-like payload without rulebookIntegrity is invalid input', async () => {
+    const key = await createTestKey()
+    const jws = await craftJws(
+      headerWith(),
+      {
+        version: '1.0.0',
+        rulebookURI: 'https://example.com/rulebook.md',
+        iat: 1_700_000_000,
+      },
+      key.signer,
+    )
+
+    expect(
+      failureDiagnostics(
+        await verifySchemaMetaJws({
+          jws,
+          verifier: key.verifier,
+          algorithm: 'ES256',
+          keyId: 'kid-1',
+        }),
+      ),
+    ).toEqual([
+      expect.objectContaining({
+        kind: 'invalid_input',
+        code: 'invalid_schema_meta',
+        path: 'payload',
+      }),
+    ])
+  })
+
   test('reports a TS11 catalogue envelope as an unsupported operation', async () => {
     const key = await createTestKey()
     const jws = await craftJws(

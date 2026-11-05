@@ -9,7 +9,6 @@
 
 import {
   signSchemaMeta,
-  validateSchemaMeta,
   verifySchemaMeta,
   type SignOptions,
   type VerifyOptions,
@@ -25,9 +24,8 @@ import {
   type AdapterDiagnostic,
   type AdapterResult,
 } from './diagnostics'
-import { OWF_PROFILE, TS11_PROFILE, type CanonicalSchemaMeta } from './model'
+import { OWF_PROFILE, type CanonicalSchemaMeta } from './model'
 import { buildOwfSchemaMeta, parseOwfSchemaMeta } from './owf'
-import { detectProfile } from './profiles'
 
 /** Algorithms the wrapper allows. ES256 is the default and the preferred one. */
 export const ALLOWED_JWS_ALGORITHMS = [
@@ -133,25 +131,21 @@ function decodeJsonPart(part: string): Record<string, unknown> | undefined {
 }
 
 /**
- * Recognises a signed payload that is TS11-shaped rather than an OWF
- * `SchemaMeta`. OWF verifies only its own profile, so these payloads must be
- * reported as an unsupported operation, not as malformed input.
+ * Classifies a payload for which OWF already verified the signature but then
+ * rejected it as a `SchemaMeta`. Only explicit TS11 discriminators qualify;
+ * anything else is invalid input, not a missing capability.
  */
 function classifyUnsupportedPayload(
   payload: Record<string, unknown>,
 ): AdapterDiagnostic | undefined {
-  if (validateSchemaMeta(payload).valid) {
-    return undefined
-  }
-  if (Array.isArray(payload.data) && typeof payload.iss === 'string') {
+  if (Array.isArray(payload.data) && typeof payload.iss === 'string' && 'iat' in payload) {
     return unsupportedOperation(
       'unsupported_ts11_envelope',
       'the TS11 v1.0.1 catalogue list envelope {iss, iat, data} is not supported; OWF verifies only the OWF SchemaMeta compact JWS',
       'payload',
     )
   }
-  const detected = detectProfile(payload)
-  if (detected.ok && detected.value === TS11_PROFILE) {
+  if (Array.isArray(payload.supportedFormats)) {
     return unsupportedOperation(
       'unsupported_profile',
       'TS11 v1.0.1 SchemaMeta JWS verification is not supported; OWF verifies only its own SchemaMeta profile',
@@ -159,6 +153,20 @@ function classifyUnsupportedPayload(
     )
   }
   return undefined
+}
+
+function normalizeRawHeader(rawHeader: Record<string, unknown>): {
+  alg: string
+  typ: string
+  kid: string
+  x5c: string[]
+} {
+  return {
+    alg: typeof rawHeader.alg === 'string' ? rawHeader.alg : '',
+    typ: typeof rawHeader.typ === 'string' ? rawHeader.typ : '',
+    kid: typeof rawHeader.kid === 'string' ? rawHeader.kid : '',
+    x5c: Array.isArray(rawHeader.x5c) ? (rawHeader.x5c as string[]) : [],
+  }
 }
 
 /** Decodes a compact JWS without verifying it. Never use the result as evidence. */
@@ -425,20 +433,35 @@ export async function verifySchemaMetaJws(
     return fail(decoded.diagnostics)
   }
 
-  const unsupportedPayload = classifyUnsupportedPayload(decoded.value.payload)
-  if (unsupportedPayload !== undefined) {
-    return fail([...diagnostics, unsupportedPayload])
-  }
-
   let verified: Awaited<ReturnType<typeof verifySchemaMeta>>
   try {
     verified = await verifySchemaMeta({ jws: options.jws, verifier: options.verifier })
   } catch (error) {
     const message = errorMessage(error)
-    const code = message.includes('SchemaMeta payload')
-      ? 'invalid_schema_meta'
-      : 'invalid_signature'
-    return fail([...diagnostics, invalidInput(code, message, 'jws')])
+    if (message.includes('Invalid signature')) {
+      return fail([...diagnostics, invalidInput('invalid_signature', message, 'jws')])
+    }
+    if (message.includes('Invalid SchemaMeta payload')) {
+      // OWF verifies the signature before it parses the payload, so this branch
+      // is reached only for a valid signature. Apply the header policy first,
+      // then decide whether the payload is unsupported or simply invalid.
+      const rawHeaderDiagnostics = [
+        ...checkForbiddenHeaderMembers(decoded.value.header),
+        ...checkHeader(normalizeRawHeader(decoded.value.header), {
+          algorithm: options.algorithm,
+          keyId: options.keyId,
+        }),
+      ]
+      if (rawHeaderDiagnostics.length > 0) {
+        return fail([...diagnostics, ...rawHeaderDiagnostics])
+      }
+      const unsupportedPayload = classifyUnsupportedPayload(decoded.value.payload)
+      if (unsupportedPayload !== undefined) {
+        return fail([...diagnostics, unsupportedPayload])
+      }
+      return fail([...diagnostics, invalidInput('invalid_schema_meta', message, 'payload')])
+    }
+    return fail([...diagnostics, invalidInput('invalid_signature', message, 'jws')])
   }
 
   const headerDiagnostics = [

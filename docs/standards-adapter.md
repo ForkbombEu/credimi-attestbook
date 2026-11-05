@@ -172,10 +172,12 @@ of the real package:
 
 TS11 catalogue response signing uses a `{ iss, iat, data }` list envelope that OWF does not
 implement. It is an unsupported operation in this adapter; only bare OWF-profile
-`SchemaMeta` JWS is supported. On verification, a payload that is not a valid OWF
-`SchemaMeta` is checked for the TS11 envelope shape and then for the TS11 profile: those
-cases return `unsupported_ts11_envelope` or `unsupported_profile`, while a payload that
-matches neither remains `invalid_schema_meta`.
+`SchemaMeta` JWS is supported. On verification, OWF checks the signature first. The header policy then runs, and only
+when the signature and header are acceptable is a rejected payload checked for the TS11
+envelope shape and then for an explicit `supportedFormats` discriminator: those cases
+return `unsupported_ts11_envelope` or `unsupported_profile`, while a payload that matches
+neither remains `invalid_schema_meta`. A forged signature or forbidden header is always
+`invalid_input`, never an unsupported operation.
 
 ## 7. Unsupported functions
 
@@ -212,7 +214,9 @@ silently approximated:
   wrong `kid`, wrong algorithm, missing `x5c`, wrong `typ`, `crit`/`b64`/`jwk`/`jku`/`x5u`,
   multi-certificate entries, `alg: none`, a synthesised `iat` that OWF accepts but the
   adapter rejects, a signed TS11 catalogue envelope and a signed bare TS11 document
-  reported as unsupported, and an invalid OWF payload reported as invalid input;
+  reported as unsupported, forged signatures over TS11/envelope payloads and forbidden
+  headers reported as invalid input, and an invalid OWF payload reported as
+  `invalid_schema_meta`;
 - SRI resolution through OWF: matching content, mismatching content, `verifyIntegrity:
   false` reported `not_tested`, the `maxExtendsDepth` ceiling, sha384 unsupported,
   unsupported formats and resolver failures;
