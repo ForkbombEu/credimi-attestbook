@@ -259,6 +259,12 @@ not by this plan.
 | `auth_tokens` | Provisional write credentials | Only a hash is stored; bound to a provider (D-10) |
 | `schema_migrations` | Applied migration bookkeeping | Append-only |
 
+The #28 implementation lives in `src/db/`, `src/registry/` and
+`migrations/0001_registry.sql`. Its concrete columns,
+stable identifiers, standards-metadata boundary and authorization model are documented in
+[`docs/registry.md`](registry.md); #29 adds the version and artifact tables beside this
+draft-level registry rather than merging standards bytes into the product columns.
+
 ### 5.3 Storage rules
 
 - Enable `PRAGMA journal_mode = WAL`, `PRAGMA foreign_keys = ON` and a busy timeout.
