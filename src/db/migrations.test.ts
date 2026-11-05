@@ -137,10 +137,26 @@ describe('registry migrations', () => {
         database
           .query(
             `INSERT INTO providers (id, name, publication_authority, metadata_json, created_at)
+             VALUES ('provider-duplicate', 'Provider', 'account-1', '{}', ?)`,
+          )
+          .run(FIXED_NOW),
+      ).toThrow(/UNIQUE constraint/i)
+
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO providers (id, name, publication_authority, metadata_json, created_at)
              VALUES ('provider-2', 'Provider', 'account-2', '[]', ?)`,
           )
           .run(FIXED_NOW),
       ).toThrow(/CHECK constraint/i)
+
+      database
+        .query(
+          `INSERT INTO providers (id, name, publication_authority, metadata_json, created_at)
+           VALUES ('provider-2', 'Provider', 'account-2', '{}', ?)`,
+        )
+        .run(FIXED_NOW)
 
       database
         .query(
@@ -149,14 +165,26 @@ describe('registry migrations', () => {
         )
         .run(FIXED_NOW, FIXED_NOW)
 
-      expect(() =>
-        database
-          .query(
-            `INSERT INTO attestations (id, rulebook_id, name, attestation_los, binding_type, created_at)
-             VALUES ('attestation-2', 'rulebook-1', 'Same', 'iso_18045_high', 'key', ?)`,
-          )
-          .run(FIXED_NOW),
-      ).not.toThrow()
+      database
+        .query(
+          `INSERT INTO rulebooks (id, provider_id, name, applicable_spec, created_at, updated_at)
+           VALUES ('rulebook-2', 'provider-1', 'Other Rulebook', 'ts11@1.0.1', ?, ?)`,
+        )
+        .run(FIXED_NOW, FIXED_NOW)
+
+      database
+        .query(
+          `INSERT INTO attestations (id, rulebook_id, name, attestation_los, binding_type, created_at)
+           VALUES ('attestation-1', 'rulebook-1', 'Same', 'iso_18045_high', 'key', ?)`,
+        )
+        .run(FIXED_NOW)
+
+      database
+        .query(
+          `INSERT INTO attestations (id, rulebook_id, name, attestation_los, binding_type, created_at)
+           VALUES ('attestation-2', 'rulebook-2', 'Same', 'iso_18045_high', 'key', ?)`,
+        )
+        .run(FIXED_NOW)
 
       expect(() =>
         database
@@ -166,6 +194,25 @@ describe('registry migrations', () => {
           )
           .run(FIXED_NOW),
       ).toThrow(/UNIQUE constraint/i)
+
+      // A schema reference must point at an attestation of its own rulebook.
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO schema_refs (id, rulebook_id, attestation_id, format_identifier, uri, created_at)
+             VALUES ('schema-ref-cross', 'rulebook-1', 'attestation-2', 'dc+sd-jwt', 'https://example.org/schema.json', ?)`,
+          )
+          .run(FIXED_NOW),
+      ).toThrow(/FOREIGN KEY/i)
+
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO schema_refs (id, rulebook_id, attestation_id, format_identifier, uri, created_at)
+             VALUES ('schema-ref-valid', 'rulebook-1', 'attestation-1', 'dc+sd-jwt', 'https://example.org/schema.json', ?)`,
+          )
+          .run(FIXED_NOW),
+      ).not.toThrow()
     } finally {
       database.close()
     }

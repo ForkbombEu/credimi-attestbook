@@ -13,6 +13,7 @@ import type {
   CreateAttestationInput,
   CreateRulebookInput,
   JsonObject,
+  UpdateProviderInput,
   UpdateRulebookInput,
 } from './types'
 
@@ -134,6 +135,14 @@ describe('provider provisioning and authentication', () => {
     expect(updated.name).toBe('Renamed Provider')
     expect(registry.getProvider(second.provider.id)?.name).toBe('Provider b')
 
+    // Publication authority is operator-assigned; even an extra runtime field
+    // cannot change it through the update path.
+    const attempted = registry.updateProvider(first.token.secret, {
+      name: 'Renamed Provider',
+      publicationAuthority: 'account-b',
+    } as unknown as UpdateProviderInput)
+    expect(attempted.publicationAuthority).toBe(first.provider.publicationAuthority)
+
     const rulebook = registry.createRulebook(first.token.secret, {
       name: 'Owned Rulebook',
       applicableSpec: 'ts11@1.0.1',
@@ -190,6 +199,38 @@ describe('rulebook persistence', () => {
     expect(attestations.map((entry) => entry.name)).toEqual(['PID', 'Pseudonym'])
     expect(attestations[0]?.supportedFormats).toEqual(['dc+sd-jwt'])
     expect(attestations[1]?.supportedFormats).toEqual(['dc+sd-jwt', 'mso_mdoc'])
+  })
+
+  test('normalizes absolute http(s) URLs before storing them', () => {
+    const { registry } = setup()
+    const { token } = provision('a')
+    const rulebook = registry.createRulebook(token.secret, {
+      name: 'URLs',
+      applicableSpec: 'ts11@1.0.1',
+      sourceUrl: 'HTTPS://Example.ORG/Catalog',
+    })
+    expect(rulebook.sourceUrl).toBe('https://example.org/Catalog')
+
+    const reference = registry.addSchemaReference(token.secret, rulebook.id, {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: 'HTTPS://Example.ORG/schema.json',
+    })
+    expect(reference.uri).toBe('https://example.org/schema.json')
+  })
+
+  test('stores a detached JSON copy of internal metadata', () => {
+    const { registry } = setup()
+    const { token } = provision('a')
+    const metadata = { nested: { value: 1 } }
+    const rulebook = registry.createRulebook(token.secret, {
+      name: 'Detached metadata',
+      applicableSpec: 'ts11@1.0.1',
+      metadata,
+    })
+
+    metadata.nested.value = 2
+    expect(rulebook.metadata).toEqual({ nested: { value: 1 } })
+    expect(registry.getRulebook(rulebook.id)?.metadata).toEqual({ nested: { value: 1 } })
   })
 
   test('updates drafts, clears optional fields and leaves unchanged rows untouched', () => {
@@ -366,6 +407,38 @@ describe('attestation types and schema references', () => {
     registry.removeAttestation(token.secret, rulebook.id, attestation.id)
     expect(registry.listSchemaReferences(rulebook.id)).toEqual([])
     expect(registry.listAttestations(rulebook.id)).toEqual([])
+  })
+
+  test('audits schema references removed together with their attestation', () => {
+    const { registry, database } = setup()
+    const { token } = provision('a')
+    const rulebook = registry.createRulebook(token.secret, {
+      name: 'Cascade audit',
+      applicableSpec: 'ts11@1.0.1',
+      attestations: [{ name: 'PID', attestationLoS: 'iso_18045_high', bindingType: 'key' }],
+    })
+    const attestation = registry.listAttestations(rulebook.id)[0]
+    if (attestation === undefined) {
+      throw new Error('expected the created attestation')
+    }
+    registry.addSchemaReference(token.secret, rulebook.id, {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: 'https://example.org/schema.json',
+      attestationId: attestation.id,
+    })
+
+    registry.removeAttestation(token.secret, rulebook.id, attestation.id)
+
+    expect(registry.listSchemaReferences(rulebook.id)).toEqual([])
+    const audit = database
+      .query<{ action: string; detail_json: string | null }, []>(
+        "SELECT action, detail_json FROM audit_log WHERE action = 'schema_ref.delete'",
+      )
+      .all()
+    expect(audit).toHaveLength(1)
+    expect(JSON.parse(audit[0]?.detail_json ?? '{}')).toMatchObject({
+      reason: 'attestation.delete',
+    })
   })
 
   test('rejects duplicate attestation names and schema format identifiers', () => {

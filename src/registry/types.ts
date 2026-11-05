@@ -160,7 +160,6 @@ export interface UpdateRulebookInput {
 
 export interface UpdateProviderInput {
   readonly name?: string
-  readonly publicationAuthority?: string
   readonly metadata?: JsonObject
 }
 

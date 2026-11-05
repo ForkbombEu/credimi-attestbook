@@ -121,10 +121,6 @@ export class Registry {
       ...existing,
       name:
         input.name === undefined ? existing.name : requireText(input.name, 'name', MAX_NAME_LENGTH),
-      publicationAuthority:
-        input.publicationAuthority === undefined
-          ? existing.publicationAuthority
-          : requireText(input.publicationAuthority, 'publicationAuthority', MAX_NAME_LENGTH),
       metadata:
         input.metadata === undefined
           ? existing.metadata
@@ -512,11 +508,18 @@ export class Registry {
     const actor = this.authenticate(accessToken)
     const rulebook = this.requireOwnedDraft(actor, rulebookId)
     const existing = this.requireAttestation(rulebook.id, attestationId)
+    const attachedReferences = this.store
+      .listSchemaReferences(rulebook.id)
+      .filter((reference) => reference.attestationId === existing.id)
 
     this.database.transaction(() => {
+      const at = this.now()
+      for (const reference of attachedReferences) {
+        this.deleteSchemaReferenceWithAudit(actor, reference, at, 'attestation.delete')
+      }
       this.store.deleteAttestation(existing.id)
       this.store.insertAudit({
-        at: this.now(),
+        at,
         actorProviderId: actor.providerId,
         action: 'attestation.delete',
         entityType: 'attestation',
@@ -637,19 +640,32 @@ export class Registry {
     const existing = this.requireSchemaReference(rulebook.id, schemaReferenceId)
 
     this.database.transaction(() => {
-      this.store.deleteSchemaReference(existing.id)
-      this.store.insertAudit({
-        at: this.now(),
-        actorProviderId: actor.providerId,
-        action: 'schema_ref.delete',
-        entityType: 'schema_ref',
-        entityId: existing.id,
-        detail: { rulebookId: rulebook.id, formatIdentifier: existing.formatIdentifier },
-      })
+      this.deleteSchemaReferenceWithAudit(actor, existing, this.now(), 'explicit')
     })()
   }
 
   // ------------------------------------------------------------------ helpers
+
+  private deleteSchemaReferenceWithAudit(
+    actor: AuthenticatedActor,
+    reference: SchemaReference,
+    at: string,
+    reason: 'explicit' | 'attestation.delete',
+  ): void {
+    this.store.deleteSchemaReference(reference.id)
+    this.store.insertAudit({
+      at,
+      actorProviderId: actor.providerId,
+      action: 'schema_ref.delete',
+      entityType: 'schema_ref',
+      entityId: reference.id,
+      detail: {
+        rulebookId: reference.rulebookId,
+        formatIdentifier: reference.formatIdentifier,
+        reason,
+      },
+    })
+  }
 
   private requireRulebook(id: string): Rulebook {
     const rulebook = this.store.getRulebook(requireIdentifier(id, 'rulebookId'))

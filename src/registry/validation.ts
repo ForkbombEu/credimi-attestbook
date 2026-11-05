@@ -121,7 +121,14 @@ export function requireJsonObject(value: unknown, field: string): JsonObject {
   if (Buffer.byteLength(serialized, 'utf8') > MAX_METADATA_BYTES) {
     throw invalidInput(`${field} must serialize to at most ${MAX_METADATA_BYTES} bytes`)
   }
-  return value as JsonObject
+
+  const parsed: unknown = JSON.parse(serialized)
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw invalidInput(`${field} must serialize to a JSON object`)
+  }
+  // Return the serialized copy so callers cannot mutate stored metadata after
+  // the write and the returned value matches exactly what the database holds.
+  return parsed as JsonObject
 }
 
 /**
@@ -144,7 +151,9 @@ export function requireAbsoluteHttpUrl(value: unknown, field: string): string {
   if (parsed.username !== '' || parsed.password !== '') {
     throw invalidInput(`${field} must not embed credentials`)
   }
-  return raw
+  // Store the parsed form: it lowercases the scheme/host and guarantees the
+  // value matches the schema's case-sensitive http(s) check.
+  return parsed.href
 }
 
 export function requireStringArray(

@@ -217,16 +217,11 @@ export class RegistryStore {
   }
 
   updateProvider(provider: Provider): void {
+    // publication_authority is operator-assigned and intentionally immutable
+    // through the service; only the display name and internal metadata change.
     this.database
-      .query(
-        'UPDATE providers SET name = ?, publication_authority = ?, metadata_json = ? WHERE id = ?',
-      )
-      .run(
-        provider.name,
-        provider.publicationAuthority,
-        JSON.stringify(provider.metadata),
-        provider.id,
-      )
+      .query('UPDATE providers SET name = ?, metadata_json = ? WHERE id = ?')
+      .run(provider.name, JSON.stringify(provider.metadata), provider.id)
   }
 
   deleteProvider(id: string): void {

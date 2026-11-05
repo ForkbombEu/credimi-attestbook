@@ -13,7 +13,10 @@ CREATE TABLE providers (
   name TEXT NOT NULL CHECK (length(trim(name)) > 0),
   -- Opaque account binding used for publication authority. Never inferred from
   -- a remote URL (FR-003); provisioning is an operator action (D-10).
-  publication_authority TEXT NOT NULL CHECK (length(trim(publication_authority)) > 0),
+  -- Operator-assigned account binding; unique and immutable through the
+  -- service so a provider cannot self-assert another account's authority.
+  publication_authority TEXT NOT NULL UNIQUE
+    CHECK (length(trim(publication_authority)) > 0),
   metadata_json TEXT NOT NULL DEFAULT '{}'
     CHECK (json_valid(metadata_json) AND json_type(metadata_json) = 'object'),
   created_at TEXT NOT NULL
@@ -67,7 +70,10 @@ CREATE TABLE attestations (
   metadata_json TEXT NOT NULL DEFAULT '{}'
     CHECK (json_valid(metadata_json) AND json_type(metadata_json) = 'object'),
   created_at TEXT NOT NULL,
-  UNIQUE (rulebook_id, name)
+  UNIQUE (rulebook_id, name),
+  -- Parent key for the composite schema_refs foreign key, so a reference can
+  -- never point at an attestation that belongs to a different rulebook.
+  UNIQUE (id, rulebook_id)
 );
 
 CREATE INDEX attestations_rulebook_id_idx ON attestations (rulebook_id);
@@ -75,14 +81,17 @@ CREATE INDEX attestations_rulebook_id_idx ON attestations (rulebook_id);
 CREATE TABLE schema_refs (
   id TEXT PRIMARY KEY,
   rulebook_id TEXT NOT NULL REFERENCES rulebooks (id) ON DELETE CASCADE,
-  attestation_id TEXT REFERENCES attestations (id) ON DELETE CASCADE,
+  attestation_id TEXT,
   format_identifier TEXT NOT NULL CHECK (length(trim(format_identifier)) > 0),
-  uri TEXT NOT NULL CHECK (length(trim(uri)) > 0),
+  uri TEXT NOT NULL
+    CHECK (uri GLOB 'https://*' OR uri GLOB 'http://*'),
   integrity TEXT,
   metadata_json TEXT NOT NULL DEFAULT '{}'
     CHECK (json_valid(metadata_json) AND json_type(metadata_json) = 'object'),
   created_at TEXT NOT NULL,
-  UNIQUE (rulebook_id, format_identifier)
+  UNIQUE (rulebook_id, format_identifier),
+  FOREIGN KEY (attestation_id, rulebook_id)
+    REFERENCES attestations (id, rulebook_id) ON DELETE CASCADE
 );
 
 CREATE INDEX schema_refs_rulebook_id_idx ON schema_refs (rulebook_id);
