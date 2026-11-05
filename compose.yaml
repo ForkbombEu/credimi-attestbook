@@ -8,6 +8,12 @@ services:
     environment:
       HOST: 0.0.0.0
       PORT: 3000
+      DATABASE_PATH: /data/attestbook.sqlite
     ports:
       - '3000:3000'
+    volumes:
+      - attestbook-data:/data
     restart: unless-stopped
+
+volumes:
+  attestbook-data:

@@ -12,8 +12,10 @@ RUN bun run build
 FROM oven/bun:1.3.1 AS runtime
 ENV NODE_ENV=production
 ENV HOST=0.0.0.0
+ENV DATABASE_PATH=/data/attestbook.sqlite
 WORKDIR /app
 COPY --from=build --chown=bun:bun /app/dist ./dist
+RUN mkdir -p /data && chown bun:bun /data
 USER bun
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

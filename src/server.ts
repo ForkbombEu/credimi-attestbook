@@ -1,8 +1,17 @@
 import { createApp } from './app'
 import { loadConfig } from './config'
+import { openDatabase } from './db/database'
+import { applyMigrations } from './db/migrations'
+import { Registry } from './registry'
+import { CredentialValidator } from './validation'
 
 const config = loadConfig()
-const app = createApp()
+const database = openDatabase(config.databasePath)
+applyMigrations(database)
+
+const registry = new Registry({ database })
+const validation = new CredentialValidator({ source: registry })
+const app = createApp({ validation })
 
 const server = Bun.serve({
   hostname: config.hostname,
@@ -16,7 +25,10 @@ function shutdown(signal: 'SIGINT' | 'SIGTERM'): void {
   console.log(`received ${signal}, shutting down`)
   server
     .stop()
-    .then(() => process.exit(0))
+    .then(() => {
+      database.close()
+      process.exit(0)
+    })
     .catch((error: unknown) => {
       console.error('failed to stop the HTTP server cleanly', error)
       process.exit(1)
