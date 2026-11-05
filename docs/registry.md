@@ -1,15 +1,20 @@
-# AttestBook registry — persistence, identifiers and authorization
+# AttestBook registry — persistence, identifiers, authorization and immutable versions
 
-**Status:** Phase 1 registry slice implemented by [issue #28](https://github.com/ForkbombEu/credimi-attestbook/issues/28).
-It provides a persistent SQLite registry for providers, rulebooks, attestation types, schema
-references, write credentials and an audit trail. It is **not** the HTTP contract, the
-publication/versioning lifecycle or a conformance claim.
+**Status:** Phase 1 registry and versioning slices implemented by
+[issue #28](https://github.com/ForkbombEu/credimi-attestbook/issues/28) and
+[issue #29](https://github.com/ForkbombEu/credimi-attestbook/issues/29).
+They provide a persistent SQLite registry for providers, rulebooks, attestation types, schema
+references, write credentials and an audit trail, plus draft/published/historical rulebook
+versions with content-addressed artifacts, SHA-256 digests, provenance and immutable
+publication. They are **not** the HTTP contract, the import pipeline, validation or a
+conformance claim.
 
-**Authoritative spec:** [`docs/specification.md`](specification.md) (FR-001, FR-003, §13, §15, §17)
-**Decisions:** [`docs/implementation-plan.md`](implementation-plan.md) D-7 (SQLite) and D-10
-(provisional product authentication)
+**Authoritative spec:** [`docs/specification.md`](specification.md) (FR-001, FR-002, FR-003,
+FR-008, §13, §15, §17)
+**Decisions:** [`docs/implementation-plan.md`](implementation-plan.md) D-7 (SQLite), D-6
+(content digest) and D-10 (provisional product authentication)
 **Architecture:** [`docs/architecture.md`](architecture.md) §6 (authorization and ownership),
-§7 (domain model) and §10 (persistence tradeoffs)
+§7 (domain model), §9 (reproducibility and content digest) and §10 (persistence tradeoffs)
 
 ## 1. Scope and boundaries
 
@@ -25,14 +30,26 @@ Implemented by #28:
   enforcement for every mutation;
 - an audit trail for privileged mutations.
 
-Deliberately **not** in #28:
+Implemented by #29 (`migrations/0002_versions_artifacts.sql`):
 
-- published/draft version rows, content digests, content-addressed artifacts and provenance
-  snapshots — issue #29;
+- draft, published and historical rulebook versions with a per-rulebook SemVer label;
+- content-addressed artifacts: a version's exact snapshot bytes are stored once under their
+  SHA-256 digest;
+- digest verification and version-specific retrieval by `(rulebookId, version)` and by
+  content digest;
+- immutable published and historical versions, enforced by service checks **and** SQLite
+  triggers that reject `UPDATE`/`DELETE`;
+- version provenance recorded on every version and a publication audit entry recording who
+  published which digest under which profile, and which versions were superseded.
+
+Deliberately **not** in #28/#29:
+
 - URL/JSON import, fetch hardening and re-import idempotency — issues #30/#31;
+- credential validation against a version — issues #32/#33;
 - the versioned REST API and generated OpenAPI — issue #34;
 - protected HTTP write routes, rate limits and API security documentation — issue #35;
-- publication UI and the rulebook editor — Phase 2.
+- publication UI, rulebook editor and version comparison/diff UI — Phase 2 and issue #37;
+- semantic content canonicalization — explicitly out of scope (D-6, R-17).
 
 Until #34 wires these services into the HTTP application, the database is not opened by
 `src/server.ts`; the services are exercised directly by tests and are the intended seam for
@@ -60,22 +77,26 @@ SHA-256 checksum. The runner:
 - refuses a database that records a migration this build does not know, instead of silently
   running a downgraded schema.
 
-Initial tables:
+Initial tables (`0001_registry`) and version tables (`0002_versions_artifacts`):
 
 | Table | Purpose | Integrity rules |
 | --- | --- | --- |
 | `providers` | Attestation Scheme Provider and publication-authority account binding | unique, operator-assigned, non-empty authority; JSON-object metadata |
 | `auth_tokens` | Provisional write credentials | only a SHA-256 token hash is stored; provider-scoped, revocable |
 | `rulebooks` | Stable rulebook identity and product metadata | provider foreign key; status ∈ draft/published/historical; JSON-object provenance/metadata |
+| `rulebook_versions` | Draft/published/historical snapshots of a rulebook | unique `(rulebook_id, version)`; digest required; artifact foreign key; status and `published_at` must agree |
+| `artifacts` | Content-addressed exact snapshot bytes | `digest` primary key; bytes never updated or deleted |
 | `attestations` | Attestation types owned by a rulebook | unique `(rulebook_id, name)`; formats stored as JSON array |
 | `schema_refs` | Format identifier, URI and SRI value | one format per attestation type (and separately one per rulebook-level scope); an optional attestation must belong to the same rulebook |
-| `audit_log` | Privileged mutation trail | action, actor provider (nullable for bootstrap), entity and timestamp |
+| `audit_log` | Privileged mutation and publication trail | actor, action, entity and timestamp |
 | `schema_migrations` | Applied migration bookkeeping | version, checksum and application timestamp |
 
-`rulebook_versions` and `artifacts` are intentionally deferred to #29. The draft work in #28
-is kept consistent with that future model: stable rulebook identity and product metadata live
-in `rulebooks`; versioned standards bytes and digests will be added alongside it, not merged
-into these product columns.
+The version tables are immutable where it matters: `artifacts` rejects `UPDATE` and `DELETE`
+outright, `rulebook_versions` rejects `UPDATE`/`DELETE` once a row is published or
+historical, and the only accepted transition for a published row is `published → historical`
+when a newer version is published. The initial schema deliberately keeps stable rulebook
+identity and product metadata in `rulebooks`; versioned content is stored beside it in
+`rulebook_versions` and `artifacts`, never merged into the product columns.
 
 ## 3. Stable identifiers
 
@@ -86,20 +107,25 @@ resource**:
 | --- | --- | --- |
 | Provider | `providers.id` | Never derived from a name, URL or contact detail; survives account renames |
 | Rulebook | `rulebooks.id` | The stable AttestBook identity; it is not the TS11 `SchemaMeta.id` and does not change when the rulebook name, source URL or metadata changes |
+| Rulebook version | `(rulebook_id, version)` | The version label is unique per rulebook; `rulebook_versions.id` is an internal opaque UUID and content changes create a new digest or a new version, never a new identity |
+| Artifact | `artifacts.digest` | The SHA-256 of the exact bytes; content-addressed, so the identity *is* the content |
 | Attestation type | `attestations.id` | Stable within its rulebook; name changes do not create a new identity |
 | Schema reference | `schema_refs.id` | Stable within its rulebook; URI/integrity updates do not create a new identity |
 | Write token | `auth_tokens.id` | Stable public token handle; the raw bearer secret is separate and shown only once |
 
 The default generator is UUID v4 (`crypto.randomUUID()`), created inside the service, and
-callers cannot supply or override provider/rulebook/attestation/schema-reference IDs. Database
-primary keys are the only identity authority; SQLite row ids are insertion order and are not
-exposed.
+callers cannot supply or override provider/rulebook/attestation/schema-reference/version IDs.
+Database primary keys are the only identity authority; SQLite row ids are insertion order and
+are not exposed. Version labels are caller-supplied but validated and unique per rulebook; a
+content digest is not a label, it identifies exact bytes.
 
 The TS11 v1.0.1 `SchemaMeta.id` is a **per-version wire value** (server-assigned UUID, TS11
 §4.3.1) and is not the same thing as the AttestBook rulebook id. The standards adapter in
 `src/standards/` keeps the canonical wire document and product
-metadata (`ProductMetadata`) as separate types; #29 stores a version's exact wire document and
-digest next to, not instead of, this stable product identity.
+metadata (`ProductMetadata`) as separate types; #29 stores a version's exact snapshot
+document and digest next to, not instead of, this stable product identity. The snapshot is an
+internal AttestBook artifact, not a TS11 wire document; import (#30) supplies the bytes that
+become exportable standards content.
 
 ## 4. Standards metadata boundary
 
@@ -112,7 +138,9 @@ stores three classes of data separately:
 | `attestationLoS`, `bindingType`, `supportedFormats[]` | TS11/ETSI values (extensible data, D-5) | typed columns + JSON array | Yes, only through the standards adapter |
 | `schema_refs.format_identifier`, `uri`, `integrity` | TS11 `Schema` values / W3C SRI | typed columns | Yes, only through the standards adapter |
 | `applicableSpec` (e.g. `ts11@1.0.1`) | AttestBook profile baseline | column | No: it identifies which profile a version is written against |
-| `sourceUrl`, `provenance_json` | AttestBook provenance | column / JSON | No |
+| `sourceUrl`, `provenance_json` (rulebook and version) | AttestBook provenance | column / JSON | No |
+| version snapshot bytes (`artifacts.bytes`) | Versioned content artifact (internal, deterministic JSON) | content-addressed BLOB | No: it is not a TS11/OWF document and is never exported as one |
+| `content_digest`, `published_at`, `rulebook_versions.status` | AttestBook product state | typed columns | No |
 | `metadata_json` on providers, rulebooks, attestations and schema references | AttestBook-internal metadata | JSON column | No |
 | `publicationStatus`, timestamps, ownership, `auth_tokens`, `audit_log` | AttestBook product state | typed columns/tables | No |
 
@@ -140,21 +168,32 @@ provisional product model of D-10. The service enforces it, not the UI or a rout
    HTTP route. The publication authority is case-insensitively unique and cannot be changed
    through the service, so a provider cannot self-assert another account's authority (FR-003).
 2. **Writes require a bearer token.** `issueToken`, `updateProvider`, `deleteProvider` and
-   every rulebook/attestation/schema mutation authenticate the token. Tokens use the `att_`
-   prefix, 256 random bits and a SHA-256 hash at rest; the raw secret is returned once at
+   every rulebook/attestation/schema/version mutation authenticate the token. Tokens use the
+   `att_` prefix, 256 random bits and a SHA-256 hash at rest; the raw secret is returned once at
    issuance and cannot be recovered from the database.
 3. **Ownership is checked on the stored resource.** A mutation loads the rulebook and requires
    its `provider_id` to equal the authenticated actor's provider. The create input has no
    provider field, so a caller cannot create a rulebook for another provider. Cross-provider
    attempts fail with `forbidden`, and token management is scoped to the actor's provider.
-4. **Reads are public.** Provider and rulebook catalogue reads (including attestations and
-   schema references) require no token, mirroring the public-read requirement of TS11 §5.2.1.
-5. **Draft-only mutation.** Published and historical rulebooks reject updates and deletes with
-   `immutable`. #29 owns the draft→published→historical lifecycle; until then publication
-   status cannot be changed through the service.
-6. **Mutations are audited.** Creates, updates, deletes, token issuance and revocation write
-   an `audit_log` row with the acting provider (or `null` for operator provisioning). Removing
-   an attestation type deletes its schema references explicitly and records
+4. **Reads are public.** Provider and rulebook catalogue reads (including attestations,
+   schema references, versions, version content and digest verification) require no token,
+   mirroring the public-read requirement of TS11 §5.2.1.
+5. **Draft-only rulebook content.** Rulebook, attestation and schema-reference mutations
+   require the rulebook to be `draft`; `published` and `historical` rulebooks reject them with
+   `immutable`. Publishing a version sets the rulebook to `published`; creating the next draft
+   version reopens the working copy to `draft` while every published version stays frozen. A
+   rulebook with published or historical versions cannot be deleted, even while its working
+   copy is a draft.
+6. **Version mutations follow the lifecycle.** `createRulebookVersion` and
+   `refreshDraftRulebookVersion` accept only the owning provider; `publishRulebookVersion`
+   requires the stored snapshot to still match the rulebook's current content. Draft rows may
+   be refreshed; published and historical rows are immutable in the service *and* in the
+   database. See §6.
+7. **Mutations are audited.** Creates, updates, deletes, token issuance and revocation write
+   an `audit_log` row with the acting provider (or `null` for operator provisioning). Version
+   creation, refresh and publication write `version.create`, `version.refresh` and
+   `version.publish` rows; a publication row records the digest, profile and superseded
+   versions. Removing an attestation type deletes its schema references explicitly and records
    `schema_ref.delete` rows with reason `attestation.delete` before the attestation row.
    Deleting a rulebook likewise records an explicit `schema_ref.delete` and
    `attestation.delete` row for each child (reason `rulebook.delete`) before the rulebook row.
@@ -166,7 +205,84 @@ authentication; those are #35 concerns, and the single-writer SQLite limitation 
 in the implementation plan (R-6, D-7). Secrets, token hashes and payload metadata are never
 logged by this module.
 
-## 6. Validation and failure model
+## 6. Versions, artifacts, digests and publication
+
+### 6.1 Lifecycle
+
+A rulebook starts `draft` and has no versions until the provider freezes one. A version moves
+`draft → published → historical`; the rulebook's own `publicationStatus` reflects the working
+copy:
+
+| Operation | Requires | Effect |
+| --- | --- | --- |
+| `createRulebookVersion(rulebookId, { version, provenance? })` | owning provider; rulebook not `historical`; unique SemVer label | snapshots current content as a `draft` version; reopens a `published` rulebook to `draft` |
+| `refreshDraftRulebookVersion(rulebookId, version)` | owning provider; version is `draft` | re-snapshots current content and updates the digest; no-op for identical content |
+| `publishRulebookVersion(rulebookId, version)` | owning provider; version is `draft`; stored digest matches current content | freezes the version as `published`, demotes previously published versions to `historical`, sets the rulebook to `published` |
+| `deleteRulebook(rulebookId)` | owning provider; rulebook is `draft` and has no published/historical versions | deletes draft versions; published/historical rows can never be deleted |
+
+`historical` is only produced by supersession: a version that was never published cannot jump
+straight to `historical`, so the status always means "published once, superseded since". Version
+labels are numeric `MAJOR.MINOR` or `MAJOR.MINOR.PATCH` (architecture §9; TS11 §4.5.1);
+prerelease and build suffixes are not accepted yet.
+
+Publishing a stale snapshot is refused with `conflict`: `publishRulebookVersion` recomputes the
+digest of the rulebook's current content and compares it with the stored version digest. The
+provider must call `refreshDraftRulebookVersion` explicitly, so a version is never published
+with content that changed after the provider froze it.
+
+### 6.2 Content digest and artifact
+
+The version's content is a deterministic JSON snapshot of the rulebook's content at freeze
+time: format marker, rulebook id, version label, profile (`specVersion`), name, description,
+source URL, attestation types with their schema references, and rulebook-level schema
+references. Internal metadata, provenance, provider identity and timestamps are deliberately
+excluded from the bytes; they live on the row. The bytes have media type
+`application/vnd.attestbook.rulebook-version+json` and are stored once in `artifacts`, keyed by
+their lowercase hex SHA-256 digest (D-6). Because the serializer fixes field order, the same
+stored state produces the same bytes and digest.
+
+This is byte-exact reproducibility, not semantic canonicalization: a re-serialized source JSON
+with a different key order or whitespace is different content and gets a different digest
+(known limitation R-17). The snapshot is an internal artifact, not a TS11/OWF wire document;
+import (#30) supplies the exact bytes that become the exportable standards artifact, reusing
+the same content-addressed store.
+
+### 6.3 Retrieval, verification and provenance
+
+- `getRulebookVersion(rulebookId, version)` and `listRulebookVersions(rulebookId)` return the
+  version rows publicly.
+- `getRulebookVersionContent(rulebookId, version)` returns the exact stored bytes and media
+  type; a consumer can verify them with its own SHA-256 implementation.
+- `verifyRulebookVersionDigest(rulebookId, version)` recomputes the digest over the stored
+  bytes and reports `expectedDigest`, `actualDigest` and `verified`.
+- `findRulebookVersionsByDigest(digest)` retrieves versions by content digest, which is how a
+  validation run or export references the exact bytes it used (FR-002).
+- `RulebookVersion.provenance` records version provenance. Creation defaults to the rulebook's
+  provenance or accepts explicit provenance; publication is recorded in the audit log with the
+  actor, timestamp, digest, profile and superseded versions, and in `published_at`.
+
+Versions are not exportable yet: the public API (#34) and the detail/version-history UI (#37)
+own export and comparison. Version comparison is also #37; this slice stores the data needed
+for it.
+
+### 6.4 Immutability enforcement
+
+Immutability does not depend on the caller using the service.
+`migrations/0002_versions_artifacts.sql` adds triggers that:
+
+- reject every `UPDATE` and `DELETE` on `artifacts`, so a digest can never disagree with its
+  bytes;
+- reject `UPDATE`/`DELETE` on `rulebook_versions` rows whose stored status is `published` or
+  `historical`, except the status-only `published → historical` transition;
+- reject a second transition or a downgrade back to `draft`.
+
+Tests exercise both the service checks and direct SQL attempts; a rejected mutation leaves the
+database unchanged. Artifacts are append-only: deleting a draft rulebook removes its draft
+version rows but does not reclaim artifact bytes, because there is no safe way to delete
+content-addressed bytes in this slice. Garbage collection is not implemented; retention is an
+operator concern until a slice adds it explicitly.
+
+## 7. Validation and failure model
 
 Inputs are validated and bounded before SQL: non-empty trimmed text, maximum lengths, JSON
 objects only (with a serialized-size limit), `http(s)` URLs without embedded credentials,
@@ -187,38 +303,50 @@ parsing messages:
 | `unauthorized` | missing, unknown or revoked bearer token |
 | `forbidden` | authenticated provider does not own the resource |
 | `not_found` | resource does not exist (or is not part of the named rulebook) |
-| `conflict` | duplicate attestation name/schema format, or provider still owns rulebooks |
-| `immutable` | mutation of a published or historical rulebook |
+| `conflict` | duplicate attestation name, schema format or version label; stale draft snapshot at publication; provider still owns rulebooks |
+| `immutable` | mutation of a published or historical rulebook/version, or of a stored artifact |
 
 Messages never include token values, hashes or raw payloads.
 
-## 7. Verification
+## 8. Verification
 
 The implementation is covered by real temporary SQLite files (not in-memory fakes):
 
 - `src/db/migrations.test.ts` — migration from an empty
   database, idempotent re-run, checksum and unknown-version rejection, WAL/foreign-key
-  enforcement, orphan/duplicate/malformed-row rejection.
+  enforcement, orphan/duplicate/malformed-row rejection, and schema-level rejection of
+  artifact updates/deletes and published/historical version mutations.
 - `src/registry/registry.test.ts` — provisioning and
   hashed-token storage, issue/revoke, rulebook and attestation/schema CRUD, persistence across
   a database reopen, cascades, audit entries, invalid writes, duplicate conflicts, immutable
   published/historical state and invalid identifiers.
+- `src/registry/versions.test.ts` — deterministic snapshot bytes and digest, provenance,
+  version-specific retrieval by label and by digest, digest verification, artifact dedupe,
+  draft refresh, stale-publication refusal, publication/supersession, persistence across a
+  reopen, unauthorized and cross-provider version mutations, and direct-SQL attempts to
+  overwrite published versions or artifacts.
 - `src/registry/authorization.test.ts` — public reads
   without a token, cross-provider mutation denial for every resource, token scoping and
   unauthorized writes that leave the database unchanged.
 
 Run the suite with `bun run check` (format, lint, strict typecheck and tests). The tests cover
-the #28 acceptance criteria; they do **not** claim HTTP contract coverage (#34), publication
-immutability (#29) or import security (#30).
+the #28/#29 acceptance criteria; they do **not** claim HTTP contract coverage (#34), URL/JSON
+import security (#30) or credential validation (#32). The UI slice (#37) still needs to expose
+version history and comparison.
 
-## 8. Related work
+## 9. Related work
 
 - [`docs/implementation-plan.md`](implementation-plan.md) §5 — persistence decision, schema
-  plan and storage rules.
-- [`docs/traceability.md`](traceability.md) Matrix B — FR-001/FR-003 registry test mapping.
+  plan and storage rules; D-6 for the digest model.
+- [`docs/architecture.md`](architecture.md) §9 — reproducibility, content digest and immutable
+  publication.
+- [`docs/traceability.md`](traceability.md) Matrix B — FR-001/FR-002/FR-003 test mapping.
 - [`docs/standards-adapter.md`](standards-adapter.md) — canonical model, wire codecs and the
   product-metadata boundary used by future version storage.
-- Issues [#29](https://github.com/ForkbombEu/credimi-attestbook/issues/29),
-  [#30](https://github.com/ForkbombEu/credimi-attestbook/issues/30),
-  [#34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) and
-  [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) for the next slices.
+- Issues [#30](https://github.com/ForkbombEu/credimi-attestbook/issues/30) (import),
+  [#31](https://github.com/ForkbombEu/credimi-attestbook/issues/31) (idempotent re-import),
+  [#32](https://github.com/ForkbombEu/credimi-attestbook/issues/32) (validation against a
+  pinned version), [#34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) (REST
+  API), [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) (secure write APIs)
+  and [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (version-history UI)
+  for the next slices.

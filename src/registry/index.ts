@@ -1,13 +1,23 @@
-// Public surface of the AttestBook registry module (issue #28).
+// Public surface of the AttestBook registry module (issues #28 and #29).
 //
-// See docs/registry.md for the stable-identifier, standards-metadata-boundary
-// and authorization rules that this module implements.
+// See docs/registry.md for the stable-identifier, standards-metadata-boundary,
+// authorization and version-immutability rules that this module implements.
 
 export { Registry, type RegistryOptions } from './registry'
 
 export { provisionProvider, type ProvisioningOptions } from './bootstrap'
 
 export { AUTH_TOKEN_HASH_LENGTH, generateBearerToken, hashBearerToken } from './tokens'
+
+export { SHA256_HEX_PATTERN, sha256Hex } from './digest'
+
+export {
+  RULEBOOK_VERSION_FORMAT,
+  RULEBOOK_VERSION_MEDIA_TYPE,
+  type RulebookVersionAttestation,
+  type RulebookVersionDocument,
+  type RulebookVersionSchemaReference,
+} from './versioning'
 
 export {
   conflict,
@@ -31,6 +41,7 @@ export {
   type AuthTokenRecord,
   type CreateAttestationInput,
   type CreateRulebookInput,
+  type CreateRulebookVersionInput,
   type CreateSchemaReferenceInput,
   type IssuedToken,
   type JsonObject,
@@ -40,11 +51,14 @@ export {
   type PublicationStatus,
   type Rulebook,
   type RulebookFilter,
+  type RulebookVersion,
+  type RulebookVersionContent,
   type SchemaReference,
   type UpdateAttestationInput,
   type UpdateProviderInput,
   type UpdateRulebookInput,
   type UpdateSchemaReferenceInput,
+  type VersionDigestVerification,
 } from './types'
 
 export {
@@ -59,4 +73,5 @@ export {
   MAX_STRING_ARRAY_ITEMS,
   MAX_TEXT_LENGTH,
   MAX_URL_LENGTH,
+  MAX_VERSION_LENGTH,
 } from './validation'

@@ -10,6 +10,7 @@ import type { Database } from 'bun:sqlite'
 import { createHash } from 'node:crypto'
 
 import initialRegistry from '../../migrations/0001_registry.sql' with { type: 'text' }
+import versionsAndArtifacts from '../../migrations/0002_versions_artifacts.sql' with { type: 'text' }
 
 export interface Migration {
   /** Stable, ordered version such as `0001_registry`. */
@@ -30,7 +31,10 @@ export interface ApplyMigrationsOptions {
 
 const MIGRATION_VERSION_PATTERN = /^\d{4}_[a-z0-9_]+$/
 
-export const MIGRATIONS: readonly Migration[] = [{ version: '0001_registry', sql: initialRegistry }]
+export const MIGRATIONS: readonly Migration[] = [
+  { version: '0001_registry', sql: initialRegistry },
+  { version: '0002_versions_artifacts', sql: versionsAndArtifacts },
+]
 
 export function migrationChecksum(sql: string): string {
   return createHash('sha256').update(sql, 'utf8').digest('hex')

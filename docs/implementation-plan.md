@@ -260,10 +260,11 @@ not by this plan.
 | `schema_migrations` | Applied migration bookkeeping | Append-only |
 
 The #28 implementation lives in `src/db/`, `src/registry/` and
-`migrations/0001_registry.sql`. Its concrete columns,
-stable identifiers, standards-metadata boundary and authorization model are documented in
-[`docs/registry.md`](registry.md); #29 adds the version and artifact tables beside this
-draft-level registry rather than merging standards bytes into the product columns.
+`migrations/0001_registry.sql`; #29 added the version and artifact tables in
+`migrations/0002_versions_artifacts.sql`. Their concrete columns, stable identifiers,
+standards-metadata boundary, authorization model and version lifecycle are documented in
+[`docs/registry.md`](registry.md): versioned content is stored beside the product columns, not
+merged into them.
 
 ### 5.3 Storage rules
 
