@@ -696,7 +696,7 @@ The machine-readable attestation scheme model (§4.3.1):
 
 | Field | Multiplicity | Type | Normative meaning |
 |-------|--------------|------|-------------------|
-| `id` | [1..1] | string (UUID) | unique schema id assigned by the catalogue server |
+| `id` | [0..1] | string (UUID) | server-assigned schema id; absent from the normative JSON Schema `required` list (the prose table lists it as [1..1], which reflects readOnly server-assignment, not client input) |
 | `version` | [1..1] | string | SemVer schema version |
 | `rulebookURI` | [1..1] | string | URI to the human-readable Attestation Rulebook; may carry `#integrity` (W3C SRI) that the consumer SHALL verify |
 | `trustedAuthorities` | [0..*] | `TrustAuthority[]` | trust model/anchors (X.509 AKI, ETSI Trusted List, OpenID Federation) |
@@ -707,7 +707,7 @@ The machine-readable attestation scheme model (§4.3.1):
 
 Sub-class **`Schema`** (§4.3.2): `formatIdentifier` [1..1] (enumeration above) + `uri` [1..1] (persistent, may carry `#integrity`).
 
-Sub-class **`TrustAuthority`** (§4.3.3): `frameworkType` [1..1] (`aki` | `etsi_tl` | `openid_federation`), `value` [1..1] (base64url AKI, Trusted List URI, or Entity Identifier), `isLoTE` [0..1] (TRUE only for `etsi_tl` pointing at an ETSI TS 119 602 List of Trusted Entities).
+Sub-class **`TrustAuthority`** (§4.3.3): `frameworkType` [1..1] (`aki` | `etsi_tl` | `openid_federation`), `value` [1..1] (base64url AKI, Trusted List URI, or Entity Identifier), `isLOTE` [0..1] (TRUE only for `etsi_tl` pointing at an ETSI TS 119 602 List of Trusted Entities). Note: the normative JSON Schema key is `isLOTE`; the TS11 prose spells it `isLoTE`.
 
 ### 3.3 Format-specific schemas (§4.3.4)
 
@@ -731,7 +731,7 @@ If several formats are supported, the registering entity SHALL provide all schem
 - `DELETE /schemas/{schemaId}` — delete; `204`/`404`. (§5.3.3)
 - OpenAPI 3.1 definition in Annex A.3 (normative). JSON Schemas in Annex A.1 (attributes) and A.2 (attestations) (normative); XML schemas in Annex A.4 (informative).
 - Read access is public (§5.2.1); write/delete is restricted to the authenticated registering entity (§5.2.2, §4.5.3).
-- DDoS/abuse protection is **SHOULD** (§5.4–§5.6), not a normative conformance requirement.
+- DDoS/abuse protection: §5.4 is a **SHALL** ("SHALL take into consideration the vulnerabilities"); the concrete mitigations in §5.5–§5.6 are **SHOULD**.
 
 ### 3.6 Versioning and governance (§4.5)
 
@@ -774,7 +774,7 @@ ARF §5.6.3 states registration of QEAA/PuB-EAA attestation schemes is **"not ma
 **Recommended (SHOULD) / permitted (MAY):**
 
 - Registration of non-qualified EAAs (SHOULD/RECOMMENDED; §4.1, §4.2).
-- DDoS/misuse protections (SHOULD; §5.4–§5.6).
+- DDoS/misuse consideration (SHALL to take vulnerabilities into account; §5.4) and concrete mitigations (SHOULD; §5.5–§5.6).
 - OpenID Federation only for non-qualified EAAs (MAY; §4.3.1).
 - Additional language localisations, `#integrity` suffix (MAY).
 
@@ -835,7 +835,7 @@ AttestBook's validation engine must therefore report schema/attestation-constrai
 2. **ARF vs TS11 registration obligation** — ARF §5.6.3 ("not mandatory") vs TS11 §4.2 ("SHALL be published") vs §4.1 ("SHOULD register"). Ambiguous; do not encode a single hard rule.
 3. **`attestationLoS` → issuer/verifier enforcement** — TS11 gives the enum and points to OpenID4VCI Annex D.2 for the issuance process, but AttestBook's role in *enforcing* LoS at validation time is not defined by TS11; treat as product-level/out-of-scope.
 4. **`TrustAuthority` value semantics** — TS11 defines the field but delegates actual trust resolution to ETSI Trusted Lists / LoTE / OpenID Federation; AttestBook must not claim to perform trust validation solely from this field.
-5. **`isLoTE` deprecation** — TS11 itself notes it "will become unnecessary and shall be deprecated" once OpenID4VCI adds an `etsi_lote` enumeration (§4.3.3 note). Forward-compatibility risk.
+5. **`isLOTE` / `isLoTE` spelling** — the normative JSON Schema key is `isLOTE`; the TS11 prose spells it `isLoTE`. TS11 also notes the field "will become unnecessary and shall be deprecated" once OpenID4VCI adds an `etsi_lote` enumeration (§4.3.3 note). Forward-compatibility risk.
 6. **W3C VCDM profiles** — ARF §5.4 notes ETSI profiles for W3C VCDM are pending; W3C VCDM attestations cannot be used in proximity (ISO/IEC 18013-5). Not yet fully profiled.
 7. **API authorisation mechanics** — TS11 §5.2.2 defers the concrete authorisation mechanism to a future version ("will be defined … into section 5.2.2 in future version"). The PUT/DELETE auth method is unspecified today.
 8. **TS 119 602 (LoTE) and TS 119 605** — both still drafts; LoTE-based trust handling is unstable.
