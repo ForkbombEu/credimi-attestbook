@@ -228,6 +228,7 @@ describe('validateSchemaDocuments with JSON Schema 2020-12', () => {
 
     expect(outcome.status).toBe('FAIL')
     expect(outcome.findings.map((entry) => entry.code)).toContain('invalid_json_schema')
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
   })
 })
 
@@ -420,6 +421,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
 
     expect(outcome.status).toBe('NOT_TESTED')
     expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_dialect')
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
   })
 
   test('reports unknown schema keywords as not tested instead of ignoring them', async () => {
@@ -440,6 +442,48 @@ describe('validateSchemaDocuments integrity and coverage', () => {
 
     expect(outcome.status).toBe('NOT_TESTED')
     expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
+  })
+
+  test('does not execute type metadata with too many declared claims', async () => {
+    const claims = Array.from({ length: 600 }, (_, index) => ({
+      path: [`claim_${index}`],
+    }))
+    const metadata = JSON.stringify({ vct: TEST_VCT, claims })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: TYPE_METADATA_URI,
+      integrity: sha256Sri(metadata),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: TYPE_METADATA_URI, content: metadata }],
+      parsed: await parseOrThrow(await issueTestCredential()),
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('type_metadata_too_complex')
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
+  })
+
+  test('does not execute schema checks over an oversized credential claim set', async () => {
+    const parsed = await parseOrThrow(
+      await issueTestCredential({
+        claims: defaultCredentialClaims({
+          values: Array.from({ length: 5_000 }, (_, index) => index),
+        }),
+        selectiveClaims: [],
+      }),
+    )
+    const outcome = validateSchemaDocuments({
+      references: [typeMetadataReference(PID_TYPE_METADATA_TEXT)],
+      documents: [{ uri: TYPE_METADATA_URI, content: PID_TYPE_METADATA_TEXT }],
+      parsed,
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('credential_claims_too_many')
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
   })
 
   test('reports an unresolved type metadata extends chain as inconclusive', async () => {
@@ -503,7 +547,25 @@ describe('validateSchemaDocuments integrity and coverage', () => {
     expect(outcome.findings.map((entry) => entry.code)).toContain('schema_document_too_deep')
   })
 
-  test('fails a supplied document that is not JSON', async () => {
+  test('fails a supplied document that is not JSON when its pin matches', async () => {
+    const parsed = await parseOrThrow(await issueTestCredential())
+    const content = '{not json'
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: TYPE_METADATA_URI,
+      integrity: sha256Sri(content),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: TYPE_METADATA_URI, content }],
+      parsed,
+    })
+
+    expect(outcome.status).toBe('FAIL')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('invalid_schema_document')
+  })
+
+  test('reports an integrity mismatch before parsing invalid JSON', async () => {
     const parsed = await parseOrThrow(await issueTestCredential())
     const outcome = validateSchemaDocuments({
       references: [typeMetadataReference(PID_TYPE_METADATA_TEXT)],
@@ -512,6 +574,6 @@ describe('validateSchemaDocuments integrity and coverage', () => {
     })
 
     expect(outcome.status).toBe('FAIL')
-    expect(outcome.findings.map((entry) => entry.code)).toContain('invalid_schema_document')
+    expect(outcome.findings.map((entry) => entry.code)).toEqual(['integrity_mismatch'])
   })
 })

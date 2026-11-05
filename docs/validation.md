@@ -126,29 +126,34 @@ interoperable (FR-012, AC-16/AC-17).
 `dc+sd-jwt` is the only format with a structural parser. `mso_mdoc`, `jwt_vc_json`,
 `jwt_vc_json-ld` and `ldp_vc` are recognised from an explicit `format` hint or from the TS11
 baseline (`src/standards/profiles.ts`), reported as recognised, and their parsing/schema/
-attestation dimensions are `NOT_TESTED`. A rulebook that does not list the credential format
-fails the attestation-constraints dimension. No generic JSON validator is presented as mdoc or
-W3C VC support (FR-011).
+attestation dimensions are `NOT_TESTED`. A format backed only by the caller hint and not
+confirmed by parsing is `INCONCLUSIVE`, not `PASS`. A rulebook that does not list the
+credential format fails the attestation-constraints dimension. No generic JSON validator is
+presented as mdoc or W3C VC support (FR-011).
 
 ## 6. Privacy, logging and limits
 
 The engine never logs or persists the credential, disclosures or claim values. The HTTP
 error handler logs only the method, path and error class. Results expose claim paths and
-constraints, not values. Request and document sizes, document count, schema and claim nesting
-depth and enum vocabulary are bounded, and at most 50 JSON Schema violations are returned per
-document. Claim depth is checked before disclosures are unpacked. Each JSON Schema document is
-compiled with a fresh Ajv instance so caller-supplied `$id` state cannot leak between requests.
+constraints, not values. Hard bounds are: 512 KiB credential, four schema documents of 128 KiB,
+4 MiB body, 64-level schema/claim nesting, 1,000 disclosures, 4,096 credential claim nodes,
+512 Type Metadata claims with 32-segment paths, 20,000,000 units of Type Metadata work and 50
+rendered JSON Schema violations. Claim depth is checked before and after disclosures are
+unpacked. Each JSON Schema document is compiled with a fresh Ajv instance so caller-supplied
+`$id` state cannot leak between requests.
 
 ## 7. Verification
 
 Tests execute the real pinned libraries and a real migrated SQLite registry:
 
 - `src/validation/sd-jwt.test.ts` — real SD-JWT VC parsing, disclosure integrity, protected
-  claims, unsupported hash algorithm, key-binding detection, claim-depth bound;
+  claims, unsupported hash algorithm, key-binding detection, claim-depth and disclosure-count
+  bounds;
 - `src/validation/schema.test.ts` — Type Metadata positive/negative attribute checks, JSON
   Schema positive/negative checks, SRI mismatch/unsupported algorithm/missing pin, rejection
   of catastrophic-regex, format, uniqueItems and `$ref` routes, unsupported dialects and
-  unknown keywords, unresolved Type Metadata `extends`, missing documents;
+  unknown keywords, unresolved Type Metadata `extends`, oversized Type Metadata and credential
+  claim sets, missing documents;
 - `src/validation/engine.test.ts` — pinned version/digest evidence, dimension statuses,
   unsupported formats, key binding, digest-tamper abort, version pinning;
 - `src/app.validation.test.ts` — typed HTTP contract, 400/404/413/503 cases, no credential or
@@ -162,3 +167,7 @@ does not claim TS11, ETSI, OpenID4VCI or interoperability conformance. Issue #33
 exhaustive dimension-applicability and non-conflation evidence; issue #30 owns the safe
 remote schema/import fetch that will replace caller-supplied documents; issue #34 owns the
 versioned REST/OpenAPI surface and validation persistence.
+
+A `vct#integrity` claim on the credential is not compared with the supplied Type Metadata in
+this slice; only the rulebook reference `#integrity` is verified. That is part of the
+`CRYPTO (integrity)` dimension and remains `NOT_TESTED`.

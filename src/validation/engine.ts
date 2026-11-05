@@ -294,12 +294,6 @@ export class CredentialValidator {
         ),
       )
     }
-    const formatDimension = dimension(
-      'format_recognition',
-      recognition.recognized ? 'PASS' : 'FAIL',
-      formatFindings,
-    )
-
     let parsed: ParsedSdJwtVc | undefined
     let parsingDimension: ValidationDimension
     if (!recognition.recognized) {
@@ -333,6 +327,25 @@ export class CredentialValidator {
         parsingDimension = dimension('credential_parsing', 'FAIL', outcome.findings)
       }
     }
+
+    let formatStatus: ValidationStatus
+    if (!recognition.recognized) {
+      formatStatus = 'FAIL'
+    } else if (recognition.source === 'hint' && parsed === undefined) {
+      formatStatus = 'INCONCLUSIVE'
+      formatFindings.push(
+        finding(
+          'format_recognition',
+          'format_hint_unconfirmed',
+          'The credential format was taken only from the caller hint and the artifact was not parsed to confirm it.',
+          'warning',
+          '/credential',
+        ),
+      )
+    } else {
+      formatStatus = 'PASS'
+    }
+    const formatDimension = dimension('format_recognition', formatStatus, formatFindings)
 
     let schemaDimension: ValidationDimension
     let schemaReferences: readonly SchemaReferenceEvidence[]

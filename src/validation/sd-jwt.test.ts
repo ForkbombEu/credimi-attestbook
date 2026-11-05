@@ -157,6 +157,20 @@ describe('parseSdJwtVc', () => {
     expect(outcome.findings.map((entry) => entry.code)).toContain('claim_depth_exceeded')
   })
 
+  test('caps the number of disclosures it will unpack', async () => {
+    const credential = await issueTestCredential()
+    const jwt = credential.split('~')[0] ?? ''
+    const disclosures = Array.from({ length: 1_001 }, (_, index) =>
+      encodeSegment([`salt-${index}`, 'unused', index]),
+    ).join('~')
+    const outcome = await parseSdJwtVc(`${jwt}~${disclosures}~`)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    expect(outcome.findings.map((entry) => entry.code)).toContain('too_many_disclosures')
+  })
+
   test('detects a trailing key-binding JWT without verifying it', async () => {
     const credential = await issueTestCredential()
     const header = encodeSegment({ typ: 'kb+jwt', alg: 'ES256' })

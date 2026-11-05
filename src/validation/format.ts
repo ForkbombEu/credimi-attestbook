@@ -22,6 +22,8 @@ export interface FormatRecognition {
   readonly format: string | null
   readonly recognized: boolean
   readonly parserAvailable: boolean
+  /** `hint` means only the caller's declared format backs the recognition. */
+  readonly source: 'detected' | 'hint'
 }
 
 function isCompactJwt(value: string): boolean {
@@ -71,6 +73,7 @@ export function recognizeCredentialFormat(artifact: CredentialArtifact): FormatR
       format: artifact.format,
       recognized: known,
       parserAvailable: known && artifact.format === 'dc+sd-jwt',
+      source: 'hint',
     }
   }
   const detected = detectCredentialFormat(artifact.value)
@@ -78,5 +81,6 @@ export function recognizeCredentialFormat(artifact: CredentialArtifact): FormatR
     format: detected,
     recognized: detected !== null,
     parserAvailable: detected === 'dc+sd-jwt',
+    source: 'detected',
   }
 }

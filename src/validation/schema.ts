@@ -39,6 +39,19 @@ const MAX_SCHEMA_DEPTH = 64
 /** Cap on rendered JSON Schema errors from a single document. */
 const MAX_SCHEMA_ERRORS = 50
 
+/** Bound on credential claim nodes handed to any schema evaluator. */
+const MAX_CREDENTIAL_CLAIM_NODES = 4_096
+
+/** Bound on Type Metadata declaration count and path length. */
+const MAX_TYPE_METADATA_CLAIMS = 512
+const MAX_TYPE_METADATA_PATH_LENGTH = 32
+
+/**
+ * Bound on the O(present claims x metadata claims^2) Type Metadata check. A
+ * pinned 128 KiB metadata document can otherwise describe thousands of paths.
+ */
+const MAX_TYPE_METADATA_WORK = 20_000_000
+
 /**
  * Keywords whose evaluation AttestBook cannot bound yet. `pattern`/`format`
  * run JavaScript regular expressions or format validators over attacker
@@ -123,6 +136,28 @@ export interface ValidateSchemaDocumentsOptions {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+function countNodes(value: unknown, limit: number): number {
+  let count = 0
+  const stack: unknown[] = [value]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    count += 1
+    if (count > limit) {
+      return count
+    }
+    if (Array.isArray(current)) {
+      for (const entry of current) {
+        stack.push(entry)
+      }
+    } else if (isRecord(current)) {
+      for (const entry of Object.values(current)) {
+        stack.push(entry)
+      }
+    }
+  }
+  return count
 }
 
 function exceedsDepth(value: unknown, limit: number, depth = 0): boolean {
@@ -339,6 +374,48 @@ function validateTypeMetadata(
   }
 
   const typeMetadata: TypeMetadataFormat = schema.data
+  const metadataClaims = typeMetadata.claims ?? []
+  const metadataPathTooLong = metadataClaims.some(
+    (claim) => claim.path.length > MAX_TYPE_METADATA_PATH_LENGTH,
+  )
+  if (metadataClaims.length > MAX_TYPE_METADATA_CLAIMS || metadataPathTooLong) {
+    return {
+      reference,
+      kind: 'type_metadata',
+      applied: false,
+      status: 'NOT_TESTED',
+      findings: [
+        finding(
+          'type_metadata_too_complex',
+          `The type metadata declares more than ${MAX_TYPE_METADATA_CLAIMS} claims or a claim path longer than ${MAX_TYPE_METADATA_PATH_LENGTH}; it was not evaluated.`,
+          'warning',
+          `/schemaReferences/${index}`,
+        ),
+      ],
+    }
+  }
+
+  const claimNodes = countNodes(parsed.claims, MAX_CREDENTIAL_CLAIM_NODES)
+  if (
+    claimNodes > MAX_CREDENTIAL_CLAIM_NODES ||
+    claimNodes * metadataClaims.length * metadataClaims.length > MAX_TYPE_METADATA_WORK
+  ) {
+    return {
+      reference,
+      kind: 'type_metadata',
+      applied: false,
+      status: 'NOT_TESTED',
+      findings: [
+        finding(
+          'type_metadata_too_complex',
+          'The credential and type metadata exceed the bounded Type Metadata evaluation budget; schema validation was not executed.',
+          'warning',
+          `/schemaReferences/${index}`,
+        ),
+      ],
+    }
+  }
+
   const findings: ValidationFinding[] = []
   if (typeMetadata.vct !== parsed.vct) {
     findings.push(
@@ -577,6 +654,39 @@ export function validateSchemaDocuments(
   const applications: SchemaApplication[] = []
   const schemaReferences: SchemaReferenceEvidence[] = []
 
+  const claimNodes = countNodes(options.parsed.claims, MAX_CREDENTIAL_CLAIM_NODES)
+  if (claimNodes > MAX_CREDENTIAL_CLAIM_NODES) {
+    for (const [index, reference] of options.references.entries()) {
+      applications.push({
+        reference,
+        kind: null,
+        applied: false,
+        status: 'NOT_TESTED',
+        findings: [
+          finding(
+            'credential_claims_too_many',
+            `The credential carries more than ${MAX_CREDENTIAL_CLAIM_NODES} claim nodes; schema validation was not executed.`,
+            'warning',
+            `/schemaReferences/${index}`,
+          ),
+        ],
+      })
+      schemaReferences.push({
+        formatIdentifier: reference.formatIdentifier,
+        uri: reference.uri,
+        integrity: reference.integrity,
+        kind: null,
+        applied: false,
+      })
+    }
+    return {
+      status: 'NOT_TESTED',
+      findings: applications.flatMap((application) => application.findings),
+      applications,
+      schemaReferences,
+    }
+  }
+
   options.references.forEach((reference, index) => {
     const documentIndex = options.documents.findIndex((entry) => entry.uri === reference.uri)
     const supplied = documentIndex === -1 ? undefined : options.documents[documentIndex]
@@ -605,6 +715,30 @@ export function validateSchemaDocuments(
       return
     }
 
+    const integrity = verifyIntegrity(reference, supplied.content, index)
+    if (integrity.status !== 'verified') {
+      applications.push({
+        reference,
+        kind: null,
+        applied: false,
+        status:
+          integrity.status === 'mismatch'
+            ? 'FAIL'
+            : integrity.status === 'unverified'
+              ? 'INCONCLUSIVE'
+              : 'NOT_TESTED',
+        findings: integrity.findings,
+      })
+      schemaReferences.push({
+        formatIdentifier: reference.formatIdentifier,
+        uri: reference.uri,
+        integrity: reference.integrity,
+        kind: null,
+        applied: false,
+      })
+      return
+    }
+
     let document: unknown
     try {
       document = JSON.parse(supplied.content)
@@ -622,30 +756,6 @@ export function validateSchemaDocuments(
             `/schemaDocuments/${documentIndex}`,
           ),
         ],
-      })
-      schemaReferences.push({
-        formatIdentifier: reference.formatIdentifier,
-        uri: reference.uri,
-        integrity: reference.integrity,
-        kind: null,
-        applied: false,
-      })
-      return
-    }
-
-    const integrity = verifyIntegrity(reference, supplied.content, index)
-    if (integrity.status !== 'verified') {
-      applications.push({
-        reference,
-        kind: null,
-        applied: false,
-        status:
-          integrity.status === 'mismatch'
-            ? 'FAIL'
-            : integrity.status === 'unverified'
-              ? 'INCONCLUSIVE'
-              : 'NOT_TESTED',
-        findings: integrity.findings,
       })
       schemaReferences.push({
         formatIdentifier: reference.formatIdentifier,
@@ -728,7 +838,7 @@ export function validateSchemaDocuments(
       uri: reference.uri,
       integrity: reference.integrity,
       kind,
-      applied: true,
+      applied: application.applied,
     })
   })
 

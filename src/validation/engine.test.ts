@@ -243,8 +243,8 @@ describe('CredentialValidator with a pinned rulebook version', () => {
       request(seeded, { format: 'mso_mdoc', value: 'o2dnb2N0eXBl' }, []),
     )
 
-    expect(result.overallStatus).toBe('NOT_TESTED')
-    expect(dimension(result, 'format_recognition').status).toBe('PASS')
+    expect(result.overallStatus).toBe('INCONCLUSIVE')
+    expect(dimension(result, 'format_recognition').status).toBe('INCONCLUSIVE')
     expect(dimension(result, 'credential_parsing').status).toBe('NOT_TESTED')
     expect(dimension(result, 'schema_validation').status).toBe('NOT_TESTED')
     expect(dimension(result, 'attestation_constraints').status).toBe('NOT_TESTED')

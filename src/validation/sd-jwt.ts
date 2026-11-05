@@ -32,6 +32,9 @@ const RESERVED_MEMBERS = new Set(['_sd', '_sd_alg', '_sd_decoy', '...'])
 /** Depth bound for recursive claim inspection. */
 const MAX_CLAIM_DEPTH = 64
 
+/** Bound on disclosures unpacked by one credential. */
+const MAX_DISCLOSURES = 1_000
+
 const NODE_HASH_ALGORITHMS: Readonly<Record<string, string>> = {
   'sha-256': 'sha256',
   'sha-384': 'sha384',
@@ -289,6 +292,17 @@ export async function parseSdJwtVc(credential: string): Promise<SdJwtParseOutcom
     return invalid([finding('invalid_sd_jwt', describeParseFailure(error), 'error', '/credential')])
   }
 
+  if (decoded.disclosures.length > MAX_DISCLOSURES) {
+    return invalid([
+      finding(
+        'too_many_disclosures',
+        `The credential carries more than ${MAX_DISCLOSURES} disclosures; it was not unpacked.`,
+        'error',
+        '/credential',
+      ),
+    ])
+  }
+
   if (
     exceedsDepth(decoded.jwt.payload, MAX_CLAIM_DEPTH) ||
     decoded.disclosures.some((disclosure) => exceedsDepth(disclosure.value, MAX_CLAIM_DEPTH))
@@ -318,8 +332,29 @@ export async function parseSdJwtVc(credential: string): Promise<SdJwtParseOutcom
     }
     claims = unpacked
   } catch (error) {
+    if (error instanceof RangeError) {
+      return invalid([
+        finding(
+          'claim_depth_exceeded',
+          `The credential claims exceed the ${MAX_CLAIM_DEPTH}-level nesting bound.`,
+          'error',
+          '/credential',
+        ),
+      ])
+    }
     return invalid([
       finding('invalid_disclosures', describeParseFailure(error), 'error', '/credential'),
+    ])
+  }
+
+  if (exceedsDepth(claims, MAX_CLAIM_DEPTH)) {
+    return invalid([
+      finding(
+        'claim_depth_exceeded',
+        `The unpacked credential claims exceed the ${MAX_CLAIM_DEPTH}-level nesting bound.`,
+        'error',
+        '/credential',
+      ),
     ])
   }
 
