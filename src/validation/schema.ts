@@ -36,11 +36,12 @@ const SRI_PATTERN = /^(sha256|sha384|sha512)-([A-Za-z0-9+/=_-]+)$/
 /** Defensive bound before a caller-supplied document reaches Ajv compilation. */
 const MAX_SCHEMA_DEPTH = 64
 
-/** Cap on rendered JSON Schema errors from a single document. */
-const MAX_SCHEMA_ERRORS = 50
-
 /** Bound on credential claim nodes handed to any schema evaluator. */
 const MAX_CREDENTIAL_CLAIM_NODES = 4_096
+
+/** Bound on a single JSON Schema's node count and schema x claim work. */
+const MAX_JSON_SCHEMA_NODES = 2_000
+const MAX_JSON_SCHEMA_WORK = 1_000_000
 
 /** Bound on Type Metadata declaration count and path length. */
 const MAX_TYPE_METADATA_CLAIMS = 512
@@ -162,7 +163,9 @@ function looksLikeJsonSchema(document: Record<string, unknown>): boolean {
  */
 function createAjv(): Ajv2020 {
   return new Ajv2020({
-    allErrors: true,
+    // Stop after the first violation: building every error for an untrusted
+    // schema applied to an attacker-controlled claim set is itself unbounded.
+    allErrors: false,
     strict: false,
     // Reject unknown keywords instead of silently ignoring them: ignoring a
     // constraint would report PASS without evaluating it.
@@ -593,6 +596,7 @@ function validateJsonSchema(
   index: number,
   document: unknown,
   parsed: ParsedSdJwtVc,
+  claimNodes: number,
 ): SchemaApplication {
   if (typeof document !== 'boolean' && !isRecord(document)) {
     return {
@@ -628,6 +632,24 @@ function validateJsonSchema(
           ),
         ],
       }
+    }
+  }
+
+  const schemaNodes = countNodes(document, MAX_JSON_SCHEMA_NODES)
+  if (schemaNodes > MAX_JSON_SCHEMA_NODES || schemaNodes * claimNodes > MAX_JSON_SCHEMA_WORK) {
+    return {
+      reference,
+      kind: 'json_schema',
+      applied: false,
+      status: 'NOT_TESTED',
+      findings: [
+        finding(
+          'json_schema_too_complex',
+          'The supplied JSON Schema and credential exceed the bounded evaluation budget; schema validation was not executed.',
+          'warning',
+          `/schemaReferences/${index}`,
+        ),
+      ],
     }
   }
 
@@ -672,8 +694,7 @@ function validateJsonSchema(
     return { reference, kind: 'json_schema', applied: true, status: 'PASS', findings: [] }
   }
 
-  const errors = validate.errors ?? []
-  const findings = errors.slice(0, MAX_SCHEMA_ERRORS).map((error: AjvErrorLike) => {
+  const findings = (validate.errors ?? []).map((error: AjvErrorLike) => {
     const path =
       error.instancePath === undefined || error.instancePath === '' ? '/' : error.instancePath
     const keyword = error.keyword ?? 'schema'
@@ -685,16 +706,6 @@ function validateJsonSchema(
       keyword,
     )
   })
-  if (errors.length > MAX_SCHEMA_ERRORS) {
-    findings.push(
-      finding(
-        'schema_errors_truncated',
-        `The JSON Schema reported ${errors.length} violations; only the first ${MAX_SCHEMA_ERRORS} are returned.`,
-        'warning',
-        '/claims',
-      ),
-    )
-  }
   return {
     reference,
     kind: 'json_schema',
@@ -911,7 +922,7 @@ export function validateSchemaDocuments(
     const application =
       kind === 'type_metadata'
         ? validateTypeMetadata(reference, index, document, options.parsed)
-        : validateJsonSchema(reference, index, document, options.parsed)
+        : validateJsonSchema(reference, index, document, options.parsed, claimNodes)
 
     const findings = [...integrity.findings, ...application.findings]
     applications.push({

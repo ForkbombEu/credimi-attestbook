@@ -60,7 +60,8 @@ therefore carries `schemaDocuments` with the **exact UTF-8 document text**. The 
   `unsupported_schema_keyword`; unknown keywords and other dialects are also `NOT_TESTED`
   instead of being ignored and reported as validated. A document that mixes a root `vct`
   with JSON Schema keywords is `NOT_TESTED` as `ambiguous_schema_document` because either
-  classification would skip constraints.
+  classification would skip constraints. JSON Schema evaluation is bounded to 2,000 schema
+  nodes and 1,000,000 schema-node × claim-node units, and Ajv stops at the first violation.
 
 A reference with no supplied document makes schema validation `NOT_TESTED`. Supplying an
 unrelated schema cannot widen validation silently.
@@ -126,6 +127,7 @@ interoperable (FR-012, AC-16/AC-17).
 
 ## 5. Unsupported formats
 
+The issuer-signed JWT must carry a `typ` header of `dc+sd-jwt` or `vc+sd-jwt`.
 `dc+sd-jwt` is the only format with a structural parser. `mso_mdoc`, `jwt_vc_json`,
 `jwt_vc_json-ld` and `ldp_vc` are recognised from an explicit `format` hint or from the TS11
 baseline (`src/standards/profiles.ts`), reported as recognised, and their parsing/schema/
@@ -140,9 +142,9 @@ The engine never logs or persists the credential, disclosures or claim values. T
 error handler logs only the method, path and error class. Results expose claim paths and
 constraints, not values. Hard bounds are: 512 KiB credential, four schema documents of 128 KiB,
 4 MiB body, 64-level schema/claim nesting, 1,000 disclosures, 4,096 credential claim nodes,
-512 Type Metadata claims with 32-segment paths, 20,000,000 units of Type Metadata work and 50
-rendered JSON Schema violations. Claim depth is checked before and after disclosures are
-unpacked. Each JSON Schema document is compiled with a fresh Ajv instance so caller-supplied
+512 Type Metadata claims with 32-segment paths, 20,000,000 units of Type Metadata work, 2,000
+JSON Schema nodes, 1,000,000 schema × claim units and one rendered JSON Schema violation per
+document. Claim depth is checked before and after disclosures are unpacked. Each JSON Schema document is compiled with a fresh Ajv instance so caller-supplied
 `$id` state cannot leak between requests.
 
 ## 7. Verification
@@ -170,7 +172,10 @@ This slice does not verify signatures, keys, certificates, status lists or trust
 does not claim TS11, ETSI, OpenID4VCI or interoperability conformance. Issue #33 owns the
 exhaustive dimension-applicability and non-conflation evidence; issue #30 owns the safe
 remote schema/import fetch that will replace caller-supplied documents; issue #34 owns the
-versioned REST/OpenAPI surface and validation persistence.
+versioned REST/OpenAPI surface and validation persistence. Validation options (FR-009) are
+not accepted yet, draft versions are publicly readable and authorization for them belongs to
+#35, and a supplied schema document that belongs to the attestation but not to the credential's
+format is ignored rather than reported.
 
 A `vct#integrity` claim on the credential is not compared with the supplied Type Metadata in
 this slice; only the rulebook reference `#integrity` is verified. That is part of the

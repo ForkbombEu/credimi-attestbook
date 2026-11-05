@@ -234,11 +234,21 @@ export async function parseSdJwtVc(credential: string): Promise<SdJwtParseOutcom
   }
 
   const typ = decodedJwt.header.typ
-  if (typ !== undefined && typ !== 'dc+sd-jwt' && typ !== 'vc+sd-jwt') {
+  if (typ === undefined) {
+    return invalid([
+      finding(
+        'missing_typ_header',
+        'The issuer-signed JWT has no `typ` header; "dc+sd-jwt" or "vc+sd-jwt" is required.',
+        'error',
+        '/header/typ',
+      ),
+    ])
+  }
+  if (typ !== 'dc+sd-jwt' && typ !== 'vc+sd-jwt') {
     return invalid([
       finding(
         'unexpected_typ_header',
-        'The issuer-signed JWT `typ` header must be "dc+sd-jwt" or "vc+sd-jwt" when present.',
+        'The issuer-signed JWT `typ` header must be "dc+sd-jwt" or "vc+sd-jwt".',
         'error',
         '/header/typ',
       ),

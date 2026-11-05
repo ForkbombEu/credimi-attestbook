@@ -217,6 +217,32 @@ describe('validateSchemaDocuments with JSON Schema 2020-12', () => {
     expect(secondOutcome.status).toBe('FAIL')
   })
 
+  test('does not evaluate a JSON Schema that exceeds the node or work budget', async () => {
+    const anyOf = Array.from({ length: 3_000 }, (_, index) => ({ const: index }))
+    const schema = JSON.stringify({
+      type: 'object',
+      properties: { values: { type: 'array', items: { anyOf } } },
+    })
+    const claims = defaultCredentialClaims({
+      values: Array.from({ length: 1_000 }, (_, index) => index),
+    })
+    const parsed = await parseOrThrow(await issueTestCredential({ claims, selectiveClaims: [] }))
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = validateSchemaDocuments({
+      references: [reference],
+      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+      parsed,
+    })
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('json_schema_too_complex')
+    expect(outcome.schemaReferences[0]?.applied).toBe(false)
+  })
+
   test('fails an invalid JSON Schema document', async () => {
     const schema = JSON.stringify({ type: 'nonsense' })
     const parsed = await parseOrThrow(await issueTestCredential())

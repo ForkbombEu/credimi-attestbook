@@ -128,6 +128,7 @@ describe('parseSdJwtVc', () => {
         given_name: 'Ada',
       },
       { _sd: ['iss', 'given_name'] },
+      { header: { typ: 'dc+sd-jwt' } },
     )
 
     const outcome = await parseSdJwtVc(credential)
@@ -172,6 +173,19 @@ describe('parseSdJwtVc', () => {
       return
     }
     expect(outcome.findings.map((entry) => entry.code)).toContain('claim_depth_exceeded')
+  })
+
+  test('rejects a missing issuer JWT typ header', async () => {
+    const credential = await issueTestCredential()
+    const tampered = mutateCredentialHeader(credential, (header) => {
+      delete header.typ
+    })
+    const outcome = await parseSdJwtVc(tampered)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    expect(outcome.findings.map((entry) => entry.code)).toContain('missing_typ_header')
   })
 
   test('rejects an unexpected issuer JWT typ header', async () => {
