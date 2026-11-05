@@ -179,7 +179,7 @@ The signed `schemas` payload maps each credential to a TS11-shaped object with a
 
 ### 3.4 EUDIPLO
 
-- **Repositories:** <https://github.com/EUDIPLO/eudiplo> (canonical) and <https://github.com/openwallet-foundation/eudiplo> (mirror). Apache-2.0.
+- **Repositories:** <https://github.com/EUDIPLO/eudiplo> (canonical) and <https://github.com/openwallet-foundation/eudiplo> (renamed/moved alias that redirects to the canonical). Apache-2.0.
 - **Description:** "Your diplomatic layer for EUDI Wallet integration." A NestJS reference EUDI Wallet implementation (issuer + verifier backend).
 
 **Relevance:** EUDIPLO is **not a catalog**; it is a reference implementation that AttestBook would target for **issuer metadata discovery** (FR-006) and as a compatibility reference for the mandatory OWF package.
@@ -256,7 +256,7 @@ ImportReport             # per-source compatibility + provenance + conflicts
 
 - **SIROS:** poll `schemas.json` using `ETag`/`Last-Modified` conditional requests (`max-age=600` observed). Prefer per-format `schemaURIs` for the actual schema payloads; follow `rulebookURI` for the human rulebook. Verify the JWS when/if signing is enabled (JWKS), but treat unsigned JSON as the current reality.
 - **FIDES:** consume the **signed** `schemas` endpoint and verify with the published JWKS; use `credentialtype` (unsigned) only for display metadata. Honor the self-reported `conformance` block and surface it in AttestBook's compatibility report rather than silently importing partial entries as full TS11.
-- **EUDI rulebooks:** ingest as URL/Markdown references only; record `conformance: not_verified` and treat them as documentation, not executable schemas.
+- **EUDI rulebooks:** ingest as URL/Markdown references only; record `conformance: prose_only` and treat them as documentation, not executable schemas.
 - Change detection and idempotency must be AttestBook-side: none of the sources exposes a reliable per-entry digest, so compute and store AttestBook's own content digest (FR-002/FR-004) and compare across syncs.
 
 ### 5.4 Issuer metadata discovery (FR-006)
@@ -308,6 +308,6 @@ None of the live catalogs can be relied upon in CI (they rebuild on their own sc
 - SIROS registry — <https://registry.siros.org> · API — <https://registry.siros.org/api/v1/schemas.json> · OpenAPI — <https://registry.siros.org/api/v1/openapi.yaml> · Integration guide — <https://registry.siros.org/docs/integration.html> · API reference — <https://registry.siros.org/docs/api.html>
 - SIROS Foundation — <https://siros.org>
 - FIDES Community catalog — <https://fides.community/ecosystem-explorer/credential-catalog/> · repo — <https://github.com/FIDEScommunity/fides-credential-catalog> · API — <https://fides-credential-catalog.vercel.app>
-- EUDIPLO — <https://github.com/EUDIPLO/eudiplo> · OWF mirror — <https://github.com/openwallet-foundation/eudiplo>
+- EUDIPLO — <https://github.com/EUDIPLO/eudiplo> · OWF path (redirects to canonical) — <https://github.com/openwallet-foundation/eudiplo>
 - Sphereon OID4VC — <https://github.com/sphereon-opensource/oid4vc>
 - WE BUILD consortium — <https://github.com/webuild-consortium/wp4-trust-group>
