@@ -10,7 +10,8 @@ Read [docs/specification.md](docs/specification.md) before any task. It is the p
 - Prefer strict TypeScript; Bun is conditional on dependency compatibility. Keep modules logical rather than speculative microservices.
 - Include tests, security for untrusted remote schemas/imports, provenance, version pinning, OpenAPI and documentation when applicable.
 - Capture-issuer / capture-verifier adapters must be designed early but not claimed operational before real integration.
-- Do not deploy to production or merge without human approval. Only push branches or open PRs when explicitly authorized in the corresponding issue/comment.
+- Never deploy to production. Only push branches or open PRs when explicitly authorized in the corresponding issue/comment.
+- The dsh-superagent agent account (`@forkboteu`) squash-merges a pull request it opened, without further human approval, once an independent Claude Code review of the PR's exact head commit passes and all required CI checks pass, as its Delivery requirements describe (`gh pr merge --squash --match-head-commit <reviewed sha>`). It never merges any other pull request, never uses `--admin` or bypasses branch protection, and does not merge work whose issue or comment explicitly forbids merging. Every other merge needs human approval.
 
 ## Execution gates
 - **Phase 0**: research, architecture and the five documents in specification section 18. No Phase 1 implementation until architecture is reviewed and expressly approved.
