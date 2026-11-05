@@ -123,7 +123,7 @@ describe('rulebook version snapshots', () => {
     expect(sha256Hex(content.bytes)).toBe(version.contentDigest)
 
     const snapshot = parseSnapshot(content)
-    expect(snapshot).toEqual({
+    const expectedSnapshot: RulebookVersionDocument = {
       format: RULEBOOK_VERSION_FORMAT,
       rulebookId: rulebook.id,
       version: '1.0',
@@ -160,7 +160,14 @@ describe('rulebook version snapshots', () => {
           integrity: null,
         },
       ],
-    })
+    }
+    expect(snapshot).toEqual(expectedSnapshot)
+
+    // Pin the exact snapshot bytes (including field order), not just the
+    // parsed value: a serializer change must break this test on purpose.
+    const expectedBytes = Buffer.from(JSON.stringify(expectedSnapshot), 'utf8')
+    expect(Buffer.from(content.bytes).toString('utf8')).toBe(expectedBytes.toString('utf8'))
+    expect(version.contentDigest).toBe(sha256Hex(expectedBytes))
 
     expect(registry.verifyRulebookVersionDigest(rulebook.id, '1.0')).toEqual({
       version,

@@ -354,6 +354,16 @@ describe('registry migrations', () => {
         database.query("DELETE FROM rulebook_versions WHERE id = 'version-1'").run(),
       ).toThrow(/immutable/i)
 
+      // A status-only transition is the exception; changing any other column at
+      // the same time is still rejected.
+      expect(() =>
+        database
+          .query(
+            "UPDATE rulebook_versions SET status = 'historical', provenance_json = '{\"changed\":true}' WHERE id = 'version-1'",
+          )
+          .run(),
+      ).toThrow(/immutable/i)
+
       // The only permitted transition is published -> historical, once.
       expect(() =>
         database

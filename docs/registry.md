@@ -230,6 +230,14 @@ digest of the rulebook's current content and compares it with the stored version
 provider must call `refreshDraftRulebookVersion` explicitly, so a version is never published
 with content that changed after the provider froze it.
 
+Supersession follows **publication order**, not a SemVer comparison: this slice does not
+require a new label to be numerically greater, so publishing `0.9` after `2.0` still makes
+`2.0` historical. Authoring/ordering policy is left to the editor slice.
+
+While the next draft is in progress, the rulebook's catalogue `publicationStatus` is `draft`
+even though a published version remains retrievable. The API slice (#34) must expose the
+published version alongside the working state so catalogue consumers are not misled.
+
 ### 6.2 Content digest and artifact
 
 The version's content is a deterministic JSON snapshot of the rulebook's content at freeze
