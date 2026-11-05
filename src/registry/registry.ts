@@ -35,6 +35,7 @@ import type {
   CreateRulebookInput,
   CreateRulebookVersionInput,
   CreateSchemaReferenceInput,
+  CreateAttestationSchemaReferenceInput,
   IssuedToken,
   Provider,
   Rulebook,
@@ -52,6 +53,8 @@ import {
   assertArray,
   assertObject,
   MAX_ATTESTATIONS_PER_RULEBOOK,
+  MAX_SCHEMA_REFERENCES_PER_ATTESTATION,
+  MAX_RULEBOOKS_PER_BATCH,
   MAX_NAME_LENGTH,
   MAX_SPEC_LENGTH,
   requireAbsoluteHttpUrl,
@@ -80,6 +83,12 @@ export interface RegistryOptions {
 }
 
 const MAX_BEARER_TOKEN_LENGTH = 256
+
+interface PreparedRulebook {
+  readonly rulebook: Rulebook
+  readonly attestations: readonly AttestationType[]
+  readonly schemaReferences: readonly SchemaReference[]
+}
 
 /** Immutable list of changed domain fields, used only in audit detail. */
 function changedFields(previous: object, next: object): readonly string[] {
@@ -288,74 +297,35 @@ export class Registry {
   }
 
   createRulebook(accessToken: string, input: CreateRulebookInput): Rulebook {
+    const rulebooks = this.createRulebooks(accessToken, [input])
+    const rulebook = rulebooks[0]
+    if (rulebook === undefined) {
+      throw new Error('createRulebooks returned no rulebook')
+    }
+    return rulebook
+  }
+
+  /**
+   * Creates several rulebooks in one transaction, so a catalog import either
+   * writes every entry or none (#30). Validation and identifier generation run
+   * before the transaction; any failure there leaves the database untouched.
+   */
+  createRulebooks(
+    accessToken: string,
+    inputs: readonly CreateRulebookInput[],
+  ): readonly Rulebook[] {
     const actor = this.authenticate(accessToken)
-    assertObject(input, 'rulebook')
-
-    const name = requireText(input.name, 'name', MAX_NAME_LENGTH)
-    const description =
-      input.description === undefined ? '' : requireDescription(input.description, 'description')
-    const sourceUrl =
-      input.sourceUrl === undefined ? null : requireAbsoluteHttpUrl(input.sourceUrl, 'sourceUrl')
-    const provenance =
-      input.provenance === undefined ? {} : requireJsonObject(input.provenance, 'provenance')
-    const applicableSpec = requireText(input.applicableSpec, 'applicableSpec', MAX_SPEC_LENGTH)
-    const metadata =
-      input.metadata === undefined ? {} : requireJsonObject(input.metadata, 'metadata')
-
+    assertArray(inputs, 'rulebooks', MAX_RULEBOOKS_PER_BATCH)
     const createdAt = this.now()
-    const rulebookId = this.generateId()
-    const attestationInputs = input.attestations ?? []
-    assertArray(attestationInputs, 'attestations', MAX_ATTESTATIONS_PER_RULEBOOK)
-    const attestations = attestationInputs.map((attestation, index) =>
-      this.buildAttestation(rulebookId, attestation, index, createdAt),
-    )
-
-    const names = new Set<string>()
-    for (const attestation of attestations) {
-      if (names.has(attestation.name)) {
-        throw invalidInput(`attestations must not repeat the name "${attestation.name}"`)
-      }
-      names.add(attestation.name)
-    }
-
-    const rulebook: Rulebook = {
-      id: rulebookId,
-      providerId: actor.providerId,
-      name,
-      description,
-      sourceUrl,
-      provenance,
-      applicableSpec,
-      publicationStatus: 'draft',
-      metadata,
-      createdAt,
-      updatedAt: createdAt,
-    }
+    const prepared = inputs.map((input) => this.prepareRulebook(actor, input, createdAt))
 
     this.transaction(() => {
-      this.store.insertRulebook(rulebook)
-      this.store.insertAudit({
-        at: createdAt,
-        actorProviderId: actor.providerId,
-        action: 'rulebook.create',
-        entityType: 'rulebook',
-        entityId: rulebookId,
-        detail: { name, applicableSpec },
-      })
-      for (const attestation of attestations) {
-        this.store.insertAttestation(attestation)
-        this.store.insertAudit({
-          at: createdAt,
-          actorProviderId: actor.providerId,
-          action: 'attestation.create',
-          entityType: 'attestation',
-          entityId: attestation.id,
-          detail: { rulebookId, name: attestation.name },
-        })
+      for (const item of prepared) {
+        this.insertPreparedRulebook(actor, item)
       }
     })()
 
-    return rulebook
+    return prepared.map((item) => item.rulebook)
   }
 
   updateRulebook(accessToken: string, rulebookId: string, input: UpdateRulebookInput): Rulebook {
@@ -939,6 +909,130 @@ export class Registry {
 
   // ------------------------------------------------------------------ helpers
 
+  /** Validates and builds one rulebook and its children without writing. */
+  private prepareRulebook(
+    actor: AuthenticatedActor,
+    input: CreateRulebookInput,
+    createdAt: string,
+  ): PreparedRulebook {
+    assertObject(input, 'rulebook')
+
+    const name = requireText(input.name, 'name', MAX_NAME_LENGTH)
+    const description =
+      input.description === undefined ? '' : requireDescription(input.description, 'description')
+    const sourceUrl =
+      input.sourceUrl === undefined ? null : requireAbsoluteHttpUrl(input.sourceUrl, 'sourceUrl')
+    const provenance =
+      input.provenance === undefined ? {} : requireJsonObject(input.provenance, 'provenance')
+    const applicableSpec = requireText(input.applicableSpec, 'applicableSpec', MAX_SPEC_LENGTH)
+    const metadata =
+      input.metadata === undefined ? {} : requireJsonObject(input.metadata, 'metadata')
+
+    const rulebookId = this.generateId()
+    const attestationInputs = input.attestations ?? []
+    assertArray(attestationInputs, 'attestations', MAX_ATTESTATIONS_PER_RULEBOOK)
+    const attestations = attestationInputs.map((attestation, index) =>
+      this.buildAttestation(rulebookId, attestation, index, createdAt),
+    )
+
+    const names = new Set<string>()
+    for (const attestation of attestations) {
+      if (names.has(attestation.name)) {
+        throw invalidInput(`attestations must not repeat the name "${attestation.name}"`)
+      }
+      names.add(attestation.name)
+    }
+
+    // Imported rulebooks arrive with their schema references attached to one
+    // attestation type (#30). Build and validate them before any write so the
+    // whole create is refused without a partial rulebook.
+    const schemaReferences: SchemaReference[] = []
+    attestationInputs.forEach((attestationInput, index) => {
+      const attestation = attestations[index]
+      if (attestation === undefined) {
+        return
+      }
+      const referenceInputs = attestationInput.schemaReferences ?? []
+      assertArray(
+        referenceInputs,
+        `attestations[${index}].schemaReferences`,
+        MAX_SCHEMA_REFERENCES_PER_ATTESTATION,
+      )
+      const formats = new Set<string>()
+      referenceInputs.forEach((referenceInput, referenceIndex) => {
+        const reference = this.buildAttestationSchemaReference(
+          attestation,
+          referenceInput,
+          createdAt,
+          `attestations[${index}].schemaReferences[${referenceIndex}]`,
+        )
+        if (formats.has(reference.formatIdentifier)) {
+          throw invalidInput(
+            `attestations[${index}].schemaReferences must not repeat the formatIdentifier "${reference.formatIdentifier}"`,
+          )
+        }
+        formats.add(reference.formatIdentifier)
+        schemaReferences.push(reference)
+      })
+    })
+
+    const rulebook: Rulebook = {
+      id: rulebookId,
+      providerId: actor.providerId,
+      name,
+      description,
+      sourceUrl,
+      provenance,
+      applicableSpec,
+      publicationStatus: 'draft',
+      metadata,
+      createdAt,
+      updatedAt: createdAt,
+    }
+
+    return { rulebook, attestations, schemaReferences }
+  }
+
+  /** Inserts one prepared rulebook and its children; caller owns the transaction. */
+  private insertPreparedRulebook(actor: AuthenticatedActor, prepared: PreparedRulebook): void {
+    const { rulebook, attestations, schemaReferences } = prepared
+    this.store.insertRulebook(rulebook)
+    this.store.insertAudit({
+      at: rulebook.createdAt,
+      actorProviderId: actor.providerId,
+      action: 'rulebook.create',
+      entityType: 'rulebook',
+      entityId: rulebook.id,
+      detail: { name: rulebook.name, applicableSpec: rulebook.applicableSpec },
+    })
+    for (const attestation of attestations) {
+      this.store.insertAttestation(attestation)
+      this.store.insertAudit({
+        at: attestation.createdAt,
+        actorProviderId: actor.providerId,
+        action: 'attestation.create',
+        entityType: 'attestation',
+        entityId: attestation.id,
+        detail: { rulebookId: rulebook.id, name: attestation.name },
+      })
+    }
+    for (const reference of schemaReferences) {
+      this.store.insertSchemaReference(reference)
+      this.store.insertAudit({
+        at: reference.createdAt,
+        actorProviderId: actor.providerId,
+        action: 'schema_ref.create',
+        entityType: 'schema_ref',
+        entityId: reference.id,
+        detail: {
+          rulebookId: rulebook.id,
+          attestationId: reference.attestationId,
+          formatIdentifier: reference.formatIdentifier,
+        },
+      })
+    }
+  }
+
   private deleteSchemaReferenceWithAudit(
     actor: AuthenticatedActor,
     reference: SchemaReference,
@@ -1086,6 +1180,34 @@ export class Registry {
       integrity:
         input.integrity === undefined ? null : requireIntegrity(input.integrity, 'integrity'),
       metadata: input.metadata === undefined ? {} : requireJsonObject(input.metadata, 'metadata'),
+      createdAt,
+    }
+  }
+
+  /** Builds a schema reference for an attestation created in the same call. */
+  private buildAttestationSchemaReference(
+    attestation: AttestationType,
+    input: CreateAttestationSchemaReferenceInput,
+    createdAt: string,
+    path: string,
+  ): SchemaReference {
+    assertObject(input, path)
+    return {
+      id: this.generateId(),
+      rulebookId: attestation.rulebookId,
+      attestationId: attestation.id,
+      formatIdentifier: requireText(
+        input.formatIdentifier,
+        `${path}.formatIdentifier`,
+        MAX_NAME_LENGTH,
+      ),
+      uri: requireAbsoluteHttpUrl(input.uri, `${path}.uri`),
+      integrity:
+        input.integrity === undefined
+          ? null
+          : requireIntegrity(input.integrity, `${path}.integrity`),
+      metadata:
+        input.metadata === undefined ? {} : requireJsonObject(input.metadata, `${path}.metadata`),
       createdAt,
     }
   }

@@ -157,6 +157,12 @@ export interface CreateAttestationInput {
   readonly attestationLoS: string
   readonly bindingType: string
   readonly supportedFormats?: readonly string[]
+  /**
+   * Schema references for this attestation type, created in the same
+   * transaction as its rulebook. Used by the import pipeline (#30); the
+   * attestation id is assigned by the registry.
+   */
+  readonly schemaReferences?: readonly CreateAttestationSchemaReferenceInput[]
   readonly metadata?: JsonObject
 }
 
@@ -173,6 +179,17 @@ export interface CreateSchemaReferenceInput {
   readonly uri: string
   readonly integrity?: string
   readonly attestationId?: string
+  readonly metadata?: JsonObject
+}
+
+/**
+ * A schema reference created together with its attestation type. The
+ * attestation id is assigned by `createRulebook`, so callers do not supply it.
+ */
+export interface CreateAttestationSchemaReferenceInput {
+  readonly formatIdentifier: string
+  readonly uri: string
+  readonly integrity?: string
   readonly metadata?: JsonObject
 }
 
