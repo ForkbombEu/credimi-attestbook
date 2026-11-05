@@ -4,7 +4,8 @@ import applicationPackage from '../package.json'
 
 // AttestBook must remain standalone: it may not acquire a Credimi runtime or
 // the orchestration stack Credimi uses (specification §4, AGENTS.md project
-// constraints). Dev-only tooling is checked separately by review.
+// constraints). This asserts the direct runtime declarations; transitive
+// resolution is fixed by bun.lock and covered by the OWF audit and smoke test.
 const FORBIDDEN_RUNTIME_DEPENDENCIES = [
   /^@credimi\//i,
   /^credimi/i,

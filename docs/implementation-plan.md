@@ -109,12 +109,13 @@ Versions in this table were inspected or executed during Phase 0. Values marked
 | EUDI ARF | 3.0.0 (tag 2026-07-21), §5.5/§5.6 | verified | [`docs/standards.md`](standards.md) Part II §4 |
 | ETSI EN 319 482-3 | draft v0.0.6 (2026-10-27), content restricted | **UNVERIFIED** | [`docs/standards.md`](standards.md) Part II §6, §8 |
 | OWF package | `@owf/eudi-attestation-schema` **0.5.4** (published 2026-10-30) | verified, 46 runtime exports | [`docs/standards.md`](standards.md) §2–§3; `research/owf-audit` |
-| OWF dependencies | `@owf/crypto` 0.6.2, `@owf/identity-common` 0.6.2, `@sd-jwt/sd-jwt-vc` 0.24.1, `zod` 4.6.7 | verified via lockfile | `research/owf-audit/package.json` |
+| OWF dependencies | `@owf/crypto` 0.6.2, `@owf/identity-common` 0.6.2, `@owf/cose` 0.6.2, `@owf/token-status-list` 0.6.2, `@sd-jwt/sd-jwt-vc` 0.24.1, `@sd-jwt/core` 0.24.1, `zod` 4.6.7 | verified via lockfile and pinned by `overrides` | `research/owf-audit/package-lock.json`, `bun.lock`, `src/owf.test.ts` |
 | Node.js | 20.20.2, 22.23.4, 24.22.2 | verified | [`docs/standards.md`](standards.md) §8 |
 | Bun | 1.3.1 (Linux x64) | verified in the Phase 0 audit environment | [`docs/standards.md`](standards.md) §8 |
 | OWF probe re-run | Node.js 24.22.2, 35 checks passed | re-verified 2026-11-05 | `research/owf-audit` run for this plan |
-| SQLite via Bun | not yet executed by an AttestBook application | **verification gate** | #26 builds the first real runner |
-| HTTP/UI/validation libraries | not yet executed by AttestBook | **verification gate** | exact versions pinned by #26/#32 |
+| SQLite via Bun | Bun 1.3.1 built-in `bun:sqlite`; WAL and foreign keys enabled | verified | `src/sqlite-smoke.test.ts`; #26 |
+| Hono HTTP library | 4.13.16 | verified (health endpoint under Bun) | `src/app.test.ts`, Docker smoke job; #26 |
+| UI/validation libraries | not yet executed by AttestBook | **verification gate** | exact versions pinned by #32/#36 |
 
 Rules that follow from this table:
 

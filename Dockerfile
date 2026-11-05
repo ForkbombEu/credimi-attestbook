@@ -10,9 +10,9 @@ RUN bun run build
 
 FROM oven/bun:1.3.1 AS runtime
 ENV NODE_ENV=production
+ENV HOST=0.0.0.0
 WORKDIR /app
 COPY --from=build --chown=bun:bun /app/dist ./dist
-COPY --chown=bun:bun package.json ./
 USER bun
 EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \

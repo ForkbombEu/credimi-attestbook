@@ -3,7 +3,7 @@ export interface AppConfig {
   readonly port: number
 }
 
-export const DEFAULT_HOSTNAME = '0.0.0.0'
+export const DEFAULT_HOSTNAME = '127.0.0.1'
 export const DEFAULT_PORT = 3000
 
 const PORT_PATTERN = /^[1-9]\d*$/

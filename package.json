@@ -33,5 +33,14 @@
     "prettier": "3.9.10",
     "typescript": "5.9.3",
     "typescript-eslint": "8.72.1"
+  },
+  "overrides": {
+    "@owf/cose": "0.6.2",
+    "@owf/crypto": "0.6.2",
+    "@owf/identity-common": "0.6.2",
+    "@owf/token-status-list": "0.6.2",
+    "@sd-jwt/core": "0.24.1",
+    "@sd-jwt/sd-jwt-vc": "0.24.1",
+    "zod": "4.6.7"
   }
 }

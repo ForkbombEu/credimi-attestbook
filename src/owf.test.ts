@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 
 import {
   schemaMeta,
@@ -14,9 +15,19 @@ import applicationPackage from '../package.json'
 /**
  * Smoke/integration coverage for the mandatory OWF dependency (decision D-1):
  * the test imports and executes the real pinned package under Bun rather than
- * mocking it.
+ * mocking it. The `overrides` in package.json keep the transitive tree at the
+ * exact versions exercised by the Phase 0 audit.
  */
 const EXPECTED_OWF_VERSION = '0.5.4'
+const EXPECTED_TRANSITIVE_VERSIONS = {
+  '@owf/cose': '0.6.2',
+  '@owf/crypto': '0.6.2',
+  '@owf/identity-common': '0.6.2',
+  '@owf/token-status-list': '0.6.2',
+  '@sd-jwt/core': '0.24.1',
+  '@sd-jwt/sd-jwt-vc': '0.24.1',
+  zod: '4.6.7',
+} as const
 
 // Test-only certificate body, reused from the Phase 0 audit probe. It contains
 // no personal data or usable private key.
@@ -55,6 +66,15 @@ function buildExampleSchemaMeta() {
     .build()
 }
 
+function readInstalledVersion(packageName: string): string {
+  const manifestPath = new URL(`../node_modules/${packageName}/package.json`, import.meta.url)
+  const manifest = JSON.parse(readFileSync(manifestPath, 'utf8')) as {
+    version: string
+  }
+
+  return manifest.version
+}
+
 describe('OWF dependency smoke test', () => {
   test('the manifest and the installed package agree on the pinned tested version', () => {
     expect(applicationPackage.dependencies['@owf/eudi-attestation-schema']).toBe(
@@ -62,6 +82,15 @@ describe('OWF dependency smoke test', () => {
     )
     expect(owfPackage.name).toBe('@owf/eudi-attestation-schema')
     expect(owfPackage.version).toBe(EXPECTED_OWF_VERSION)
+  })
+
+  test('overrides keep the audited transitive dependency tree', () => {
+    for (const [packageName, expectedVersion] of Object.entries(EXPECTED_TRANSITIVE_VERSIONS)) {
+      expect({
+        packageName,
+        version: readInstalledVersion(packageName),
+      }).toEqual({ packageName, version: expectedVersion })
+    }
   })
 
   test('the real package builds and structurally validates a SchemaMeta document', () => {

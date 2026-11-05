@@ -89,19 +89,24 @@ API round-trip, so the image is exercised on every pull request.
 
 ## Configuration
 
-| Variable | Default   | Meaning                                       |
-| -------- | --------- | --------------------------------------------- |
-| `PORT`   | `3000`    | Listener port; an integer between 1 and 65535 |
-| `HOST`   | `0.0.0.0` | Listener hostname or address                  |
+| Variable | Default     | Meaning                                       |
+| -------- | ----------- | --------------------------------------------- |
+| `PORT`   | `3000`      | Listener port; an integer between 1 and 65535 |
+| `HOST`   | `127.0.0.1` | Listener hostname or address                  |
 
-Invalid values fail fast at startup instead of silently binding elsewhere.
+Local development binds loopback only. The Docker image and `compose.yaml` set
+`HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup
+instead of silently binding elsewhere.
 
 ## Mandatory OWF dependency
 
 `@owf/eudi-attestation-schema` is pinned to exactly **0.5.4** (no range, no `0.6.0-alpha`)
-and recorded in `bun.lock`. `src/owf.test.ts` executes the real package under Bun and asserts
-the manifest, the installed version and its structural validation behaviour. The Phase 0 audit
-probe remains reproducible from
+and recorded in `bun.lock`. `package.json` `overrides` pin its audited transitive tree
+(`@sd-jwt/sd-jwt-vc` 0.24.1, `@sd-jwt/core` 0.24.1, `@owf/crypto`/`@owf/identity-common`/
+`@owf/cose`/`@owf/token-status-list` 0.6.2 and `zod` 4.6.7), so the application installs the
+versions the Phase 0 audit exercised. `src/owf.test.ts` executes the real package under Bun
+and asserts the manifest, the installed package and transitive versions, and its structural
+validation behaviour. The Phase 0 audit probe remains reproducible from
 [`research/owf-audit/`](research/owf-audit/README.md); the `owf-compat` CI job re-runs it on
 Node.js 22 and Bun 1.3.1. Any upgrade must repeat the audit described in
 [`docs/standards.md`](docs/standards.md).

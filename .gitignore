@@ -6,7 +6,6 @@ coverage/
 # Local configuration and secrets
 .env
 .env.*
-!.env.example
 
 # Tooling and operating-system noise
 .DS_Store
