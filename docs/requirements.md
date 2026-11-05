@@ -21,7 +21,8 @@ tested baselines, Phase 1 order)
 
 The phase and issue columns are the plan of record; a requirement may be partially
 delivered in Phase 1 and completed later, and the table says so explicitly. Issues are the
-migrated Phase 1 set #26–#39 and the phase issues #15–#18.
+migrated Phase 1 set #26–#39 and the open later-phase set #40–#54, which was migrated and
+split from the closed duplicates #15–#19.
 
 ### 1.1 Functional requirements
 
@@ -32,23 +33,23 @@ migrated Phase 1 set #26–#39 and the phase issues #15–#18.
 | FR-003 | Provider management, ownership and publication authority | Phase 1: #28, #35 | Provision product auth only; TS11 catalogue auth is unspecified (D-10) |
 | FR-004 | External rulebook import: URL/JSON, preview, structural validation, compatibility, provenance, safe re-import | Phase 1: #30, #31, #36 | Adapter-based; no assumed full TS11 conformance (R4.4) |
 | FR-005 | Catalog synchronization: conditional fetch, idempotency, change detection, conflict reporting, availability | Phase 1 partial: #31; full sync later | Scheduled sync and source diagnostics are not an MVP dependency |
-| FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #16 | Not authoritative for rulebooks |
-| FR-007 | Rulebook editor and authoring workflow | Phase 2: #15 | UI-003; not Phase 1 |
-| FR-008 | Publication of validated, versioned, reproducible artifacts with provenance/integrity | Phase 1 subset: #29; full workflow Phase 2: #15 | Where signing applies, use OWF behind the JOSE policy |
+| FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #43 | Not authoritative for rulebooks |
+| FR-007 | Rulebook editor and authoring workflow | Phase 2: #40, #41 | UI-003; not Phase 1 |
+| FR-008 | Publication of validated, versioned, reproducible artifacts with provenance/integrity | Phase 1 subset: #29; full workflow Phase 2: #42 | Where signing applies, use OWF behind the JOSE policy |
 | FR-009 | Reusable validation API with structured results and evidence | Phase 1: #32 | SD-JWT VC structural scope |
 | FR-010 | Eight independent validation dimensions | Phase 1: #33 | No dimension PASS without execution |
 | FR-011 | Credential format support, SD-JWT VC first, extensible interfaces | Phase 1: #32 (SD-JWT VC); later formats | mdoc explicitly `NOT_TESTED`, not mocked |
 | FR-012 | PASS / FAIL / NOT_TESTED / NOT_APPLICABLE / INCONCLUSIVE results | Phase 1: #33 | Conservative overall aggregation (D-8) |
-| FR-013 | Issuer test fixtures | Phase 3: #16 | Not Phase 1 |
-| FR-014 | Verifier test fixtures and policies | Phase 3: #16 | Not Phase 1 |
-| FR-015 | Capture artifact model | Phase 0 contracts: [`docs/capture-integration.md`](capture-integration.md); Phase 4: #17 | Not implemented |
-| FR-016 | `capture-issuer` integration | Phase 4: #17 | Not claimed operational |
-| FR-017 | `capture-verifier` integration | Phase 4: #17 | Not claimed operational |
-| FR-018 | Capture integration contracts (push/pull, mock adapter) | Phase 0 contracts; Phase 4: #17 | Transport-agnostic, no broker |
-| FR-019 | Correlation and traceability across rulebook, capture and validation | Phase 0 contracts; Phase 4: #17 | Stable ids, pinned version + digest |
-| FR-020 | Credimi test orchestration via API | Phase 5: #18 | No Temporal/StepCI/PocketBase dependency |
-| FR-021 | Headless Wallet testing workflow | Phase 5: #18 | AttestBook validates, does not orchestrate |
-| FR-022 | Continuous conformance: deterministic, reproducible, machine-readable | Phase 1 supports the evidence subset (#33, #34); Phase 5: #18 | No conformance claim |
+| FR-013 | Issuer test fixtures | Phase 3: #44 | Not Phase 1 |
+| FR-014 | Verifier test fixtures and policies | Phase 3: #45 | Not Phase 1 |
+| FR-015 | Capture artifact model | Phase 0 contracts: [`docs/capture-integration.md`](capture-integration.md); Phase 4: #46 | Not implemented |
+| FR-016 | `capture-issuer` integration | Phase 4: #47 | Not claimed operational |
+| FR-017 | `capture-verifier` integration | Phase 4: #47 | Not claimed operational |
+| FR-018 | Capture integration contracts (push/pull, mock adapter) | Phase 0 contracts; Phase 4: #46, #47 | Transport-agnostic, no broker |
+| FR-019 | Correlation and traceability across rulebook, capture and validation | Phase 0 contracts; Phase 4: #48 | Stable ids, pinned version + digest |
+| FR-020 | Credimi test orchestration via API | Phase 5: #49 | No Temporal/StepCI/PocketBase dependency |
+| FR-021 | Headless Wallet testing workflow | Phase 5: #50 | AttestBook validates, does not orchestrate |
+| FR-022 | Continuous conformance: deterministic, reproducible, machine-readable | Phase 1 supports the evidence subset (#33, #34); Phase 5: #51 | No conformance claim |
 
 ### 1.2 User-interface requirements
 
@@ -56,10 +57,10 @@ migrated Phase 1 set #26–#39 and the phase issues #15–#18.
 | --- | --- | --- |
 | UI-001 | Rulebook catalog with search/filter, provider, version, status, source, compatibility | Phase 1: #36 |
 | UI-002 | Rulebook details, attestation types, schema references, compatibility, version history, provenance | Phase 1: #37 |
-| UI-003 | Rulebook editor, live validation, diff, draft management, publication | Phase 2: #15 |
-| UI-004 | Import interface: URL/file, preview, diagnostics, conflict resolution, sync settings | Phase 2+ follow-up (not in #15); API import lands in #30/#31 |
+| UI-003 | Rulebook editor, live validation, diff, draft management, publication | Phase 2: #40, #41, #42 |
+| UI-004 | Import interface: URL/file, preview, diagnostics, conflict resolution, sync settings | Phase 2+ follow-up (not in #40–#42); API import lands in #30/#31 |
 | UI-005 | Credential playground: input/upload, rulebook/type selection, validation, violations, export | Phase 1: #38 |
-| UI-006 | Capture explorer (mock-backed until real contracts exist) | Phase 4: #17 |
+| UI-006 | Capture explorer (mock-backed until real contracts exist) | Phase 4: #48 |
 
 ### 1.3 Acceptance criteria
 
@@ -73,13 +74,13 @@ migrated Phase 1 set #26–#39 and the phase issues #15–#18.
 | AC-06 | Published versions immutable | Phase 1: #29 |
 | AC-07 | Credential validated against a selected rulebook version | Phase 1: #32, #38 |
 | AC-08 | Errors identify constraints and failing attributes | Phase 1: #32, #33, #38 |
-| AC-09 | Create, edit and publish a supported rulebook | Phase 2: #15 |
-| AC-10 | Issuer consumes definitions through a documented API | Phase 3: #16 |
-| AC-11 | Verifier consumes constraints through a documented API | Phase 3: #16 |
-| AC-12 | Architecture supports capture without redesigning the validation engine | Phase 0 contracts; Phase 4: #17 |
-| AC-13 | Mock capture artifacts validate through the public API | Phase 4: #17 |
-| AC-14 | Capture evidence correlates with validation results | Phase 4: #17 |
-| AC-15 | Credimi consumes results without database access | Phase 5: #18 |
+| AC-09 | Create, edit and publish a supported rulebook | Phase 2: #40, #41, #42 |
+| AC-10 | Issuer consumes definitions through a documented API | Phase 3: #43, #44 |
+| AC-11 | Verifier consumes constraints through a documented API | Phase 3: #45 |
+| AC-12 | Architecture supports capture without redesigning the validation engine | Phase 0 contracts; Phase 4: #46, #47, #48 |
+| AC-13 | Mock capture artifacts validate through the public API | Phase 4: #47 |
+| AC-14 | Capture evidence correlates with validation results | Phase 4: #48 |
+| AC-15 | Credimi consumes results without database access | Phase 5: #49 |
 | AC-16 | Rulebook, cryptographic, protocol and interoperability results remain distinguishable | Phase 1: #33 |
 | AC-17 | Unsupported functionality explicitly reported | Phase 1: #32, #33 |
 | AC-18 | Automated tests, Docker and developer documentation | Phase 1: #26, #39 |

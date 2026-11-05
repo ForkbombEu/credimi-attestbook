@@ -251,10 +251,12 @@ libraries or external systems and only *reported*:
 
 Rules:
 
-- Each dimension reports its own status; the overall result is an **aggregation** (proposed:
-  FAIL if any executed dimension FAILs; INCONCLUSIVE if any dimension is INCONCLUSIVE and
-  none FAILs; otherwise the status of the executed dimensions, with NOT_TESTED dimensions
-  shown explicitly). The aggregation rule is an open decision (§12, AD-8).
+- Each dimension reports its own status; the overall result is an **aggregation** adopted as
+  D-8: **FAIL** if any dimension FAILs; else **INCONCLUSIVE** if any is INCONCLUSIVE; else
+  **NOT_TESTED** if any applicable dimension was not executed; else **PASS** only when every
+  applicable dimension PASSed; **NOT_APPLICABLE** only when no dimension is applicable.
+  Per-dimension statuses are always returned. An overall PASS therefore never hides an
+  untested dimension.
 - **Never report a dimension PASS that was not executed.** A schema-valid credential with an
   invalid signature is not "fully valid"; a locally-passing credential is not "interoperable"
   (FR-012, AC-16, AC-17).

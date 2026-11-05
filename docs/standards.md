@@ -504,10 +504,11 @@ allowed by `docs/specification.md` section 2.1.
 
 ### 9.2 Decisions adopted in the consolidated plan
 
-These Phase 0 findings are adopted as D-1–D-6 and D-17 in
-[`docs/implementation-plan.md`](implementation-plan.md) §3, with rationale, traceability and
-the implementation issue that verifies each one. Where wording differs, the consolidated
-decision register wins:
+These Phase 0 findings are consolidated in
+[`docs/implementation-plan.md`](implementation-plan.md) §3: pinning is D-1, the codec
+boundary is D-2, the JOSE policy is D-3, the runtime and tooling baseline is D-13, and
+credential-validation separation is D-17. The no-conformance statement is repeated in the
+plan's §12 non-claims. Where wording differs, the consolidated decision register wins:
 
 1. **Pin 0.5.4 exactly** for the first integration spike; treat newer versions
    as a dependency upgrade requiring a repeat of this audit.
@@ -570,10 +571,10 @@ Unresolved:
   expose 482-3 on the audit date.
 - **Is `issuanceProfile` normative?** It is absent from the TS11 v1.0.1
   normative schema; no clause is cited in the package README.
-- **Which model should AttestBook expose?** TS11 v1.0.1 is the baseline in
-  `docs/specification.md`; the architecture decision must choose whether the
-  public contract follows TS11 v1.0.1, a later ETSI draft, or both behind a
-  versioned adapter.
+- **Which model should AttestBook expose?** Resolved by D-2 and D-4: TS11 v1.0.1 is the
+  Phase 1 baseline and the canonical model sits behind the version-aware adapter. OWF's
+  `SchemaMeta` is not the public TS11 contract, and ETSI EN 319 482-3 is not a public model
+  until the draft is readable and re-audited. This item is no longer open.
 - **Which trust frameworks must AttestBook accept?** TS11 names `aki`,
   `etsi_tl` and `openid_federation`; OWF exposes `etsi_tl` and `x509`.
 - **Which OID4VCI version** should the issuer template target? The helper emits

@@ -61,28 +61,30 @@ const checkedFiles = [
 ].filter((file) => existsSync(file) && statSync(file).isFile());
 
 const linkPattern = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
+const referenceDefinitionPattern = /^ {0,3}\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))/gm;
 const linksByFile = new Map();
 let localLinkCount = 0;
 
 for (const file of checkedFiles) {
   const text = readFileSync(file, 'utf8');
-  // Keep line numbers stable while ignoring example links inside fenced code blocks.
-  const linkText = text.replace(/^```[^\n]*\n[\s\S]*?^```[ \t]*$/gm, (block) =>
-    block.replace(/[^\n]/g, ' '),
-  );
+  // Keep line numbers stable while ignoring example links inside fenced code blocks
+  // and inline code spans.
+  const linkText = text
+    .replace(/^```[^\n]*\n[\s\S]*?^```[ \t]*$/gm, (block) => block.replace(/[^\n]/g, ' '))
+    .replace(/`[^`\n]*`/g, (span) => ' '.repeat(span.length));
   const targets = new Set();
 
-  for (const match of linkText.matchAll(linkPattern)) {
-    let raw = match[1].trim();
+  const addLocalLink = (rawValue, index) => {
+    let raw = rawValue.trim();
     if (raw.startsWith('<') && raw.endsWith('>')) {
       raw = raw.slice(1, -1);
     }
-    if (!raw || raw.startsWith('#')) continue;
-    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) continue; // http:, https:, mailto:, ...
-    if (raw.startsWith('//')) continue;
+    if (!raw || raw.startsWith('#')) return;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(raw)) return; // http:, https:, mailto:, ...
+    if (raw.startsWith('//')) return;
 
     const [pathPart] = raw.split('#');
-    if (!pathPart) continue;
+    if (!pathPart) return;
 
     let decoded = pathPart;
     try {
@@ -99,9 +101,16 @@ for (const file of checkedFiles) {
     localLinkCount += 1;
 
     if (!existsSync(target)) {
-      const line = text.slice(0, match.index).split('\n').length;
+      const line = text.slice(0, index).split('\n').length;
       fail(`${rel(file)}:${line}: broken local link -> ${raw}`);
     }
+  };
+
+  for (const match of linkText.matchAll(linkPattern)) {
+    addLocalLink(match[1], match.index);
+  }
+  for (const match of linkText.matchAll(referenceDefinitionPattern)) {
+    addLocalLink(match[2] ?? match[3], match.index);
   }
 
   linksByFile.set(file, targets);
@@ -135,9 +144,11 @@ for (const id of [...decisionIds].sort()) {
   }
 }
 
+const phase1WaveTable = planText.split(/^## 9\./m)[1]?.split(/^## 10\./m)[0] ?? '';
 for (let issue = 26; issue <= 39; issue += 1) {
-  if (!planText.includes(`issues/${issue}`)) {
-    fail(`docs/implementation-plan.md: missing migrated Phase 1 issue #${issue}`);
+  const row = new RegExp(`^\\|\\s*\\d+\\s*\\|[^\\n]*issues/${issue}(?:\\D|$)`, 'm');
+  if (!row.test(phase1WaveTable)) {
+    fail(`docs/implementation-plan.md §9: missing a dependency-table row for Phase 1 issue #${issue}`);
   }
 }
 
@@ -151,5 +162,6 @@ if (failures.length > 0) {
 
 console.log(
   `docs-check: OK (${requiredDocs.length} required documents, ${checkedFiles.length} files, ` +
-    `${localLinkCount} local links, ${decisionIds.size} decision references, #26-#39 covered)`,
+    `${localLinkCount} local links, ${decisionIds.size} decision references, ` +
+    `Phase 1 wave table covers #26-#39)`,
 );

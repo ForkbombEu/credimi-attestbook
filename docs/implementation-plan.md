@@ -55,21 +55,38 @@ contracts, a catalog/detail UI, a validation playground and an end-to-end accept
 
 ### Phase 1 non-goals
 
-These are deliberate exclusions, not forgotten work. A later phase issue owns each one.
+These are deliberate exclusions, not forgotten work. A later phase issue owns most of them;
+the two without a current migrated issue are marked explicitly.
 
 - Rulebook editor, publication workflow and provider-management UI (FR-007/FR-008,
-  UI-003) — Phase 2, issue [#15](https://github.com/ForkbombEu/credimi-attestbook/issues/15).
+  UI-003) — Phase 2, issues
+  [#40](https://github.com/ForkbombEu/credimi-attestbook/issues/40),
+  [#41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) and
+  [#42](https://github.com/ForkbombEu/credimi-attestbook/issues/42).
 - Full catalog synchronization scheduling (FR-005 beyond idempotent safe re-import) and
-  the import UI (UI-004) — later phase; #30/#31 deliver the safe API path only.
+  the import UI (UI-004) — later phase; #30/#31 deliver the safe API path only, and no
+  migrated issue currently owns these two follow-ups.
 - Issuer discovery (FR-006), issuer fixtures (FR-013) and verifier fixtures (FR-014) —
-  Phase 3, issue [#16](https://github.com/ForkbombEu/credimi-attestbook/issues/16).
+  Phase 3, issues
+  [#43](https://github.com/ForkbombEu/credimi-attestbook/issues/43),
+  [#44](https://github.com/ForkbombEu/credimi-attestbook/issues/44) and
+  [#45](https://github.com/ForkbombEu/credimi-attestbook/issues/45).
 - Capture artifact ingestion, mock/real capture adapters and the capture explorer
-  (FR-015–FR-019, UI-006) — Phase 4, issue
-  [#17](https://github.com/ForkbombEu/credimi-attestbook/issues/17). Phase 0 only fixes the
+  (FR-015–FR-019, UI-006) — Phase 4, issues
+  [#46](https://github.com/ForkbombEu/credimi-attestbook/issues/46),
+  [#47](https://github.com/ForkbombEu/credimi-attestbook/issues/47) and
+  [#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48). Phase 0 only fixes the
   contracts in [`docs/capture-integration.md`](capture-integration.md).
 - Credimi orchestration, headless-wallet workflow and continuous conformance
-  (FR-020–FR-022) — Phase 5, issue
-  [#18](https://github.com/ForkbombEu/credimi-attestbook/issues/18).
+  (FR-020–FR-022) — Phase 5, issues
+  [#49](https://github.com/ForkbombEu/credimi-attestbook/issues/49),
+  [#50](https://github.com/ForkbombEu/credimi-attestbook/issues/50) and
+  [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51).
+- Security hardening, performance/caching and ETSI migration or external interoperability
+  checks — Phase 6, issues
+  [#52](https://github.com/ForkbombEu/credimi-attestbook/issues/52),
+  [#53](https://github.com/ForkbombEu/credimi-attestbook/issues/53) and
+  [#54](https://github.com/ForkbombEu/credimi-attestbook/issues/54).
 - mdoc/mDL validation. Phase 1 recognises the format from metadata but reports it
   `NOT_TESTED`; no fake parser and no implied support (FR-011).
 - Real cryptographic, trust, protocol or interoperability validation of credentials.
@@ -146,7 +163,7 @@ later issue explicitly supersedes one.
 | D-1 | Spec §2.1; AC-02 | Lockfile audit, OWF integration test, upgrade runbook |
 | D-2 | FR-001, AC-04; SR-08/SR-09 | Round-trip and unknown-member tests for TS11/OWF profiles |
 | D-3 | FR-008, SR-16; security T4 | Negative JOSE tests (alg none, mismatch, missing/forged iat, x5c) |
-| D-4 | SR-08, SR-12; OQ-1–OQ-4 | Stored `specVersion`; no ETSI claim |
+| D-4 | SR-08, SR-12; D-9–D-12 resolve the related OQs | Stored `specVersion`; no ETSI claim |
 | D-5 | SR-10, migration | Unknown enum values preserved and reported |
 | D-6 | FR-002, AC-05/AC-06; SR-12 | Digest stability, immutability and tamper tests |
 | D-7 | FR-001–FR-003, spec §17 | Migration and isolation tests on a temporary SQLite file |
@@ -326,10 +343,10 @@ Rules:
 
 ## 9. Dependency-ordered Phase 1 plan
 
-The backlog is the migrated issue set #26–#39. The superseded Phase 1 issues #6–#14 and
-the Phase 0 approval gate in #5 are not part of this plan. An issue starts only when every
-issue on its `Depends on` line is **CLOSED with stateReason COMPLETED**, as the repository
-workflow requires.
+The Phase 1 backlog is the migrated issue set #26–#39. The original Phase 1 issues #6–#14
+were closed as duplicates, and the Phase 0 approval gate in #5 is superseded by #25. An
+issue starts only when every issue on its `Depends on` line is **CLOSED with stateReason
+COMPLETED**, as the repository workflow requires.
 
 | Wave | Issue | Slice | Depends on | Exit evidence |
 | --- | --- | --- | --- | --- |
@@ -424,13 +441,13 @@ dimension as PASS.
 | AC-06 published versions immutable | Phase 1 | #29, #37 |
 | AC-07 credential validated against a selected version | Phase 1 | #32, #38 |
 | AC-08 errors identify constraints and attributes | Phase 1 | #32, #33, #38 |
-| AC-09 create/edit/publish a rulebook | Phase 2 | #15 |
-| AC-10 issuer consumes definitions via API | Phase 3 | #16 |
-| AC-11 verifier consumes constraints via API | Phase 3 | #16 |
-| AC-12 capture design needs no validation-engine redesign | Phase 4 | #17; contracts in capture-integration.md |
-| AC-13 mock capture artifacts validate | Phase 4 | #17 |
-| AC-14 capture evidence correlates with results | Phase 4 | #17 |
-| AC-15 Credimi consumes results without DB access | Phase 5 | #18 |
+| AC-09 create/edit/publish a rulebook | Phase 2 | #40, #41, #42 |
+| AC-10 issuer consumes definitions via API | Phase 3 | #43, #44 |
+| AC-11 verifier consumes constraints via API | Phase 3 | #45 |
+| AC-12 capture design needs no validation-engine redesign | Phase 4 | #46, #47, #48; contracts in capture-integration.md |
+| AC-13 mock capture artifacts validate | Phase 4 | #47 |
+| AC-14 capture evidence correlates with results | Phase 4 | #48 |
+| AC-15 Credimi consumes results without DB access | Phase 5 | #49 |
 | AC-16 dimensions remain distinguishable | Phase 1 | #33 |
 | AC-17 unsupported functionality is explicit | Phase 1 | #32, #33 |
 | AC-18 tests, Docker and developer documentation | Phase 1 | #26, #39 |
@@ -447,7 +464,7 @@ a later issue can act on them; they do not block autonomous Phase 1 work.
 | Finding | Status / decision | Owner or trigger |
 | --- | --- | --- |
 | Issue #5 required a human approval gate before Phase 1 | **Dropped** by issue #25 and repository policy; Phase 1 is dependency-driven, not sign-off-driven. | Resolved in this plan |
-| Original Phase 1 issues #6–#14 carry stale "blocked until approval" wording | Superseded by #26–#39; not executed. | Repository owner may close the stale issues |
+| Original Phase 1 issues #6–#14 carry stale "blocked until approval" wording | Closed as duplicates and superseded by #26–#39; not executed. | No action |
 | FR-005 periodic synchronization and UI-004 import interface have no current roadmap child issue | Phase 1 delivers only safe API import/re-import (#30/#31); a follow-up issue is needed for scheduling and the import UI. | Later backlog planning |
 | OWF `verifySchemaMeta` accepts inconsistent JOSE headers and synthesises `iat` | Mitigated by D-3; upstream issue candidates remain open. | #27; upstream OWF |
 | OWF `SchemaMeta` diverges from TS11 v1.0.1 (id, integrity, trust, formats, schema URIs) | Mitigated by D-2; no public OWF model. | #27 |
@@ -458,7 +475,7 @@ a later issue can act on them; they do not block autonomous Phase 1 work.
 | TS11 catalogue authorisation mechanism is unspecified (§5.2.2) | Provisional product auth only (D-10). | #35; re-check TS11 |
 | `isLOTE` vs `isLoTE` spelling and future `etsi_lote` value | Preserve both/unknown values as extensible data (D-5). | #27 |
 | mdoc/mDL, browser, Deno and ARM behaviour are untested | Explicit `NOT_TESTED` / documented limitation (D-17, R-5, R-12). | Later format/runtime issue |
-| Capture decisions CD-1, CD-2, CD-3, CD-4, CD-5, CD-6 (field set, redaction depth, pull schedule, sync/async push, correlation ownership, artifact storage) | Deliberately deferred to Phase 4, after real capture contracts exist. | #17 |
+| Capture decisions CD-1, CD-2, CD-3, CD-4, CD-5, CD-6 (field set, redaction depth, pull schedule, sync/async push, correlation ownership, artifact storage) | Deliberately deferred to Phase 4, after real capture contracts exist. | #46, #47, #48 |
 | PostgreSQL, semantic canonicalization, TS11 catalogue API and OID4VCI version target | Not needed for the Phase 1 MVP; later decisions with their own issues. | Future issues |
 
 ## 12. Assumptions and non-claims
@@ -503,3 +520,19 @@ a later issue can act on them; they do not block autonomous Phase 1 work.
   [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37),
   [#38](https://github.com/ForkbombEu/credimi-attestbook/issues/38),
   [#39](https://github.com/ForkbombEu/credimi-attestbook/issues/39)
+- Later-phase issues (migrated/split from the closed duplicates #15–#19):
+  [#40](https://github.com/ForkbombEu/credimi-attestbook/issues/40),
+  [#41](https://github.com/ForkbombEu/credimi-attestbook/issues/41),
+  [#42](https://github.com/ForkbombEu/credimi-attestbook/issues/42),
+  [#43](https://github.com/ForkbombEu/credimi-attestbook/issues/43),
+  [#44](https://github.com/ForkbombEu/credimi-attestbook/issues/44),
+  [#45](https://github.com/ForkbombEu/credimi-attestbook/issues/45),
+  [#46](https://github.com/ForkbombEu/credimi-attestbook/issues/46),
+  [#47](https://github.com/ForkbombEu/credimi-attestbook/issues/47),
+  [#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48),
+  [#49](https://github.com/ForkbombEu/credimi-attestbook/issues/49),
+  [#50](https://github.com/ForkbombEu/credimi-attestbook/issues/50),
+  [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51),
+  [#52](https://github.com/ForkbombEu/credimi-attestbook/issues/52),
+  [#53](https://github.com/ForkbombEu/credimi-attestbook/issues/53),
+  [#54](https://github.com/ForkbombEu/credimi-attestbook/issues/54)
