@@ -17,6 +17,20 @@ export {
 export { aggregateStatus } from './status'
 
 export {
+  assertDimensionCatalogue,
+  assertDimensionConsistency,
+  createDimension,
+  DIMENSION_DEFINITIONS,
+  dimensionDefinition,
+  DimensionConsistencyError,
+  limitationsFromDimensions,
+  type DimensionApplicability,
+  type DimensionDefinition,
+  type DimensionInput,
+  type DimensionOwner,
+} from './dimensions'
+
+export {
   detectCredentialFormat,
   recognizeCredentialFormat,
   STRUCTURAL_PARSER_FORMATS,
@@ -41,8 +55,11 @@ export {
   type SchemaReferenceEvidence,
   type ValidateCredentialInput,
   type ValidationDimension,
+  type ValidationDimensionEvidence,
   type ValidationDimensionId,
+  type ValidationEvidenceValue,
   type ValidationFinding,
+  type ValidationLimitation,
   type ValidationSeverity,
   type ValidationStatus,
 } from './types'
