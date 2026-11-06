@@ -13,3 +13,7 @@ coverage/
 # Tooling and operating-system noise
 .DS_Store
 *.log
+
+# Browser test artefacts
+test-results/
+playwright-report/

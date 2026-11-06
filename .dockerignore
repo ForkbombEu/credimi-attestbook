@@ -8,3 +8,7 @@ docs
 research
 scripts
 *.log
+
+test-results
+playwright-report
+ui/node_modules

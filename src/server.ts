@@ -1,9 +1,14 @@
+import { existsSync } from 'node:fs'
+
 import { createApp } from './app'
 import { loadConfig } from './config'
 import { openDatabase } from './db/database'
 import { applyMigrations } from './db/migrations'
 import { Registry } from './registry'
 import { CredentialValidator } from './validation'
+
+/** Vite writes the built web UI here; `bun run build` produces it. */
+const UI_DIST_PATH = './dist/ui'
 
 const config = loadConfig()
 const database = openDatabase(config.databasePath)
@@ -18,7 +23,11 @@ const validation = new CredentialValidator({
     maxConcurrent: config.schemaSandboxConcurrency,
   },
 })
-const app = createApp({ registry, validation })
+const app = createApp({
+  registry,
+  validation,
+  ...(existsSync(UI_DIST_PATH) ? { uiRoot: UI_DIST_PATH } : {}),
+})
 
 const server = Bun.serve({
   hostname: config.hostname,

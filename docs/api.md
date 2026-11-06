@@ -21,6 +21,8 @@ bearer authentication), D-14 (Hono + Zod/OpenAPI layer) and D-15 (CI jobs, inclu
 Implemented and exposed by this slice:
 
 - public catalogue reads of rulebooks, attestation types, schema references and versions;
+- the public provider projection used by the catalog UI (added by
+  [issue #36](https://github.com/ForkbombEu/credimi-attestbook/issues/36));
 - exact snapshot bytes and the content digest of one version;
 - authenticated create of a draft rulebook, create of a draft version and publication;
 - authenticated import preview and import of URL/JSON sources;
@@ -34,7 +36,9 @@ Deliberately **not** in this slice:
   to offer them;
 - provider-management HTTP routes, rate limiting and token expiry/rotation — future hardening;
   the implemented write-auth model is documented in [`docs/security.md`](security.md);
-- rulebook editor, version comparison/diff and UI routes — later Phase 2 slices.
+- rulebook editor, version comparison/diff, detail UI and credential playground UI — later
+  slices (#37, #38, #40–#42). The catalog UI at `/` is delivered by #36 and documented in
+  [`docs/ui.md`](ui.md); it is not an API route.
 
 Every handler calls the real registry, import or validation service. A service that is not
 wired answers `503` with a typed code instead of a placeholder success response.
@@ -49,7 +53,7 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.0.0`);
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.1.0`, after the additive public provider read added by #36);
   it is separate from the package version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
@@ -64,6 +68,7 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | Method | Path | Auth | Success | Purpose |
 | --- | --- | --- | --- | --- |
 | `GET` | `/health` | no | `200` | Liveness and build version (unversioned). |
+| `GET` | `/api/v1/providers` | no | `200` | Public provider projection (`id`, `name`, `createdAt`) used by the catalog UI. |
 | `GET` | `/api/v1/rulebooks` | no | `200` | Filtered, paginated catalogue listing. Query parameters: `providerId`, `status`, `limit` (default 50, max 100), `offset` (default 0). |
 | `POST` | `/api/v1/rulebooks` | yes | `201` + `Location` | Create a draft rulebook, its attestation types and their schema references. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}` | no | `200` | One rulebook's public product metadata. |
@@ -98,6 +103,10 @@ carries pagination:
 `limit` and `offset` are applied after the provider/status filters; `total` is the filtered
 count. The Phase 1 registry listing is in-memory, which is acceptable for the bounded MVP
 catalogue and is the documented limitation until a paginated store query exists.
+
+`GET /api/v1/providers` uses the same `{ "data": [...] }` envelope. Its public projection
+contains only `id`, `name` and `createdAt`: publication authority, registry metadata and
+tokens are never exposed.
 
 `POST /api/v1/rulebooks` and `POST /api/v1/rulebooks/{rulebookId}/versions` return `201` and
 a `Location` header pointing at the canonical GET path. The other writes and imports return
@@ -233,7 +242,8 @@ bun run check           # formatting, lint, strict typecheck and all tests
 
 The API tests use real temporary SQLite databases, real registry services, the real import
 pipeline (offline JSON sources only) and a genuinely signed SD-JWT VC fixture. They do not
-claim coverage of HTTP rate limits, provider-management routes or the UI.
+claim coverage of HTTP rate limits or provider-management routes. The catalog UI has its own
+component and browser tests described in [`docs/ui.md`](ui.md).
 
 ## 9. Limitations and next slices
 

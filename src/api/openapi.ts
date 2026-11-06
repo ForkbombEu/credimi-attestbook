@@ -13,7 +13,7 @@ import { OPENAPI_COMPONENTS, componentJsonSchema } from './schemas'
 export const OPENAPI_VERSION = '3.1.0'
 
 /** Version of the API contract document itself. */
-export const API_CONTRACT_VERSION = '1.0.0'
+export const API_CONTRACT_VERSION = '1.1.0'
 
 /** URL prefix that carries the product API's major version. */
 export const API_VERSION_PREFIX = '/api/v1'
@@ -33,6 +33,10 @@ const TAG_DESCRIPTIONS: readonly { readonly name: string; readonly description: 
   {
     name: 'service',
     description: 'Unversioned operational endpoints. Not part of the versioned resource API.',
+  },
+  {
+    name: 'providers',
+    description: 'Public provider identities referenced by catalogue rulebooks.',
   },
   { name: 'rulebooks', description: 'Stable rulebook identity, content and schema references.' },
   { name: 'versions', description: 'Immutable rulebook snapshots, digests and publication.' },

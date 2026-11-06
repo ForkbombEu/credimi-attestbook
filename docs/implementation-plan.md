@@ -115,7 +115,7 @@ Versions in this table were inspected or executed during Phase 0. Values marked
 | OWF probe re-run | Node.js 24.22.2, 35 checks passed | re-verified 2026-11-05 | `research/owf-audit` run for this plan |
 | SQLite via Bun | Bun 1.3.1 built-in `bun:sqlite`; WAL and foreign keys enabled | verified | `src/sqlite-smoke.test.ts`; #26 |
 | Hono HTTP library | 4.13.16 | verified (health endpoint under Bun) | `src/app.test.ts`, Docker smoke job; #26 |
-| UI/validation libraries | not yet executed by AttestBook | **verification gate** | exact versions pinned by #32/#36 |
+| UI libraries | React/React DOM 19.3.1, Vite 8.3.6, Vitest 5.1.0, `@playwright/test` 1.65.0 (exact set in [`docs/ui.md`](ui.md) §2) | verified: production build plus component and browser tests executed | `docs/ui.md`, `ui/src/*.test.ts[x]`, `ui/e2e/`; #36 |
 
 Rules that follow from this table:
 
@@ -292,8 +292,10 @@ merged into them.
 - **Validation libraries:** `@sd-jwt/sd-jwt-vc` (version aligned with OWF's pinned
   transitive version) for SD-JWT VC parsing and Ajv 2020-12 for JSON Schema validation.
   The exact versions are pinned and tested in #32.
-- **UI:** React + Vite, consuming the same public API. Phase 1 builds UI-001, UI-002 and
-  UI-005 only; it does not claim the editor, import UI or capture explorer.
+- **UI:** React 19 + Vite 8, consuming the same public API, with the built assets served
+  from `/` by the Bun server. Phase 1 builds UI-001, UI-002 and UI-005 only; the catalog
+  slice (#36) is implemented, and the editor, import UI and capture explorer are not
+  claimed.
 - **Docker:** multi-stage image based on `oven/bun:1.3.1`, non-root runtime user, health
   endpoint, migration entrypoint, no secrets baked in.
 - **Observability:** structured logs with request ids and a redaction layer; no raw
@@ -307,14 +309,14 @@ touches production.
 
 | Job | What it does | Introduced by |
 | --- | --- | --- |
-| `quality` | Format check, lint, strict typecheck | #26 |
+| `quality` | Format check, lint and strict typecheck, including the UI project | #26, extended by #36 |
 | `test` | Unit + integration tests on Bun 1.3.1, including the real OWF package and a temporary SQLite database | #26, extended by #27–#33 |
-| `build` | Production build and bundle | #26 |
-| `docker` | Build image, start container, wait for health, run an API round-trip, stop | #26 |
+| `build` | Production build and bundle, including `dist/ui/index.html` | #26, extended by #36 |
+| `docker` | Build image, start container, wait for health, run a catalog-page and API round-trip, stop | #26, extended by #36 |
 | `docs` | `node scripts/check-docs.mjs` (five documents, relative links, cross-references) | #25, wired into main CI by #26 |
 | `openapi` | Validate the generated OpenAPI 3.1 document and contract tests | #34 |
 | `owf-compat` | Re-run the Phase 0 OWF probe on Node 22 and Bun 1.3.1 against the pinned lockfile | #26 |
-| `ui` | Component tests and Playwright end-to-end tests against the real API | #36–#38 |
+| `ui` | UI typecheck, component/accessibility tests and Playwright end-to-end tests against the real API | #36, extended by #37–#38 |
 
 Rules:
 

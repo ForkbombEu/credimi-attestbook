@@ -22,6 +22,7 @@ import type {
   CredentialValidationResource,
   ImportPreviewResource,
   ImportResultResource,
+  ProviderResource,
   RulebookPageResource,
   RulebookResource,
   RulebookVersionDocumentResource,
@@ -95,6 +96,34 @@ async function postJson(app: Hono, path: string, body: unknown, token?: string):
     body: JSON.stringify(body),
   })
 }
+
+describe('provider read API', () => {
+  test('lists the public provider projection without authority or metadata', async () => {
+    const { app, registry } = setup()
+    const [provider] = registry.listProviders()
+    if (provider === undefined) {
+      throw new Error('the fixture must provision at least one provider')
+    }
+
+    const response = await app.request('/api/v1/providers')
+    expect(response.status).toBe(200)
+    const body = await json<DataBody<readonly ProviderResource[]>>(response)
+    assertSchema('ProviderListResponse', body)
+    expect(body.data).toEqual([
+      { id: provider.id, name: provider.name, createdAt: provider.createdAt },
+    ])
+    expect(body.data[0]).not.toHaveProperty('publicationAuthority')
+    expect(body.data[0]).not.toHaveProperty('metadata')
+  })
+
+  test('answers 503 instead of an empty list when the registry is not wired', async () => {
+    const app = createApp()
+    const response = await app.request('/api/v1/providers')
+
+    expect(response.status).toBe(503)
+    expect((await errorJson(response)).error.code).toBe('registry_unavailable')
+  })
+})
 
 describe('rulebook read API', () => {
   test('lists the public catalogue with pagination and without internal fields', async () => {
