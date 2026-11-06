@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
+import { fileURLToPath } from 'node:url'
 
 import { MAX_VALIDATION_BODY_BYTES, createApp, type ErrorEnvelope } from './app'
 import { createRegistryFixture, type RegistryFixture } from './registry/test-support'
@@ -77,26 +78,12 @@ describe('POST /api/credentials/validate', () => {
     expect(result.violations.map((entry) => entry.code)).toContain('signature_not_verified')
   })
 
-  test('keeps /health responsive while a hostile schema runs in the sandbox', async () => {
-    const hostile = JSON.stringify({
-      type: 'object',
-      properties: {
-        given_name: {
-          anyOf: Array.from({ length: 950 }, () => ({ minLength: 600_000 })),
-        },
-      },
-    })
-    const { app, seeded } = setup(
-      {
-        schemaUri: 'https://example.org/schemas/hostile.json',
-        schemaContent: hostile,
-      },
-      { timeoutMs: 1_000 },
+  test('keeps /health responsive while a schema runs in the sandbox', async () => {
+    const slowEntry = fileURLToPath(
+      new URL('./validation/test-fixtures/slow-entry.ts', import.meta.url),
     )
-    const credential = await issueTestCredential({
-      claims: defaultCredentialClaims({ given_name: 'a'.repeat(370_000) }),
-      selectiveClaims: [],
-    })
+    const { app, seeded } = setup({}, { entry: slowEntry, timeoutMs: 1_000 })
+    const credential = await issueTestCredential()
 
     const validation = post(app, body(seeded, credential))
     await new Promise((resolve) => setTimeout(resolve, 50))
