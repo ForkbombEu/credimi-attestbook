@@ -1,16 +1,22 @@
 interface LoadingStateProps {
   readonly rowCount?: number
+  readonly title?: string
+  readonly detail?: string
 }
 
-export function LoadingState({ rowCount = 4 }: LoadingStateProps) {
+export function LoadingState({
+  rowCount = 4,
+  title = 'Loading rulebooks…',
+  detail = 'Reading the public catalogue API.',
+}: LoadingStateProps) {
   return (
     <div className="state-panel state-panel--loading">
       <h2 className="state-title">
         <span role="status" aria-live="polite">
-          Loading rulebooks…
+          {title}
         </span>
       </h2>
-      <p className="state-detail">Reading the public catalogue API.</p>
+      <p className="state-detail">{detail}</p>
       <div className="skeleton-table" aria-hidden="true">
         {Array.from({ length: rowCount }, (_, index) => (
           <div className="skeleton-row" key={index}>
@@ -28,12 +34,17 @@ export function LoadingState({ rowCount = 4 }: LoadingStateProps) {
 interface ErrorStateProps {
   readonly message: string
   readonly onRetry: () => void
+  readonly title?: string
 }
 
-export function ErrorState({ message, onRetry }: ErrorStateProps) {
+export function ErrorState({
+  message,
+  onRetry,
+  title = 'The rulebook catalog could not be loaded.',
+}: ErrorStateProps) {
   return (
     <div className="state-panel state-panel--error" role="alert">
-      <h2 className="state-title">The rulebook catalog could not be loaded.</h2>
+      <h2 className="state-title">{title}</h2>
       <p className="state-detail">{message}</p>
       <button type="button" className="button button--primary" onClick={onRetry}>
         Retry

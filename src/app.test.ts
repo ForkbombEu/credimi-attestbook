@@ -94,6 +94,14 @@ describe('built web UI', () => {
     expect(asset.headers.get('x-content-type-options')).toBe('nosniff')
   })
 
+  test('serves the UI entry document for a client-routed rulebook detail link', async () => {
+    const response = await uiApp.request('/rulebooks/00000000-0000-4000-8000-000000000000')
+
+    expect(response.status).toBe(200)
+    expect(response.headers.get('content-type')).toContain('text/html')
+    expect(await response.text()).toContain('<title>AttestBook</title>')
+  })
+
   test('rejects asset path traversal and missing assets with the JSON 404', async () => {
     for (const path of [
       '/assets/%2e%2e/index.html',
@@ -131,5 +139,9 @@ describe('built web UI', () => {
 
     expect(response.status).toBe(404)
     expect(response.headers.get('content-type')).toContain('application/json')
+
+    const deepLink = await createApp().request('/rulebooks/00000000-0000-4000-8000-000000000000')
+    expect(deepLink.status).toBe(404)
+    expect(deepLink.headers.get('content-type')).toContain('application/json')
   })
 })

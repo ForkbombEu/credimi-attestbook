@@ -4,7 +4,14 @@
 // never bypasses the API to read the registry. Error messages are the stable,
 // safe messages of the API error envelope.
 
-import type { Attestation, Provider, RulebookPage, RulebookVersion } from './types'
+import type {
+  Attestation,
+  Provider,
+  Rulebook,
+  RulebookPage,
+  RulebookVersion,
+  SchemaReference,
+} from './types'
 
 /** Hard cap of the catalogue API page size (`limit` maximum). */
 export const CATALOG_PAGE_LIMIT = 100
@@ -12,7 +19,12 @@ export const CATALOG_PAGE_LIMIT = 100
 export interface CatalogApi {
   listProviders(signal?: AbortSignal): Promise<readonly Provider[]>
   listRulebooks(signal?: AbortSignal): Promise<RulebookPage>
+  getRulebook(rulebookId: string, signal?: AbortSignal): Promise<Rulebook>
   listAttestations(rulebookId: string, signal?: AbortSignal): Promise<readonly Attestation[]>
+  listSchemaReferences(
+    rulebookId: string,
+    signal?: AbortSignal,
+  ): Promise<readonly SchemaReference[]>
   listVersions(rulebookId: string, signal?: AbortSignal): Promise<readonly RulebookVersion[]>
 }
 
@@ -68,6 +80,7 @@ async function getJson<T>(fetchImpl: FetchLike, path: string, signal?: AbortSign
 export function createHttpCatalogApi(
   fetchImpl: FetchLike = (input, init) => fetch(input, init),
 ): CatalogApi {
+  const rulebookPath = (rulebookId: string) => `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}`
   return {
     async listProviders(signal) {
       const body = await getJson<unknown>(fetchImpl, '/api/v1/providers', signal)
@@ -77,17 +90,35 @@ export function createHttpCatalogApi(
       const path = `/api/v1/rulebooks?limit=${CATALOG_PAGE_LIMIT}&offset=0`
       return getJson<RulebookPage>(fetchImpl, path, signal)
     },
+    async getRulebook(rulebookId, signal) {
+      const body = await getJson<unknown>(fetchImpl, rulebookPath(rulebookId), signal)
+      return singleData<Rulebook>(body)
+    },
     async listAttestations(rulebookId, signal) {
-      const path = `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/attestations`
+      const path = `${rulebookPath(rulebookId)}/attestations`
       const body = await getJson<unknown>(fetchImpl, path, signal)
       return singleData<readonly Attestation[]>(body)
     },
+    async listSchemaReferences(rulebookId, signal) {
+      const path = `${rulebookPath(rulebookId)}/schema-references`
+      const body = await getJson<unknown>(fetchImpl, path, signal)
+      return singleData<readonly SchemaReference[]>(body)
+    },
     async listVersions(rulebookId, signal) {
-      const path = `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/versions`
+      const path = `${rulebookPath(rulebookId)}/versions`
       const body = await getJson<unknown>(fetchImpl, path, signal)
       return singleData<readonly RulebookVersion[]>(body)
     },
   }
+}
+
+/**
+ * The public API path of a version snapshot's exact bytes. The link is an
+ * export: the response carries `Content-Digest` and an `ETag` so a consumer can
+ * verify it against the digest shown in the version history.
+ */
+export function versionContentPath(rulebookId: string, version: string): string {
+  return `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/versions/${encodeURIComponent(version)}/content`
 }
 
 export function isAbortError(error: unknown): boolean {

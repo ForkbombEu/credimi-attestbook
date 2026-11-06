@@ -1,8 +1,9 @@
 // Wire types of the public product API that the catalog consumes (issue #36).
 //
 // These mirror the stable response fields of src/api/schemas.ts. The UI only
-// reads the public projection: provider, rulebook, attestation and version
-// metadata. It never receives registry-internal provenance, metadata or tokens.
+// reads the public projection: provider, rulebook, attestation, schema
+// reference and version metadata. It never receives registry-internal
+// provenance, metadata or tokens.
 
 export type PublicationStatus = 'draft' | 'published' | 'historical'
 
@@ -24,6 +25,18 @@ export interface Rulebook {
   readonly updatedAt: string
 }
 
+export interface SchemaReference {
+  readonly id: string
+  readonly rulebookId: string
+  /** Attestation type this reference belongs to; `null` for rulebook-level. */
+  readonly attestationId: string | null
+  readonly formatIdentifier: string
+  readonly uri: string
+  /** W3C SRI value such as `sha256-...`, when the source carries one. */
+  readonly integrity: string | null
+  readonly createdAt: string
+}
+
 export interface Attestation {
   readonly id: string
   readonly rulebookId: string
@@ -31,6 +44,7 @@ export interface Attestation {
   readonly attestationLoS: string
   readonly bindingType: string
   readonly supportedFormats: readonly string[]
+  readonly schemaReferences: readonly SchemaReference[]
   readonly createdAt: string
 }
 

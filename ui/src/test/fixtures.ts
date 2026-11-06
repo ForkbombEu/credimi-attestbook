@@ -1,12 +1,32 @@
-// Shared fixtures for the catalog unit and component tests.
+// Shared fixtures for the catalog and detail unit and component tests.
 
-import type { CatalogApi } from '../api'
-import type { Attestation, Provider, Rulebook, RulebookVersion } from '../types'
+import { CatalogApiError, type CatalogApi } from '../api'
+import type { Attestation, Provider, Rulebook, RulebookVersion, SchemaReference } from '../types'
 
 export const PROVIDERS: readonly Provider[] = [
   { id: 'provider-issuer', name: 'Example Issuer', createdAt: '2026-01-02T10:00:00.000Z' },
   { id: 'provider-lab', name: 'Wallet Lab', createdAt: '2026-01-03T10:00:00.000Z' },
 ]
+
+export const PID_SCHEMA_REFERENCE: SchemaReference = {
+  id: 'reference-pid',
+  rulebookId: 'rulebook-pid',
+  attestationId: 'attestation-pid',
+  formatIdentifier: 'dc+sd-jwt',
+  uri: 'https://issuer.example.org/schemas/pid',
+  integrity: 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=',
+  createdAt: '2026-02-01T10:00:00.000Z',
+}
+
+export const RULEBOOK_SCHEMA_REFERENCE: SchemaReference = {
+  id: 'reference-rulebook',
+  rulebookId: 'rulebook-pid',
+  attestationId: null,
+  formatIdentifier: 'mso_mdoc',
+  uri: 'https://issuer.example.org/schemas/common',
+  integrity: null,
+  createdAt: '2026-02-01T10:00:00.000Z',
+}
 
 export function makeRulebook(overrides: Partial<Rulebook> = {}): Rulebook {
   return {
@@ -31,6 +51,7 @@ export function makeAttestation(overrides: Partial<Attestation> = {}): Attestati
     attestationLoS: 'iso_18045_high',
     bindingType: 'cryptographic',
     supportedFormats: ['dc+sd-jwt', 'mso_mdoc'],
+    schemaReferences: [],
     createdAt: '2026-02-01T10:00:00.000Z',
     ...overrides,
   }
@@ -54,6 +75,7 @@ export interface CatalogDataset {
   readonly providers: readonly Provider[]
   readonly rulebooks: readonly Rulebook[]
   readonly attestations: Readonly<Record<string, readonly Attestation[]>>
+  readonly schemaReferences: Readonly<Record<string, readonly SchemaReference[]>>
   readonly versions: Readonly<Record<string, readonly RulebookVersion[]>>
 }
 
@@ -72,7 +94,7 @@ export const SAMPLE_DATASET: CatalogDataset = {
     }),
   ],
   attestations: {
-    'rulebook-pid': [makeAttestation()],
+    'rulebook-pid': [makeAttestation({ schemaReferences: [PID_SCHEMA_REFERENCE] })],
     'rulebook-age': [
       makeAttestation({
         id: 'attestation-age',
@@ -82,6 +104,10 @@ export const SAMPLE_DATASET: CatalogDataset = {
       }),
     ],
   },
+  schemaReferences: {
+    'rulebook-pid': [PID_SCHEMA_REFERENCE, RULEBOOK_SCHEMA_REFERENCE],
+    'rulebook-age': [],
+  },
   versions: {
     'rulebook-pid': [
       makeVersion(),
@@ -89,6 +115,7 @@ export const SAMPLE_DATASET: CatalogDataset = {
         id: 'version-1-1',
         version: '1.1',
         status: 'draft',
+        contentDigest: 'b'.repeat(64),
         createdAt: '2026-03-04T10:00:00.000Z',
         publishedAt: null,
       }),
@@ -108,7 +135,15 @@ export function createFakeApi(dataset: CatalogDataset = SAMPLE_DATASET): Catalog
   return {
     listProviders: () => Promise.resolve(dataset.providers),
     listRulebooks: () => Promise.resolve(page(dataset)),
+    getRulebook: (rulebookId) => {
+      const rulebook = dataset.rulebooks.find((candidate) => candidate.id === rulebookId)
+      return rulebook === undefined
+        ? Promise.reject(new CatalogApiError('No route matches the request path.', 404))
+        : Promise.resolve(rulebook)
+    },
     listAttestations: (rulebookId) => Promise.resolve(dataset.attestations[rulebookId] ?? []),
+    listSchemaReferences: (rulebookId) =>
+      Promise.resolve(dataset.schemaReferences[rulebookId] ?? []),
     listVersions: (rulebookId) => Promise.resolve(dataset.versions[rulebookId] ?? []),
   }
 }
