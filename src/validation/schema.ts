@@ -648,10 +648,7 @@ function validateJsonSchema(
   }
 }
 
-/**
- * Applies every supplied document to the selected rulebook references.
- * `references` must already be filtered to the credential format.
- */
+/** D-8 status aggregation for the schema-validation dimension. */
 export function aggregateSchemaStatus(statuses: readonly ValidationStatus[]): ValidationStatus {
   if (statuses.length === 0) {
     return 'NOT_APPLICABLE'
@@ -720,9 +717,11 @@ function settle(
 }
 
 /**
- * Performs every cheap, non-compute-heavy check in the HTTP process: input
- * bounds, reference matching, integrity, JSON parsing, depth, ambiguity and
- * the unsupported-keyword scan. Only verified documents reach `pending`.
+ * Applies every supplied document to the selected rulebook references.
+ * `references` must already be filtered to the credential format. This
+ * performs only the cheap checks in the HTTP process: input bounds, reference
+ * matching, integrity, JSON parsing, depth, ambiguity and the
+ * unsupported-keyword scan. Only verified documents reach `pending`.
  */
 export function prepareSchemaDocuments(
   options: PrepareSchemaDocumentsOptions,

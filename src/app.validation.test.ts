@@ -6,7 +6,6 @@ import { createRegistryFixture, type RegistryFixture } from './registry/test-sup
 import { CredentialValidator, type CredentialValidationResult } from './validation'
 import type { SchemaSandboxLimits } from './validation/schema-sandbox'
 import {
-  defaultCredentialClaims,
   issueTestCredential,
   seedPublishedRulebook,
   type SeedRulebookOptions,
@@ -85,11 +84,13 @@ describe('POST /api/credentials/validate', () => {
     const { app, seeded } = setup({}, { entry: slowEntry, timeoutMs: 1_000 })
     const credential = await issueTestCredential()
 
+    const started = Date.now()
     const validation = post(app, body(seeded, credential))
     await new Promise((resolve) => setTimeout(resolve, 50))
 
     // Prove the HTTP process answers /health before the sandboxed validation
-    // finishes. A fixed millisecond threshold is too sensitive to CI load.
+    // finishes. The spinning entry guarantees the child is still running.
+    const healthStarted = Date.now()
     const healthPromise = Promise.resolve(app.request('/health'))
     const winner = await Promise.race([
       healthPromise.then(() => 'health' as const),
@@ -98,11 +99,15 @@ describe('POST /api/credentials/validate', () => {
     expect(winner).toBe('health')
     const health = await healthPromise
     expect(health.status).toBe(200)
+    expect(Date.now() - healthStarted).toBeLessThan(200)
 
     const response = await validation
     expect(response.status).toBe(200)
+    expect(Date.now() - started).toBeGreaterThanOrEqual(900)
     const result = (await response.json()) as CredentialValidationResult
     expect(result.violations.map((entry) => entry.code)).toContain('schema_evaluation_timeout')
+    const schemaDimension = result.dimensions.find((entry) => entry.id === 'schema_validation')
+    expect(schemaDimension?.status).toBe('NOT_TESTED')
   })
 
   test('does not echo the credential or claim values', async () => {
