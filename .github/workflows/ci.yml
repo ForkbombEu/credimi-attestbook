@@ -228,8 +228,17 @@ jobs:
       - name: Run the Phase 1 end-to-end acceptance workflow
         run: bun run acceptance
 
-      - name: Verify the dimension-aware evidence was exported
-        run: test -s dist/acceptance-evidence.json
+      - name: Verify the dimension-aware evidence was exported with the UI checked
+        run: |
+          test -s dist/acceptance-evidence.json
+          bun -e '
+            import { readFileSync } from "node:fs";
+            const evidence = JSON.parse(readFileSync("dist/acceptance-evidence.json", "utf8"));
+            if (evidence.ui.checked !== true || evidence.ui.servedRoutes.length !== 3) {
+              console.error("the acceptance evidence did not check the built UI routes");
+              process.exit(1);
+            }
+          '
 
   docs:
     name: docs

@@ -6,9 +6,9 @@
 //
 // It builds no services of its own: the workflow uses a temporary SQLite
 // database, the real migrations and the in-process HTTP application. The built
-// UI is checked when `dist/ui` exists (`bun run build` produces it). The
-// dimension-aware evidence is written to `ACCEPTANCE_EVIDENCE_PATH`
-// (default `dist/acceptance-evidence.json`).
+// UI is required (`bun run build` produces it); the workflow fails if
+// `dist/ui/index.html` is missing. The dimension-aware evidence is written to
+// `ACCEPTANCE_EVIDENCE_PATH` (default `dist/acceptance-evidence.json`).
 
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'

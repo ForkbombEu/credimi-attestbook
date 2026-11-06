@@ -111,7 +111,7 @@ export interface AcceptanceEvidence {
     readonly snapshotHasNormativeFields: boolean
   }
   readonly valid: ValidationSummary
-  readonly negativeMissingClaim: ValidationSummary
+  readonly negativeTypeViolation: ValidationSummary
   readonly negativeUnsupportedFormat: ValidationSummary
   readonly negativeNoSchemaDocument: ValidationSummary
   readonly nonConflation: {
@@ -184,6 +184,24 @@ interface ErrorEnvelope {
   readonly error: { readonly code: string; readonly message: string }
 }
 
+/**
+ * Records and enforces an expected HTTP status. Reading a success body without
+ * this guard would crash with a `TypeError` on an unexpected error response
+ * instead of reporting the failed acceptance check.
+ */
+function expectStatus(
+  checker: Checker,
+  id: string,
+  description: string,
+  status: number,
+  expected: number,
+): void {
+  checker.equal(id, description, status, expected)
+  if (status !== expected) {
+    checker.finish()
+  }
+}
+
 function sha256Hex(bytes: Uint8Array): string {
   return createHash('sha256').update(bytes).digest('hex')
 }
@@ -245,8 +263,9 @@ function assertDimension(
 
 export interface AcceptanceOptions {
   /**
-   * Directory containing the built UI, `false` to skip the UI-asset checks
-   * (the unit-test job has no build output), or omitted to use `./dist/ui`.
+   * Directory containing the built UI, or omitted to use `./dist/ui`. The UI
+   * is required by default; pass `false` only to run the API/validation checks
+   * without a build (the unit-test job does this).
    */
   readonly uiRoot?: string | false
   /** Clock used for evidence metadata. */
@@ -274,7 +293,15 @@ export async function runAcceptance(
     const importer = new RulebookImporter({ registry })
     const validation = new CredentialValidator({ source: registry, now })
     const uiRoot = options.uiRoot ?? './dist/ui'
-    const uiAvailable = uiRoot !== false && existsSync(join(uiRoot, 'index.html'))
+    const uiRequested = uiRoot !== false
+    const uiAvailable = uiRequested && existsSync(join(uiRoot, 'index.html'))
+    if (uiRequested) {
+      checker.ok(
+        'ui.built',
+        `the built UI entry document exists at ${join(String(uiRoot), 'index.html')} (run \`bun run build\` first)`,
+        uiAvailable,
+      )
+    }
     const app = createApp({
       registry,
       importer,
@@ -337,13 +364,14 @@ export async function runAcceptance(
       { source: { kind: 'json', content: JSON.stringify(owf), name: 'owf-badge.json' } },
       token,
     )
-    const owfEntry = owfPreview.data?.data.entries[0]
-    checker.equal(
+    expectStatus(
+      checker,
       'owf.import.status',
       'the OWF document previews as a compatible entry',
       owfPreview.status,
       200,
     )
+    const owfEntry = owfPreview.data?.data.entries[0]
     checker.equal(
       'owf.import.profile',
       'the OWF document is classified with the OWF 0.5.4 profile',
@@ -370,8 +398,14 @@ export async function runAcceptance(
       { source: { kind: 'json', content: ts11Text, name: 'ts11-pid.json' } },
       token,
     )
+    expectStatus(
+      checker,
+      'import.preview.status',
+      'the TS11 preview returns 200',
+      preview.status,
+      200,
+    )
     const previewEntry = preview.data?.data.entries[0]
-    checker.equal('import.preview.status', 'the TS11 preview returns 200', preview.status, 200)
     checker.ok(
       'import.preview.compatible',
       'the TS11 entry is structurally valid, compatible and conformant with the pinned baseline',
@@ -393,8 +427,14 @@ export async function runAcceptance(
       { source: { kind: 'json', content: ts11Text, name: 'ts11-pid.json' } },
       token,
     )
+    expectStatus(
+      checker,
+      'import.status',
+      'the authenticated import returns 200',
+      imported.status,
+      200,
+    )
     const importEntry = imported.data?.data.entries[0]
-    checker.equal('import.status', 'the authenticated import returns 200', imported.status, 200)
     checker.equal(
       'import.disposition',
       'the new entry is created as a draft',
@@ -418,6 +458,13 @@ export async function runAcceptance(
       'GET',
       `/api/v1/rulebooks/${rulebookId}`,
     )
+    expectStatus(
+      checker,
+      'rulebook.read.status',
+      'the imported rulebook read returns 200',
+      rulebookRead.status,
+      200,
+    )
     const rulebook = rulebookRead.data?.data
     checker.equal(
       'rulebook.status',
@@ -435,6 +482,13 @@ export async function runAcceptance(
     const attestationsRead = await requestJson<JsonData<readonly AttestationDetailResource[]>>(
       'GET',
       `/api/v1/rulebooks/${rulebookId}/attestations`,
+    )
+    expectStatus(
+      checker,
+      'attestations.read.status',
+      'the attestation list returns 200',
+      attestationsRead.status,
+      200,
     )
     const attestations = attestationsRead.data?.data ?? []
     const attestation = attestations[0]
@@ -465,6 +519,13 @@ export async function runAcceptance(
     const referencesRead = await requestJson<JsonData<readonly SchemaReferenceResource[]>>(
       'GET',
       `/api/v1/rulebooks/${rulebookId}/schema-references`,
+    )
+    expectStatus(
+      checker,
+      'schemaReferences.read.status',
+      'the schema-reference list returns 200',
+      referencesRead.status,
+      200,
     )
     const reference = referencesRead.data?.data?.[0]
     checker.equal(
@@ -498,7 +559,8 @@ export async function runAcceptance(
       { version: '1.0.0' },
       token,
     )
-    checker.equal(
+    expectStatus(
+      checker,
       'version.create.status',
       'freezing the working copy returns 201',
       createdVersion.status,
@@ -517,7 +579,8 @@ export async function runAcceptance(
       {},
       token,
     )
-    checker.equal(
+    expectStatus(
+      checker,
       'version.publish.status',
       'publishing the draft returns 200',
       published.status,
@@ -534,6 +597,13 @@ export async function runAcceptance(
       'GET',
       `/api/v1/rulebooks/${rulebookId}/versions`,
     )
+    expectStatus(
+      checker,
+      'versions.read.status',
+      'the version list returns 200',
+      versionsRead.status,
+      200,
+    )
     const versions = versionsRead.data?.data ?? []
     checker.equal('versions.count', 'the rulebook has one immutable version', versions.length, 1)
     checker.equal('versions.label', 'the version label is retained', versions[0]?.version, '1.0.0')
@@ -546,6 +616,13 @@ export async function runAcceptance(
 
     const contentResponse = await server.app.request(
       `/api/v1/rulebooks/${rulebookId}/versions/1.0.0/content`,
+    )
+    expectStatus(
+      checker,
+      'version.content.status',
+      'the exact version content returns 200',
+      contentResponse.status,
+      200,
     )
     const contentBytes = new Uint8Array(await contentResponse.arrayBuffer())
     const snapshot = JSON.parse(
@@ -609,7 +686,8 @@ export async function runAcceptance(
       schemaDocuments: [{ uri: SCHEMA_URI, content: SCHEMA_DOCUMENT_TEXT }],
     }
     const validResponse = await validate(validBody)
-    checker.equal(
+    expectStatus(
+      checker,
       'validation.valid.status',
       'the structural validation request returns 200',
       validResponse.status,
@@ -743,31 +821,32 @@ export async function runAcceptance(
     )
 
     // -------------------------------- negative: a failing attribute constraint
-    const invalidCredential = await issueTestCredential({
+    const typeViolationCredential = await issueTestCredential({
       claims: defaultCredentialClaims({ birthdate: 18151210 }),
     })
-    const missingClaimResponse = await validate({
+    const typeViolationResponse = await validate({
       ...validBody,
-      credential: invalidCredential,
+      credential: typeViolationCredential,
     })
-    const missingClaim = (missingClaimResponse.payload as JsonData<CredentialValidationResource>)
-      .data
-    const missingClaimSummary = summarize(missingClaim, JSON.stringify(missingClaim))
-    checker.equal(
+    expectStatus(
+      checker,
       'validation.negative.schema.status',
       'an attribute type violation returns 200',
-      missingClaimResponse.status,
+      typeViolationResponse.status,
       200,
     )
+    const typeViolation = (typeViolationResponse.payload as JsonData<CredentialValidationResource>)
+      .data
+    const typeViolationSummary = summarize(typeViolation, JSON.stringify(typeViolation))
     checker.equal(
       'validation.negative.schema.overall',
       'a schema failure is reported as FAIL overall',
-      missingClaim.overallStatus,
+      typeViolation.overallStatus,
       'FAIL',
     )
     assertDimension(
       checker,
-      missingClaim,
+      typeViolation,
       'schema_validation',
       { status: 'FAIL', applicable: true, executed: true },
       'validation.negative.schema',
@@ -775,7 +854,7 @@ export async function runAcceptance(
     checker.ok(
       'validation.negative.schema.finding',
       'the schema failure names the failing JSON Pointer path and constraint',
-      missingClaim.violations.some(
+      typeViolation.violations.some(
         (violation) =>
           violation.dimension === 'schema_validation' &&
           typeof violation.path === 'string' &&
@@ -789,16 +868,17 @@ export async function runAcceptance(
       ...validBody,
       credential: { format: 'mso_mdoc', value: credential },
     })
-    const unsupportedFormat = (
-      unsupportedFormatResponse.payload as JsonData<CredentialValidationResource>
-    ).data
-    const unsupportedFormatSummary = summarize(unsupportedFormat, JSON.stringify(unsupportedFormat))
-    checker.equal(
+    expectStatus(
+      checker,
       'validation.negative.format.status',
       'an unsupported format returns 200',
       unsupportedFormatResponse.status,
       200,
     )
+    const unsupportedFormat = (
+      unsupportedFormatResponse.payload as JsonData<CredentialValidationResource>
+    ).data
+    const unsupportedFormatSummary = summarize(unsupportedFormat, JSON.stringify(unsupportedFormat))
     checker.equal(
       'validation.negative.format.overall',
       'an unsupported format is not reported as a pass',
@@ -834,14 +914,15 @@ export async function runAcceptance(
       attestationType: attestationName,
       credential,
     })
-    const noSchema = (noSchemaResponse.payload as JsonData<CredentialValidationResource>).data
-    const noSchemaSummary = summarize(noSchema, JSON.stringify(noSchema))
-    checker.equal(
+    expectStatus(
+      checker,
       'validation.negative.noSchema.status',
       'a validation without schema documents returns 200',
       noSchemaResponse.status,
       200,
     )
+    const noSchema = (noSchemaResponse.payload as JsonData<CredentialValidationResource>).data
+    const noSchemaSummary = summarize(noSchema, JSON.stringify(noSchema))
     checker.equal(
       'validation.negative.noSchema.overall',
       'a missing schema document keeps the overall result NOT_TESTED',
@@ -881,11 +962,9 @@ export async function runAcceptance(
     checker.ok(
       'import.negative.invalidTs11',
       'a TS11 document missing a required member is invalid and incompatible',
-      (invalidPreview.status === 200 &&
+      invalidPreview.status === 200 &&
         invalidEntry?.structuralStatus === 'invalid' &&
-        invalidEntry?.compatible === false) ||
-        (invalidPreview.status === 422 &&
-          (invalidPreview.data as ErrorEnvelope).error.code === 'import_rejected'),
+        invalidEntry?.compatible === false,
     )
 
     // --------------------------------------- non-conflation of the dimensions
@@ -898,7 +977,7 @@ export async function runAcceptance(
       interoperabilityNotApplicable:
         dimension(valid, 'interoperability')?.status === 'NOT_APPLICABLE',
       schemaFailureDoesNotBecomeSchemaPass:
-        dimension(missingClaim, 'schema_validation')?.status === 'FAIL',
+        dimension(typeViolation, 'schema_validation')?.status === 'FAIL',
       unsupportedFormatIsNotReportedPass:
         dimension(unsupportedFormat, 'credential_parsing')?.status !== 'PASS',
       credentialNotInExportedEvidence: !exportedText.includes(credential),
@@ -965,7 +1044,7 @@ export async function runAcceptance(
         snapshotHasNormativeFields,
       },
       valid: validSummary,
-      negativeMissingClaim: missingClaimSummary,
+      negativeTypeViolation: typeViolationSummary,
       negativeUnsupportedFormat: unsupportedFormatSummary,
       negativeNoSchemaDocument: noSchemaSummary,
       nonConflation,

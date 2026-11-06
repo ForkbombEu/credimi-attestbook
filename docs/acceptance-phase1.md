@@ -38,11 +38,15 @@ temporary SQLite database:
    document supplied, and the dimension-aware result is exported as JSON;
 8. negative cases run against the same application: an attribute type violation, an
    unsupported credential format, a missing schema document and an invalid TS11 import;
-9. the built UI entry document is served for `/`, `/rulebooks/<id>` and `/playground`.
+9. the built UI entry document is required and is served for `/`, `/rulebooks/<id>` and
+   `/playground`; `bun run acceptance` fails with a `ui.built` check when `dist/ui` is
+   missing rather than skipping the UI evidence.
 
-The workflow passed **106/106 checks** locally (`bun run acceptance`). It also runs as a
-Bun test in the `test` CI job without the built-asset check (the `test` job does not build
-the UI), and as the dedicated `acceptance` CI job after `bun run build`.
+The workflow passed **112/112 checks** locally (`bun run acceptance`). It also runs as a
+Bun test in the `test` CI job with `uiRoot: false` (the `test` job does not build the UI;
+the workflow then records that the UI check was opted out and fails if a built UI is
+missing when it is requested), and as the dedicated `acceptance` CI job after
+`bun run build`, which verifies that the exported evidence recorded all three UI routes.
 
 ### 1.1 Dimension-aware validation evidence
 
@@ -110,12 +114,12 @@ Run from the repository root on 2026-11-06 with Bun 1.3.1 and Node.js 22.23.4 on
 | `bun run lint` | passed |
 | `bun run typecheck` | passed |
 | `bun run typecheck:ui` | passed |
-| `bun run test` | 421 pass, 0 fail (includes the acceptance workflow test) |
+| `bun run test` | 423 pass, 0 fail (includes the three acceptance workflow tests) |
 | `bun run test:ui` | 115 pass, 0 fail across 9 files |
 | `bun run openapi:check` | OpenAPI 3.1.0 document validated (15 operations, 26 schemas) |
 | `bun run docs:check` | 12 pass, 0 fail |
 | `bun run build` | passed; `dist/server.js`, `dist/validation/schema-sandbox-entry.js` and `dist/ui/` produced |
-| `bun run acceptance` | 106/106 checks passed; evidence written to `dist/acceptance-evidence.json` |
+| `bun run acceptance` | 112/112 checks passed; evidence written to `dist/acceptance-evidence.json` with `ui.checked: true` and three served routes |
 | `research/owf-audit`: `node probe.mjs`, `bun probe.mjs`, `npx tsc --noEmit` | 35 checks passed on both runtimes; typecheck passed |
 | `bun run test:e2e` | Not runnable locally: the environment lacks the Chromium OS libraries (`libnspr4`, `libnss3`, …). The `ui` CI job installs Chromium with `--with-deps` and runs the same 22 browser tests. |
 
@@ -123,8 +127,8 @@ Docker is not installed in this environment, so `docker build` / `docker compose
 run locally. The `docker smoke` CI job builds the image, starts a container, waits for
 `/health`, checks the built catalog page, the empty catalogue API and the unknown-route 404.
 
-CI is the merge gate for the jobs that need system tooling: the pull request that adds this
-report must have every CI job green before it is squash-merged
+CI is the merge gate for the jobs that need system tooling: the repository's merge procedure
+requires every CI job green on the reviewed commit before the squash merge
 ([`docs/implementation-plan.md`](implementation-plan.md) §7).
 
 ## 5. Outstanding limitations

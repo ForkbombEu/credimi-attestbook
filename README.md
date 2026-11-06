@@ -293,7 +293,7 @@ Application code still uses `strict`, `exactOptionalPropertyTypes` and
 | `docker smoke`      | Image build, container startup, health, catalogue and 404 round-trip |
 | `ui`                | UI typecheck, component/axe tests and Playwright browser flows       |
 | `acceptance`        | Phase 1 end-to-end workflow and dimension-aware evidence export      |
-| `docs`              | Phase 0 document consistency and the checker's own tests             |
+| `docs`              | Documentation consistency and the checker's own tests                |
 | `owf compatibility` | Phase 0 OWF probe on Node.js 22 and Bun 1.3.1                        |
 
 No job deploys, publishes an image or needs a secret or a live external service.

@@ -1,13 +1,29 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
-import { runAcceptance } from './workflow'
+import { AcceptanceError, runAcceptance } from './workflow'
+
+/** A throwaway directory removed after the test that created it. */
+function temporaryUiDirectory(content?: string): string {
+  const directory = mkdtempSync(join(tmpdir(), 'attestbook-acceptance-ui-'))
+  if (content !== undefined) {
+    writeFileSync(join(directory, 'index.html'), content, 'utf8')
+  }
+  return directory
+}
+
+const MINIMAL_UI_ENTRY =
+  '<!doctype html><html><head><title>Rulebook catalog · AttestBook</title></head><body></body></html>'
 
 /**
  * Issue #39 acceptance coverage. The workflow is real end to end: temporary
  * SQLite database, checked-in migrations, the real registry, import pipeline,
  * credential validator and in-process HTTP application. The browser UI is
  * exercised separately by the Playwright suite in the `ui` CI job; this test
- * skips the built-asset check because the `test` CI job does not run a build.
+ * uses a minimal built entry document so the static-serving check is covered
+ * without a Vite build.
  */
 describe('Phase 1 end-to-end acceptance workflow', () => {
   test('imports TS11 metadata, inspects versions, validates a credential and exports evidence', async () => {
@@ -18,6 +34,7 @@ describe('Phase 1 end-to-end acceptance workflow', () => {
 
     expect(checks.every((check) => check.passed)).toBe(true)
     expect(checks.length).toBeGreaterThan(60)
+    expect(checks.some((check) => check.id === 'ui.built')).toBe(false)
 
     expect(evidence.owf.packageVersion).toBe('0.5.4')
     expect(evidence.owf.validDocument).toBe(true)
@@ -51,7 +68,7 @@ describe('Phase 1 end-to-end acceptance workflow', () => {
     expect(evidence.valid.limitationCodes).toContain('signature_not_verified')
     expect(evidence.valid.limitationCodes).toContain('trust_not_evaluated')
 
-    expect(evidence.negativeMissingClaim.overallStatus).toBe('FAIL')
+    expect(evidence.negativeTypeViolation.overallStatus).toBe('FAIL')
     expect(evidence.negativeUnsupportedFormat.overallStatus).toBe('FAIL')
     expect(evidence.negativeNoSchemaDocument.overallStatus).toBe('NOT_TESTED')
 
@@ -61,5 +78,41 @@ describe('Phase 1 end-to-end acceptance workflow', () => {
     expect(evidence.nonConflation.credentialNotInExportedEvidence).toBe(true)
 
     expect(evidence.ui.checked).toBe(false)
+  }, 60_000)
+
+  test('requires the built UI when the caller does not opt out', async () => {
+    const directory = temporaryUiDirectory()
+    try {
+      let error: unknown
+      try {
+        await runAcceptance({ uiRoot: directory, now: () => '2026-01-01T00:00:00.000Z' })
+      } catch (caught) {
+        error = caught
+      }
+      expect(error).toBeInstanceOf(AcceptanceError)
+      if (!(error instanceof AcceptanceError)) {
+        throw error
+      }
+      expect(error.checks.some((check) => check.id === 'ui.built' && !check.passed)).toBe(true)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  }, 60_000)
+
+  test('checks the served UI routes when a built entry document exists', async () => {
+    const directory = temporaryUiDirectory(MINIMAL_UI_ENTRY)
+    try {
+      const { evidence, checks } = await runAcceptance({
+        uiRoot: directory,
+        now: () => '2026-01-01T00:00:00.000Z',
+      })
+
+      expect(checks.every((check) => check.passed)).toBe(true)
+      expect(checks.some((check) => check.id === 'ui.built' && check.passed)).toBe(true)
+      expect(evidence.ui.checked).toBe(true)
+      expect(evidence.ui.servedRoutes).toEqual(['/', '/rulebooks/example', '/playground'])
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
   }, 60_000)
 })
