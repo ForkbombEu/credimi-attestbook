@@ -249,7 +249,8 @@ versioned REST/OpenAPI surface and validation persistence. FR-010 allows externa
 test orchestration to supply other dimensions, but this slice accepts no external dimension
 evidence: caller-supplied dimension results are ignored, so an untested dimension cannot be
 made to PASS. Validation options (FR-009) are not accepted yet, draft versions are publicly
-readable and authorization for them belongs to #35, and a supplied schema document that
+readable by design (writes are authenticated and provider-scoped; see
+[`docs/security.md`](security.md)), and a supplied schema document that
 belongs to the attestation but not to the credential's format is ignored rather than reported.
 
 A `vct#integrity` claim on the credential is not compared with the supplied Type Metadata in

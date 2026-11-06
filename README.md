@@ -77,8 +77,9 @@ bun run docs:check   # Phase 0 documentation consistency, plain Node
   [`docs/validation.md`](docs/validation.md);
 - `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
   the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
-  routes Hono registered, and success/error contract tests for every exposed resource; see
-  [`docs/api.md`](docs/api.md);
+  routes Hono registered, success/error contract tests for every exposed resource, and
+  HTTP-level write-authentication/provider-ownership tests; see [`docs/api.md`](docs/api.md)
+  and [`docs/security.md`](docs/security.md);
 - `src/app.validation.test.ts` — the typed `POST /api/v1/credentials/validate` contract,
   400/404/413/503 cases and non-disclosure of credential material;
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
@@ -101,8 +102,9 @@ implemented by the import pipeline; the version-history UI comes in a later issu
 
 The server opens the registry database and applies migrations at startup, so credential
 validation can read rulebooks from the same process. The versioned REST API exposes the
-implemented registry, import and validation resources; write hardening and provider
-management remain issue #35. The service contract, stable identifier rules,
+implemented registry, import and validation resources; its authentication, provider
+ownership and secret-handling model is documented in
+[`docs/security.md`](docs/security.md). The service contract, stable identifier rules,
 standards-metadata boundary, authorization model and version lifecycle are documented in
 [`docs/registry.md`](docs/registry.md).
 
@@ -169,8 +171,8 @@ pinning, redirect re-validation, request and total timeouts, response-size and J
 limits, bounded catalog entries and schema-reference fan-out. Schema references are
 retained but not fetched or SRI-verified in this slice, and re-import/conflict handling is
 implemented. The HTTP preview route requires a provider token because a URL preview performs
-a bounded outbound fetch; rate limiting remains issue #35. See [`docs/import.md`](docs/import.md)
-for the full contract, limits and limitations.
+a bounded outbound fetch; rate limiting remains future hardening work. See
+[`docs/import.md`](docs/import.md) for the full contract, limits and limitations.
 
 ## Build and run
 

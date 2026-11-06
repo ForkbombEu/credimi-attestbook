@@ -133,4 +133,13 @@ describe('generated OpenAPI document', () => {
       })
     }
   })
+
+  test('protected operations document the bearer challenge on 401', () => {
+    for (const route of API_ROUTES.filter((candidate) => candidate.security)) {
+      const operation = operationFor(route)
+      const responses = operation['responses'] as Record<string, Record<string, unknown>>
+      const headers = responses['401']?.['headers'] as Record<string, unknown> | undefined
+      expect(headers?.['WWW-Authenticate'], route.operationId).toBeDefined()
+    }
+  })
 })

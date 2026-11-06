@@ -83,7 +83,9 @@ Deliberately **not** in #28/#29/#30/#31:
 - the versioned REST API and generated OpenAPI — implemented by
   [issue #34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) in `src/api/` and
   documented in [`docs/api.md`](api.md);
-- rate limits, request-authentication hardening and provider-management HTTP routes — issue #35;
+- HTTP rate limiting, token expiry/rotation and provider-management HTTP routes — not
+  implemented in Phase 1; the write API's authentication, provider ownership and secret
+  handling are documented in [`docs/security.md`](security.md);
 - publication UI, rulebook editor and version comparison/diff UI — Phase 2 and issue #37;
 - semantic content canonicalization — explicitly out of scope (D-6, R-17).
 
@@ -250,10 +252,11 @@ provisional product model of D-10. The service enforces it, not the UI or a rout
    Child mutations also update the rulebook's `updatedAt`.
 
 Token revocation is idempotent and only affects the authenticated provider's tokens. Phase 1
-does not yet implement token expiry, rotation policy, rate limiting or HTTP-level request
-authentication; those are #35 concerns, and the single-writer SQLite limitation is documented
-in the implementation plan (R-6, D-7). Secrets, token hashes and payload metadata are never
-logged by this module.
+does not yet implement token expiry, rotation policy or rate limiting; the HTTP write
+authentication and ownership checks are implemented in `src/api/routes.ts` and verified in
+`src/api/security.test.ts`, with the complete model in [`docs/security.md`](security.md). The
+single-writer SQLite limitation is documented in the implementation plan (R-6, D-7). Secrets,
+token hashes and payload metadata are never logged by this module.
 
 ## 6. Versions, artifacts, digests and publication
 
@@ -434,6 +437,7 @@ version history and comparison.
   conflict detection, documented in [`docs/import.md`](import.md) §5),
   [#32](https://github.com/ForkbombEu/credimi-attestbook/issues/32) (validation against a
   pinned version), [#34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) (REST
-  API), [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) (secure write APIs)
-  and [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (version-history UI)
+  API), [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) (secure write APIs,
+  documented in [`docs/security.md`](security.md)) and
+  [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (version-history UI)
   for the next slices.

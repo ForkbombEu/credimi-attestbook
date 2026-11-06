@@ -64,8 +64,9 @@ Deliberately **not** in #30/#31:
   (FR-005 beyond idempotent safe re-import);
 - the HTTP surface and OpenAPI contract were added by
   [issue #34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) (see
-  [`docs/api.md`](api.md)); HTTP rate limiting and request-authentication hardening remain
-  [issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35);
+  [`docs/api.md`](api.md)); the write authentication and provider ownership model is
+  documented in [`docs/security.md`](security.md); HTTP rate limiting remains future
+  hardening;
 - fetching, resolving or verifying `rulebookURI` or `schemaURIs`; SRI verification over
   fetched schema bytes remains delegated to OWF with a caller-supplied resolver, and this
   slice reports unresolved references as `not_tested`;
@@ -170,12 +171,11 @@ Residual risks: a compromised resolver remains trusted at fetch time; the transp
 the validated address, so a later DNS change cannot redirect the connection. The service
 preview is unauthenticated at the service level; the HTTP route added by
 [issue #34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) requires the provider
-bearer token before it fetches or parses anything (see [`docs/api.md`](api.md)), but HTTP
-rate limiting of preview and import is still missing and is part of the broader HTTP
-security hardening tracked with
-[issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35). Redirect
-targets are resolved independently. The single-writer SQLite deployment limit is documented
-in [`docs/implementation-plan.md`](implementation-plan.md) D-7.
+bearer token before it fetches or parses anything (see [`docs/api.md`](api.md)), and the
+authentication/ownership rationale is in [`docs/security.md`](security.md). HTTP rate
+limiting of preview and import is still missing and remains future hardening work.
+Redirect targets are resolved independently. The single-writer SQLite deployment limit is
+documented in [`docs/implementation-plan.md`](implementation-plan.md) D-7.
 
 ## 5. Re-import identity, idempotency and conflicts
 
@@ -368,8 +368,9 @@ updates, full FR-005 synchronization or interoperability.
 
 - [`docs/api.md`](api.md) — the versioned REST/OpenAPI surface implemented by #34, which
   exposes the per-entry import result.
-- Issue [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) — HTTP write
-  security, rate limiting and provider-management routes.
+- Issue [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) — the HTTP write
+  authentication and provider ownership model, documented in [`docs/security.md`](security.md);
+  rate limiting and provider-management routes remain future hardening.
 - Issues [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) and
   [#41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) — version history and
   the editor workflow that resolves a reported conflict.
