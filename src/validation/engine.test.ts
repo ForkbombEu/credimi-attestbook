@@ -129,11 +129,38 @@ describe('CredentialValidator with a pinned rulebook version', () => {
     expect(dimension(result, 'protocol_conformance').status).toBe('NOT_APPLICABLE')
     expect(dimension(result, 'interoperability').status).toBe('NOT_APPLICABLE')
 
+    // A dimension may be PASS only when it was applicable and actually ran.
+    for (const entry of result.dimensions) {
+      expect(entry.evidence.scope.length).toBeGreaterThan(0)
+      expect(entry.evidence.reason.length).toBeGreaterThan(0)
+      if (entry.status === 'PASS') {
+        expect(entry.applicable).toBe(true)
+        expect(entry.executed).toBe(true)
+      }
+    }
+    expect(dimension(result, 'cryptographic_verification').executed).toBe(false)
+    expect(dimension(result, 'cryptographic_verification').applicable).toBe(true)
+    expect(dimension(result, 'issuer_trust').executed).toBe(false)
+    expect(dimension(result, 'protocol_conformance').applicable).toBe(false)
+    expect(dimension(result, 'interoperability').executed).toBe(false)
+    expect(dimension(result, 'cryptographic_verification').evidence.details).toMatchObject({
+      issuer_jws_signature_verified: false,
+      key_binding_proof_verified: false,
+      status_list_token_verified: false,
+    })
+
     expect(result.overallStatus).toBe('NOT_TESTED')
     const codes = result.violations.map((entry) => entry.code)
     expect(codes).toContain('signature_not_verified')
     expect(codes).toContain('trust_not_evaluated')
     expect(result.violations.every((entry) => entry.severity !== 'error')).toBe(true)
+    const limitationCodes = result.limitations.map((entry) => entry.code)
+    expect(limitationCodes).toContain('signature_not_verified')
+    expect(limitationCodes).toContain('key_binding_proof_not_verified')
+    expect(limitationCodes).toContain('status_list_not_checked')
+    expect(limitationCodes).toContain('trust_not_evaluated')
+    expect(limitationCodes).toContain('protocol_not_applicable')
+    expect(limitationCodes).toContain('interoperability_not_applicable')
   })
 
   test('does not treat an invalid signature as overall validation success', async () => {
@@ -155,6 +182,40 @@ describe('CredentialValidator with a pinned rulebook version', () => {
     expect(result.overallStatus).not.toBe('PASS')
     expect(result.overallStatus).toBe('NOT_TESTED')
     expect(dimension(result, 'cryptographic_verification').status).toBe('NOT_TESTED')
+    expect(dimension(result, 'cryptographic_verification').executed).toBe(false)
+    expect(dimension(result, 'cryptographic_verification').applicable).toBe(true)
+    expect(result.limitations.map((entry) => entry.code)).toContain('signature_not_verified')
+    // Structural checks may pass, but no structural result may claim the
+    // signature or issuer trust was verified.
+    expect(dimension(result, 'schema_validation').status).toBe('PASS')
+    expect(dimension(result, 'issuer_trust').status).toBe('NOT_TESTED')
+  })
+
+  test('ignores caller-supplied dimension results and cannot be told a check passed', async () => {
+    const { seeded, validator } = setup()
+    const credential = await issueTestCredential()
+    const result = await validator.validate({
+      ...request(seeded, credential),
+      dimensions: [
+        {
+          id: 'issuer_trust',
+          status: 'PASS',
+          applicable: true,
+          executed: true,
+          findings: [],
+          evidence: { scope: 'caller', reason: 'caller', details: {} },
+        },
+      ],
+      limitations: [],
+      overallStatus: 'PASS',
+    })
+
+    // The request parser accepts only the documented fields; asserted evidence
+    // never becomes a result, so a caller cannot claim an untested dimension.
+    expect(result.overallStatus).toBe('NOT_TESTED')
+    expect(dimension(result, 'issuer_trust').status).toBe('NOT_TESTED')
+    expect(dimension(result, 'cryptographic_verification').status).toBe('NOT_TESTED')
+    expect(result.limitations.map((entry) => entry.code)).toContain('trust_not_evaluated')
   })
 
   test('does not return raw claim values or the credential artifact', async () => {
@@ -247,9 +308,15 @@ describe('CredentialValidator with a pinned rulebook version', () => {
     expect(dimension(result, 'format_recognition').status).toBe('INCONCLUSIVE')
     expect(dimension(result, 'credential_parsing').status).toBe('NOT_TESTED')
     expect(dimension(result, 'schema_validation').status).toBe('NOT_TESTED')
-    expect(dimension(result, 'attestation_constraints').status).toBe('NOT_TESTED')
+    // Rulebook-level checks ran, but the credential-dependent key-binding check
+    // did not, so the dimension is executed and inconclusive, not PASS.
+    expect(dimension(result, 'attestation_constraints').status).toBe('INCONCLUSIVE')
+    expect(dimension(result, 'attestation_constraints').executed).toBe(true)
     expect(dimension(result, 'cryptographic_verification').status).toBe('NOT_TESTED')
     expect(result.violations.map((entry) => entry.code)).toContain('format_parser_unavailable')
+    expect(result.limitations.map((entry) => entry.code)).toContain(
+      'credential_dependent_checks_not_run',
+    )
   })
 
   test('does not pass schema validation when no schema document is supplied', async () => {

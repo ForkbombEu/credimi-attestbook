@@ -1,9 +1,11 @@
 # Credential validation: SD-JWT VC structural evidence
 
 **Status:** Phase 1 implementation for
-[issue #32](https://github.com/ForkbombEu/credimi-attestbook/issues/32). This document
-describes the checks that actually run, the typed API and the evidence it returns. It makes
-no cryptographic, trust, protocol, interoperability or standards-conformance claim.
+[issue #32](https://github.com/ForkbombEu/credimi-attestbook/issues/32) and
+[issue #33](https://github.com/ForkbombEu/credimi-attestbook/issues/33). This document
+describes the checks that actually run, the typed API, the per-dimension applicability
+model and the evidence it returns. It makes no cryptographic, trust, protocol,
+interoperability or standards-conformance claim.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) FR-009–FR-012 and §13.
 **Architecture:** [`docs/architecture.md`](architecture.md) §8 (dimension status model) and
@@ -29,14 +31,53 @@ published or draft rulebook version**. The engine:
    `verifyClaimsAgainstTypeMetadata`, or JSON Schema 2020-12 through Ajv 8.20.0;
 6. checks attestation constraints that are observable in a credential (format support,
    `attestationLoS`/`bindingType` vocabulary, key binding via an issuer-signed `cnf`);
-7. returns per-dimension statuses, structured findings with JSON Pointer paths, and the
-   pinned rulebook version and digest.
+7. returns per-dimension statuses, an explicit applicability/execution flag and machine-readable
+   evidence for each dimension, structured findings with JSON Pointer paths, the explicit
+   limitation list, and the pinned rulebook version and digest.
 
 The following are **not** executed and never reported PASS: signature verification,
 key-binding proof verification, status-list checks, issuer trust, protocol conformance and
 end-to-end interoperability (FR-010, FR-012, D-17).
 
-## 2. Why schema documents are supplied by the caller
+## 2. Dimension applicability and evidence
+
+Every result carries the eight FR-010 dimensions in normative order. Each dimension reports
+`status`, `applicable`, `executed`, `findings` and an `evidence` object with a `scope` (what
+a real execution evaluates), a `reason` (why the dimension did or did not run) and
+non-sensitive `details` facts. The engine builds every dimension through `createDimension`
+(`src/validation/dimensions.ts`), which rejects a status that contradicts applicability or
+execution. An unexecuted dimension therefore **cannot** be returned as `PASS`: `PASS` and
+`FAIL` require an applicable, executed check; `NOT_TESTED` requires an applicable,
+unexecuted dimension; `INCONCLUSIVE` requires an executed check with a warning and no error;
+`NOT_APPLICABLE` requires an unexecuted, non-applicable dimension.
+
+| # | Dimension | Owner | Executed here | Applicability to one credential artifact | Evidence detail |
+| --- | --- | --- | --- | --- | --- |
+| 1 | `credential_parsing` | AttestBook | yes | conditional on a recognised format with a structural parser | parser outcome, disclosure count and bounds |
+| 2 | `format_recognition` | AttestBook | yes | required | recognised format, detection source, parser availability |
+| 3 | `cryptographic_verification` | external | no | required | explicitly records issuer JWS signature, KB-JWT proof and status-list checks as not executed |
+| 4 | `schema_validation` | AttestBook | yes | conditional on a matching pinned reference and supplied document | reference count, documents supplied/applied, findings |
+| 5 | `attestation_constraints` | AttestBook | yes | required | format support, TS11 vocabulary, key-binding presence |
+| 6 | `issuer_trust` | external | no | required | explicitly records that no trust anchors were applied |
+| 7 | `protocol_conformance` | external | no | not applicable to a standalone artifact | explicitly records that no protocol exchange exists |
+| 8 | `interoperability` | external | no | not applicable to a standalone artifact | explicitly records that no external wallet/verifier execution occurred |
+
+The `applicability` column follows D-8: applicability is decided by the selected rulebook,
+credential format and request, not by whether AttestBook implements the check. Cryptography
+and issuer trust are required for any credential, so their absence is `NOT_TESTED`, never
+`NOT_APPLICABLE`. Protocol conformance and interoperability are request-scoped
+`NOT_APPLICABLE` because a single credential artifact contains no issuer/verifier interaction
+and no external execution; those statuses assert nothing about success and are never derived
+from another dimension passing.
+
+The result also carries `limitations`: every finding of a dimension whose status is not
+`PASS` or `FAIL`, with a stable `code`, the `dimension`, its `status` and a non-sensitive
+message. For a structurally valid credential the list explicitly names the unverified issuer
+signature, key-binding proof, status-list check, issuer trust, protocol conformance and
+end-to-end interoperability. A caller never has to infer an absent crypto, trust, protocol or
+interoperability check from `overallStatus` alone.
+
+## 3. Why schema documents are supplied by the caller
 
 A rulebook version snapshot records schema references (`formatIdentifier`, `uri`, W3C SRI
 `integrity`); it does not embed the fetched schema bodies. AttestBook does not fetch remote
@@ -64,10 +105,14 @@ therefore carries `schemaDocuments` with the **exact UTF-8 document text**. The 
   separate Bun worker process with a 2-second hard timeout and a 256 MiB RSS watchdog; hitting
   either limit is reported as `NOT_TESTED`, not as a credential failure.
 
-A reference with no supplied document makes schema validation `NOT_TESTED`. Supplying an
-unrelated schema cannot widen validation silently.
+A reference with no supplied document makes schema validation `NOT_TESTED`. A reference whose
+integrity pin cannot be verified (unsupported algorithm or malformed value) is not applied; if
+no pinned reference was applied, the schema dimension is `NOT_TESTED` with `executed: false`
+rather than an executed `INCONCLUSIVE`. A `FAIL` remains an executed conclusion even when the
+failing reference was not applied. Supplying an unrelated schema cannot widen validation
+silently.
 
-## 3. Typed contract
+## 4. Typed contract
 
 ```http
 POST /api/credentials/validate
@@ -102,15 +147,17 @@ The response includes:
 | `attestation` | Selected `name`, `attestationLoS`, `bindingType`, `supportedFormats` |
 | `credential` | Non-sensitive facts only: `format`, `vct`, `disclosureCount`, `keyBindingPresent` |
 | `schemaReferences` | Pinned reference URI/integrity, detected `kind`, whether it was `applied` |
-| `dimensions` | The eight FR-010 dimensions, each with a status and findings |
+| `dimensions` | The eight FR-010 dimensions, each with `status`, `applicable`, `executed`, `findings` and machine-readable `evidence` |
 | `violations` | Flattened `error`/`warning` findings for clients |
+| `limitations` | Explicit unexecuted or inconclusive checks, one entry per finding of a dimension that is not `PASS`/`FAIL` |
 | `overallStatus` | D-8 aggregation of `dimensions` |
 
 Findings carry a stable `code`, `severity`, `dimension`, optional JSON Pointer `path` and an
 `expected` constraint. Type-metadata array elements use `*` as a wildcard segment. Claim
-values and the raw credential artifact are never returned.
+values and the raw credential artifact are never returned; `evidence.details` holds only
+non-sensitive facts and explicit `false` flags for checks that did not run.
 
-## 4. Statuses and aggregation
+## 5. Statuses and aggregation
 
 Statuses follow FR-012: `PASS`, `FAIL`, `NOT_TESTED`, `NOT_APPLICABLE`, `INCONCLUSIVE`.
 Aggregation follows D-8:
@@ -121,23 +168,27 @@ Aggregation follows D-8:
 - else `PASS` only when every applicable dimension passed;
 - `NOT_APPLICABLE` only when no dimension is applicable.
 
-Because cryptographic verification and issuer trust are applicable but not implemented here,
-a structurally valid credential returns `overallStatus: "NOT_TESTED"` with structural `PASS`
-dimensions. This is the intended result: a locally passing credential is not "fully valid" or
-interoperable (FR-012, AC-16/AC-17).
+The dimension constructor enforces the matching per-dimension invariants before aggregation
+(§2), so an unexecuted dimension cannot be `PASS` and cannot contribute a passing overall
+result. Because cryptographic verification and issuer trust are applicable but not implemented
+here, a structurally valid credential returns `overallStatus: "NOT_TESTED"` with structural
+`PASS` dimensions. This is the intended result: a locally passing credential is not "fully
+valid" or interoperable, and an overall `PASS` is not reachable in this slice (FR-012,
+AC-16/AC-17).
 
-## 5. Unsupported formats
+## 6. Unsupported formats
 
 The issuer-signed JWT must carry a `typ` header of `dc+sd-jwt` or `vc+sd-jwt`.
 `dc+sd-jwt` is the only format with a structural parser. `mso_mdoc`, `jwt_vc_json`,
 `jwt_vc_json-ld` and `ldp_vc` are recognised from an explicit `format` hint or from the TS11
-baseline (`src/standards/profiles.ts`), reported as recognised, and their parsing/schema/
-attestation dimensions are `NOT_TESTED`. A format backed only by the caller hint and not
-confirmed by parsing is `INCONCLUSIVE`, not `PASS`. A rulebook that does not list the
-credential format fails the attestation-constraints dimension. No generic JSON validator is
-presented as mdoc or W3C VC support (FR-011).
+baseline (`src/standards/profiles.ts`) and reported as recognised. Their parsing and schema
+dimensions are `NOT_TESTED`; the attestation-constraints dimension is `INCONCLUSIVE` because
+the rulebook-level checks ran but the credential-dependent key-binding check did not. A format
+backed only by the caller hint and not confirmed by parsing is `INCONCLUSIVE`, not `PASS`. A
+rulebook that does not list the credential format fails the attestation-constraints dimension.
+No generic JSON validator is presented as mdoc or W3C VC support (FR-011).
 
-## 6. Privacy, logging and limits
+## 7. Privacy, logging and limits
 
 The engine never logs or persists the credential, disclosures or claim values. The HTTP
 error handler logs only the method, path and error class. Results expose claim paths and
@@ -153,7 +204,7 @@ produces `NOT_TESTED` evidence with `schema_evaluation_timeout`,
 is checked before and after disclosures are unpacked. Each JSON Schema document is compiled with a fresh Ajv instance so caller-supplied
 `$id` state cannot leak between requests.
 
-## 7. Verification
+## 8. Verification
 
 Tests execute the real pinned libraries and a real migrated SQLite registry:
 
@@ -166,25 +217,39 @@ Tests execute the real pinned libraries and a real migrated SQLite registry:
   unsupported dialects, unknown keywords and ambiguous `vct`/JSON Schema documents,
   unresolved Type Metadata `extends`, oversized credential claim sets, the sandbox timeout
   path and missing documents;
+- `src/validation/dimensions.test.ts` — the eight-dimension catalogue, the exhaustive
+  applicability table, table-driven status-semantics tests and rejection of every
+  contradictory applicability/execution/status combination;
+- `src/validation/non-conflation.test.ts` — the four spec §16 negative implications, plus a
+  table-driven proof across valid, invalid-signature, missing-claim, unsupported-format and
+  unrecognized inputs that no unexecuted dimension or overall result is `PASS`;
 - `src/validation/engine.test.ts` — pinned version/digest evidence, dimension statuses,
-  unsupported formats, key binding, digest-tamper abort, version pinning;
+  applicability/execution flags, evidence details, limitations, unsupported formats, key
+  binding, digest-tamper abort, version pinning;
+- `src/validation/schema-dimension.test.ts` — an unverifiable integrity pin with nothing
+  applied is `NOT_TESTED`/unexecuted (also end to end), partial application stays executed
+  `INCONCLUSIVE`, and a non-applied `FAIL` remains an executed conclusion;
 - `src/validation/schema-sandbox.test.ts` — real-child timeout, memory, output, busy,
   unavailable, malformed-output and mixed integrity/timeout behaviour;
-- `src/app.validation.test.ts` — typed HTTP contract, 400/404/413/503 cases, /health
-  responsiveness during a hostile sandbox run, no credential or claim values in responses or
-  logs;
+- `src/app.validation.test.ts` — typed HTTP contract with `applicable`/`executed`/`evidence`
+  and `limitations` fields, 400/404/413/503 cases, an invalid signature over HTTP that is
+  not overall success, /health responsiveness during a hostile sandbox run, and no credential
+  or claim values in responses or logs;
 - `src/config.test.ts` — `DATABASE_PATH` configuration.
 
-## 8. Non-claims and next slices
+## 9. Non-claims and next slices
 
 This slice does not verify signatures, keys, certificates, status lists or trust anchors, and
-does not claim TS11, ETSI, OpenID4VCI or interoperability conformance. Issue #33 owns the
-exhaustive dimension-applicability and non-conflation evidence; issue #30 owns the safe
+does not claim TS11, ETSI, OpenID4VCI or interoperability conformance. Issue #33 reports the
+exhaustive applicability, status semantics and non-conflation evidence; it does not implement
+cryptographic verification, trust resolution or protocol execution. Issue #30 owns the safe
 remote schema/import fetch that will replace caller-supplied documents; issue #34 owns the
-versioned REST/OpenAPI surface and validation persistence. Validation options (FR-009) are
-not accepted yet, draft versions are publicly readable and authorization for them belongs to
-#35, and a supplied schema document that belongs to the attestation but not to the credential's
-format is ignored rather than reported.
+versioned REST/OpenAPI surface and validation persistence. FR-010 allows external adapters or
+test orchestration to supply other dimensions, but this slice accepts no external dimension
+evidence: caller-supplied dimension results are ignored, so an untested dimension cannot be
+made to PASS. Validation options (FR-009) are not accepted yet, draft versions are publicly
+readable and authorization for them belongs to #35, and a supplied schema document that
+belongs to the attestation but not to the credential's format is ignored rather than reported.
 
 A `vct#integrity` claim on the credential is not compared with the supplied Type Metadata in
 this slice; only the rulebook reference `#integrity` is verified. That is part of the

@@ -19,10 +19,12 @@ import {
 } from '../registry/versioning'
 import { TS11_ATTESTATION_LOS_VALUES, TS11_BINDING_TYPE_VALUES } from '../standards/profiles'
 
+import { createDimension, dimensionDefinition, limitationsFromDimensions } from './dimensions'
 import { recognizeCredentialFormat } from './format'
 import { parseValidateCredentialInput } from './request'
+import type { SchemaValidationOutcome } from './schema'
 import { validateSchemaDocuments, type SchemaSandboxLimits } from './schema-sandbox'
-import { parseSdJwtVc, type ParsedSdJwtVc } from './sd-jwt'
+import { parseSdJwtVc, MAX_DISCLOSURES, type ParsedSdJwtVc } from './sd-jwt'
 import { aggregateStatus } from './status'
 import type {
   AttestationEvidence,
@@ -31,6 +33,7 @@ import type {
   SchemaReferenceEvidence,
   ValidationDimension,
   ValidationDimensionId,
+  ValidationEvidenceValue,
   ValidationFinding,
   ValidationStatus,
 } from './types'
@@ -149,30 +152,65 @@ function finding(
   }
 }
 
-function dimension(
-  id: ValidationDimensionId,
-  status: ValidationStatus,
-  findings: readonly ValidationFinding[] = [],
-): ValidationDimension {
-  return { id, status, findings }
-}
-
-function externalDimension(
-  id: ValidationDimensionId,
-  status: ValidationStatus,
-  code: string,
-  message: string,
-  severity: 'warning' | 'info',
-): ValidationDimension {
-  return dimension(id, status, [finding(id, code, message, severity)])
-}
-
 function notExecutedDimension(
   id: ValidationDimensionId,
   code: string,
   message: string,
+  details: Readonly<Record<string, ValidationEvidenceValue>> = {},
 ): ValidationDimension {
-  return dimension(id, 'NOT_TESTED', [finding(id, code, message, 'warning')])
+  return createDimension({
+    id,
+    status: 'NOT_TESTED',
+    applicable: true,
+    executed: false,
+    findings: [finding(id, code, message, 'warning')],
+    evidence: {
+      scope: dimensionDefinition(id).scope,
+      reason: message,
+      details: { executed: false, ...details },
+    },
+  })
+}
+
+function notApplicableDimension(
+  id: ValidationDimensionId,
+  code: string,
+  message: string,
+  details: Readonly<Record<string, ValidationEvidenceValue>> = {},
+): ValidationDimension {
+  return createDimension({
+    id,
+    status: 'NOT_APPLICABLE',
+    applicable: false,
+    executed: false,
+    findings: [finding(id, code, message, 'info')],
+    evidence: {
+      scope: dimensionDefinition(id).scope,
+      reason: message,
+      details: { executed: false, ...details },
+    },
+  })
+}
+
+function executedDimension(
+  id: ValidationDimensionId,
+  status: Exclude<ValidationStatus, 'NOT_TESTED' | 'NOT_APPLICABLE'>,
+  findings: readonly ValidationFinding[],
+  reason: string,
+  details: Readonly<Record<string, ValidationEvidenceValue>> = {},
+): ValidationDimension {
+  return createDimension({
+    id,
+    status,
+    applicable: true,
+    executed: true,
+    findings,
+    evidence: {
+      scope: dimensionDefinition(id).scope,
+      reason,
+      details: { executed: true, ...details },
+    },
+  })
 }
 
 function attestationEvidence(attestation: SnapshotAttestation): AttestationEvidence {
@@ -194,6 +232,47 @@ function unparsedSchemaReferences(
     kind: null,
     applied: false,
   }))
+}
+
+/**
+ * Builds the schema-validation dimension from a schema outcome. An
+ * `INCONCLUSIVE` aggregate where no document was applied (for example an
+ * unverifiable `sha384` or malformed integrity pin) means no schema check ran,
+ * so the dimension is `NOT_TESTED` with `executed: false`. A `FAIL` is always a
+ * real conclusion, even when the failing reference was not applied.
+ */
+export function schemaDimensionFromOutcome(
+  outcome: SchemaValidationOutcome,
+  referenceCount: number,
+  documentsSupplied: number,
+): ValidationDimension {
+  const appliedDocuments = outcome.schemaReferences.filter((entry) => entry.applied).length
+  const status: ValidationStatus =
+    outcome.status === 'INCONCLUSIVE' && appliedDocuments === 0 ? 'NOT_TESTED' : outcome.status
+  const applicable = status !== 'NOT_APPLICABLE'
+  const executed = status === 'PASS' || status === 'FAIL' || status === 'INCONCLUSIVE'
+  const primaryFinding = outcome.findings.find((entry) => entry.severity !== 'info')
+  return createDimension({
+    id: 'schema_validation',
+    status,
+    applicable,
+    executed,
+    findings: outcome.findings,
+    evidence: {
+      scope: dimensionDefinition('schema_validation').scope,
+      reason:
+        status === 'PASS'
+          ? 'Every supplied schema document for the pinned references was applied and satisfied.'
+          : (primaryFinding?.message ??
+            'Schema validation did not reach a conclusive result for every pinned reference.'),
+      details: {
+        executed,
+        references: referenceCount,
+        documents_supplied: documentsSupplied,
+        applied_documents: appliedDocuments,
+      },
+    },
+  })
 }
 
 /** The typed, framework-independent credential validation service. */
@@ -305,38 +384,77 @@ export class CredentialValidator {
         'credential_parsing',
         'format_not_recognized',
         'Credential parsing was not executed because the format was not recognised.',
+        { format_recognized: false },
       )
     } else if (!recognition.parserAvailable) {
       parsingDimension = notExecutedDimension(
         'credential_parsing',
         'format_parser_unavailable',
         `Credential parsing was not executed: AttestBook has no parser for "${recognition.format}".`,
+        { format: recognition.format, parser_available: false },
       )
     } else {
       const outcome = await parseSdJwtVc(artifact.value)
       if (outcome.ok) {
         parsed = outcome.value
-        parsingDimension = dimension('credential_parsing', 'PASS', [
-          finding(
-            'credential_parsing',
-            'credential_parsed',
-            `The credential was parsed as SD-JWT VC with ${outcome.value.disclosureCount} disclosure(s).`,
-            'info',
-            '/credential',
-          ),
-        ])
+        parsingDimension = executedDimension(
+          'credential_parsing',
+          'PASS',
+          [
+            finding(
+              'credential_parsing',
+              'credential_parsed',
+              `The credential was parsed as SD-JWT VC with ${outcome.value.disclosureCount} disclosure(s).`,
+              'info',
+              '/credential',
+            ),
+          ],
+          'The credential parsed as SD-JWT VC and its disclosure structure was verified.',
+          {
+            format: 'dc+sd-jwt',
+            disclosure_count: outcome.value.disclosureCount,
+            max_disclosures: MAX_DISCLOSURES,
+          },
+        )
       } else if (outcome.kind === 'unsupported') {
-        parsingDimension = dimension('credential_parsing', 'NOT_TESTED', outcome.findings)
+        parsingDimension = createDimension({
+          id: 'credential_parsing',
+          status: 'NOT_TESTED',
+          applicable: true,
+          executed: false,
+          findings: outcome.findings,
+          evidence: {
+            scope: dimensionDefinition('credential_parsing').scope,
+            reason:
+              'Credential structure was not verified because the disclosure hash algorithm cannot be executed by this runtime.',
+            details: { format: recognition.format, hash_algorithm_executable: false },
+          },
+        })
       } else {
-        parsingDimension = dimension('credential_parsing', 'FAIL', outcome.findings)
+        parsingDimension = createDimension({
+          id: 'credential_parsing',
+          status: 'FAIL',
+          applicable: true,
+          executed: true,
+          findings: outcome.findings,
+          evidence: {
+            scope: dimensionDefinition('credential_parsing').scope,
+            reason: 'The credential could not be parsed as a structurally valid SD-JWT VC.',
+            details: { format: recognition.format, structurally_valid: false },
+          },
+        })
       }
     }
 
     let formatStatus: ValidationStatus
+    let formatReason: string
     if (!recognition.recognized) {
       formatStatus = 'FAIL'
+      formatReason = 'The credential artifact does not match a known credential format.'
     } else if (recognition.source === 'hint' && parsed === undefined) {
       formatStatus = 'INCONCLUSIVE'
+      formatReason =
+        'The credential format was taken only from the caller hint and the artifact was not parsed to confirm it.'
       formatFindings.push(
         finding(
           'format_recognition',
@@ -348,8 +466,20 @@ export class CredentialValidator {
       )
     } else {
       formatStatus = 'PASS'
+      formatReason = 'The credential format was recognised from the artifact.'
     }
-    const formatDimension = dimension('format_recognition', formatStatus, formatFindings)
+    const formatDimension = executedDimension(
+      'format_recognition',
+      formatStatus,
+      formatFindings,
+      formatReason,
+      {
+        format: recognition.format,
+        recognized: recognition.recognized,
+        parser_available: recognition.parserAvailable,
+        recognition_source: recognition.source,
+      },
+    )
 
     let schemaDimension: ValidationDimension
     let schemaReferences: readonly SchemaReferenceEvidence[]
@@ -358,18 +488,16 @@ export class CredentialValidator {
         'schema_validation',
         'credential_not_parsed',
         'Schema validation was not executed because the credential was not parsed.',
+        { references: matchingReferences.length },
       )
       schemaReferences = unparsedSchemaReferences(matchingReferences)
     } else if (matchingReferences.length === 0) {
-      schemaDimension = dimension('schema_validation', 'NOT_APPLICABLE', [
-        finding(
-          'schema_validation',
-          'no_matching_schema_reference',
-          `The selected attestation type has no "${recognition.format ?? 'unknown'}" schema reference in this rulebook version.`,
-          'info',
-          '/schemaReferences',
-        ),
-      ])
+      schemaDimension = notApplicableDimension(
+        'schema_validation',
+        'no_matching_schema_reference',
+        `The selected attestation type has no "${recognition.format ?? 'unknown'}" schema reference in this rulebook version.`,
+        { references: 0, format: recognition.format },
+      )
       schemaReferences = []
     } else {
       const outcome = await validateSchemaDocuments(
@@ -380,7 +508,11 @@ export class CredentialValidator {
         },
         this.sandbox,
       )
-      schemaDimension = dimension('schema_validation', outcome.status, outcome.findings)
+      schemaDimension = schemaDimensionFromOutcome(
+        outcome,
+        matchingReferences.length,
+        request.schemaDocuments?.length ?? 0,
+      )
       schemaReferences = outcome.schemaReferences
     }
 
@@ -457,61 +589,117 @@ export class CredentialValidator {
         }
       }
 
-      let status: ValidationStatus
+      let status: Exclude<ValidationStatus, 'NOT_TESTED' | 'NOT_APPLICABLE'>
+      let reason: string
+      let credentialDependentChecksExecuted = true
       if (findings.some((entry) => entry.severity === 'error')) {
         status = 'FAIL'
+        reason =
+          'At least one attestation-specific constraint is violated by the credential or rulebook version.'
       } else if (parsed === undefined) {
-        status = 'NOT_TESTED'
+        // The rulebook-level checks ran, but the credential-dependent check
+        // could not, so the dimension is executed and inconclusive, never PASS.
+        status = 'INCONCLUSIVE'
+        reason =
+          'Rulebook-level attestation constraints were evaluated, but the credential-dependent key-binding check could not run because the credential was not parsed.'
+        credentialDependentChecksExecuted = false
         findings.push(
           finding(
             'attestation_constraints',
-            'credential_not_parsed',
+            'credential_dependent_checks_not_run',
             'Credential-dependent attestation constraints were not evaluated because the credential was not parsed.',
-            'info',
+            'warning',
           ),
         )
       } else if (findings.some((entry) => entry.severity === 'warning')) {
         status = 'INCONCLUSIVE'
+        reason =
+          'The credential satisfies the attestation constraints, but at least one rulebook value is outside the pinned TS11 vocabulary and was preserved rather than coerced.'
       } else {
         status = 'PASS'
+        reason =
+          'The credential satisfies every attestation constraint observable without cryptography.'
       }
-      attestationDimension = dimension('attestation_constraints', status, findings)
+      attestationDimension = executedDimension(
+        'attestation_constraints',
+        status,
+        findings,
+        reason,
+        {
+          credential_format_supported:
+            format === null || attestation.supportedFormats.includes(format),
+          key_binding_required: attestation.bindingType === 'key',
+          key_binding_present: parsed?.keyBindingPresent ?? null,
+          credential_dependent_checks_executed: credentialDependentChecksExecuted,
+        },
+      )
     }
 
     // FR-010 order: parsing, format recognition, crypto, schema, attestation,
     // trust, protocol, interoperability.
+    const cryptoReason =
+      'Issuer JWS signatures, key-binding (KB-JWT) proofs and status-list tokens were not verified; this endpoint performs structural validation only.'
     const finalDimensions: readonly ValidationDimension[] = [
       parsingDimension,
       formatDimension,
-      externalDimension(
-        'cryptographic_verification',
-        'NOT_TESTED',
-        'signature_not_verified',
-        'Credential signatures, key-binding proofs and status-list tokens were not verified; this endpoint performs structural validation only.',
-        'warning',
-      ),
+      createDimension({
+        id: 'cryptographic_verification',
+        status: 'NOT_TESTED',
+        applicable: true,
+        executed: false,
+        findings: [
+          finding(
+            'cryptographic_verification',
+            'signature_not_verified',
+            'The issuer JWS signature was not verified; structural validity is not cryptographic validity.',
+            'warning',
+            '/credential',
+          ),
+          finding(
+            'cryptographic_verification',
+            'key_binding_proof_not_verified',
+            'Any key-binding (KB-JWT) proof was not verified, and possession of the bound key was not demonstrated.',
+            'warning',
+            '/cnf',
+          ),
+          finding(
+            'cryptographic_verification',
+            'status_list_not_checked',
+            'The credential status was not checked against a status-list token or revocation policy.',
+            'warning',
+            '/status',
+          ),
+        ],
+        evidence: {
+          scope: dimensionDefinition('cryptographic_verification').scope,
+          reason: cryptoReason,
+          details: {
+            executed: false,
+            issuer_jws_signature_verified: false,
+            key_binding_proof_verified: false,
+            status_list_token_verified: false,
+          },
+        },
+      }),
       schemaDimension,
       attestationDimension,
-      externalDimension(
+      notExecutedDimension(
         'issuer_trust',
-        'NOT_TESTED',
         'trust_not_evaluated',
         'The credential issuer was not evaluated against trust anchors; no trust configuration was applied.',
-        'warning',
+        { trust_anchors_applied: false },
       ),
-      externalDimension(
+      notApplicableDimension(
         'protocol_conformance',
-        'NOT_APPLICABLE',
         'protocol_not_applicable',
-        'Protocol conformance requires a protocol interaction; a standalone credential artifact provides none.',
-        'info',
+        'Protocol conformance requires an issuer or verifier protocol interaction; a standalone credential artifact provides none.',
+        { protocol_exchange_present: false },
       ),
-      externalDimension(
+      notApplicableDimension(
         'interoperability',
-        'NOT_APPLICABLE',
         'interoperability_not_applicable',
         'End-to-end interoperability requires external wallet and verifier execution and is never inferred from structural validation.',
-        'info',
+        { external_wallet_execution: false },
       ),
     ]
 
@@ -541,6 +729,7 @@ export class CredentialValidator {
       schemaReferences,
       dimensions: finalDimensions,
       violations,
+      limitations: limitationsFromDimensions(finalDimensions),
       overallStatus: aggregateStatus(finalDimensions),
     }
   }

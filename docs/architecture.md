@@ -266,6 +266,9 @@ Rules:
   (FR-012, AC-16, AC-17).
 - Dimensions map 1:1 to the traceability matrix
   ([`docs/traceability.md`](traceability.md) from [#2](https://github.com/ForkbombEu/credimi-attestbook/issues/2)).
+- The implemented applicability table and the construction-time status invariants live in
+  `src/validation/dimensions.ts`; see [`docs/validation.md`](validation.md) §2 for the
+  per-dimension evidence and limitation model (issue #33).
 
 ## 9. Reproducibility, content digest and immutable publication
 

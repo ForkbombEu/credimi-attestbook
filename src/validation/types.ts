@@ -53,11 +53,51 @@ export interface ValidationFinding {
   readonly expected?: string
 }
 
-/** One FR-010 dimension with its own status and findings. */
+/**
+ * A JSON-serializable, non-sensitive evidence value. Evidence never carries a
+ * claim value, a raw credential artifact, a disclosure or key material.
+ */
+export type ValidationEvidenceValue = string | number | boolean | null
+
+/**
+ * Machine-readable evidence for one dimension. `scope` states what this build
+ * actually evaluates; `reason` states why the dimension did or did not run;
+ * `details` carries the structured facts the check produced (or explicitly
+ * records the absent checks, for example `issuer_jws_signature_verified: false`).
+ */
+export interface ValidationDimensionEvidence {
+  readonly scope: string
+  readonly reason: string
+  readonly details: Readonly<Record<string, ValidationEvidenceValue>>
+}
+
+/**
+ * One FR-010 dimension with its own status, applicability, execution flag,
+ * findings and evidence. A dimension that did not execute is never `PASS`
+ * (enforced by `createDimension` in `./dimensions`).
+ */
 export interface ValidationDimension {
   readonly id: ValidationDimensionId
   readonly status: ValidationStatus
+  /** Whether this request requires the dimension (D-8 applicability). */
+  readonly applicable: boolean
+  /** Whether an actual check ran for this dimension. */
+  readonly executed: boolean
   readonly findings: readonly ValidationFinding[]
+  readonly evidence: ValidationDimensionEvidence
+}
+
+/**
+ * An explicit limitation of the reported result: a dimension that did not
+ * execute, or a check within it that was not conclusive. The code is stable and
+ * machine-readable, and the message never contains credential material.
+ */
+export interface ValidationLimitation {
+  readonly code: string
+  readonly dimension: ValidationDimensionId
+  /** The status of the dimension that produced the limitation. */
+  readonly status: ValidationStatus
+  readonly message: string
 }
 
 /** The rulebook version the run was pinned to. */
@@ -109,6 +149,20 @@ export interface CredentialValidationResult {
   readonly dimensions: readonly ValidationDimension[]
   /** Findings with an `error` or `warning` severity, flattened for clients. */
   readonly violations: readonly ValidationFinding[]
+  /**
+   * Explicit, machine-readable limitations of this result: every dimension
+   * that did not run or did not reach a conclusion is named here, so a caller
+   * never has to infer an absent cryptographic, trust, protocol or
+   * interoperability check from the overall status alone.
+   */
+  readonly limitations: readonly ValidationLimitation[]
+  /**
+   * D-8 aggregation: `FAIL` if any dimension failed; else `INCONCLUSIVE`;
+   * else `NOT_TESTED` if any applicable dimension was not executed; else
+   * `PASS` only when every applicable dimension executed and passed. In this
+   * structural-only slice, cryptography and issuer trust are always applicable
+   * and not executed, so an overall `PASS` is not reachable.
+   */
   readonly overallStatus: ValidationStatus
 }
 

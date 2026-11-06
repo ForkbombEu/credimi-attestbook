@@ -75,6 +75,43 @@ describe('POST /api/credentials/validate', () => {
     expect(result.overallStatus).toBe('NOT_TESTED')
     expect(result.dimensions).toHaveLength(8)
     expect(result.violations.map((entry) => entry.code)).toContain('signature_not_verified')
+    for (const entry of result.dimensions) {
+      expect(typeof entry.applicable).toBe('boolean')
+      expect(typeof entry.executed).toBe('boolean')
+      expect(entry.evidence.reason.length).toBeGreaterThan(0)
+    }
+    const limitationCodes = result.limitations.map((entry) => entry.code)
+    expect(limitationCodes).toContain('signature_not_verified')
+    expect(limitationCodes).toContain('key_binding_proof_not_verified')
+    expect(limitationCodes).toContain('status_list_not_checked')
+    expect(limitationCodes).toContain('trust_not_evaluated')
+    expect(limitationCodes).toContain('protocol_not_applicable')
+    expect(limitationCodes).toContain('interoperability_not_applicable')
+  })
+
+  test('does not report overall success for a schema-valid credential with an invalid signature', async () => {
+    const { app, seeded } = setup()
+    const credential = await issueTestCredential()
+    const segments = credential.split('~')
+    const jwt = (segments[0] ?? '').split('.')
+    const header = jwt[0]
+    const payload = jwt[1]
+    if (header === undefined || payload === undefined) {
+      throw new Error('fixture is not a compact JWT')
+    }
+    const tampered = [
+      [header, payload, 'aW52YWxpZC1zaWduYXR1cmU'].join('.'),
+      ...segments.slice(1),
+    ].join('~')
+
+    const response = await post(app, body(seeded, tampered))
+    expect(response.status).toBe(200)
+    const result = (await response.json()) as CredentialValidationResult
+    expect(result.overallStatus).not.toBe('PASS')
+    const crypto = result.dimensions.find((entry) => entry.id === 'cryptographic_verification')
+    expect(crypto?.status).toBe('NOT_TESTED')
+    expect(crypto?.executed).toBe(false)
+    expect(result.limitations.map((entry) => entry.code)).toContain('signature_not_verified')
   })
 
   test('keeps /health responsive while a schema runs in the sandbox', async () => {
