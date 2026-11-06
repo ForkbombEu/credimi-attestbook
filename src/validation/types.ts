@@ -184,7 +184,7 @@ export interface SchemaDocumentInput {
   readonly content: string
 }
 
-/** Typed request for `POST /api/credentials/validate`. */
+/** Typed request for `POST /api/v1/credentials/validate`. */
 export interface ValidateCredentialInput {
   readonly rulebookId: string
   readonly rulebookVersion: string

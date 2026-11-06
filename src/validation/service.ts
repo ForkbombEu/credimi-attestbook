@@ -6,7 +6,7 @@
 
 import type { CredentialValidationResult } from './types'
 
-export const CREDENTIAL_VALIDATION_PATH = '/api/credentials/validate'
+export const CREDENTIAL_VALIDATION_PATH = '/api/v1/credentials/validate'
 
 export interface CredentialValidationService {
   validate(input: unknown): Promise<CredentialValidationResult>

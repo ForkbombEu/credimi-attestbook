@@ -9,6 +9,7 @@
         "@sd-jwt/sd-jwt-vc": "0.24.1",
         "ajv": "8.20.0",
         "hono": "4.13.16",
+        "zod": "4.6.7",
       },
       "devDependencies": {
         "@eslint/js": "9.39.5",

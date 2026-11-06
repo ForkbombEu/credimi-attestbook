@@ -59,8 +59,10 @@ Deliberately **not** in #30/#31:
   destructive write;
 - conditional fetching, scheduled synchronization and source-availability diagnostics
   (FR-005 beyond idempotent safe re-import);
-- the HTTP API, OpenAPI contract, write authorization at the HTTP layer and rate limiting
-  — issues #34/#35;
+- the HTTP surface and OpenAPI contract were added by
+  [issue #34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) (see
+  [`docs/api.md`](api.md)); HTTP rate limiting and request-authentication hardening remain
+  [issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35);
 - fetching, resolving or verifying `rulebookURI` or `schemaURIs`; SRI verification over
   fetched schema bytes remains delegated to OWF with a caller-supplied resolver, and this
   slice reports unresolved references as `not_tested`;
@@ -73,7 +75,8 @@ Deliberately **not** in #30/#31:
 
 ## 2. Public service contract
 
-`src/import/` exposes two operations. Neither is wired to the HTTP server yet.
+`src/import/` exposes two operations; the versioned HTTP API exposes them as
+`POST /api/v1/imports/preview` and `POST /api/v1/imports` (see [`docs/api.md`](api.md)).
 
 ```ts
 const importer = new RulebookImporter({ registry })
@@ -356,9 +359,10 @@ updates, full FR-005 synchronization or interoperability.
 
 ## 8. Related work
 
-- Issues [#34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) and
-  [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) — REST/OpenAPI surface
-  and HTTP write security, which will expose the per-entry import result.
+- [`docs/api.md`](api.md) — the versioned REST/OpenAPI surface implemented by #34, which
+  exposes the per-entry import result.
+- Issue [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) — HTTP write
+  security, rate limiting and provider-management routes.
 - Issues [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) and
   [#41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) — version history and
   the editor workflow that resolves a reported conflict.

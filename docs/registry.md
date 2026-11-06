@@ -80,14 +80,16 @@ Deliberately **not** in #28/#29/#30/#31:
 - scheduled synchronization, conditional fetching and source-availability diagnostics —
   later FR-005 slices;
 - credential validation against a version — issues #32/#33;
-- the versioned REST API and generated OpenAPI — issue #34;
-- protected HTTP write routes, rate limits and API security documentation — issue #35;
+- the versioned REST API and generated OpenAPI — implemented by
+  [issue #34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) in `src/api/` and
+  documented in [`docs/api.md`](api.md);
+- rate limits, request-authentication hardening and provider-management HTTP routes — issue #35;
 - publication UI, rulebook editor and version comparison/diff UI — Phase 2 and issue #37;
 - semantic content canonicalization — explicitly out of scope (D-6, R-17).
 
-Until #34 wires these services into the HTTP application, the database is not opened by
-`src/server.ts`; the services are exercised directly by tests and are the intended seam for
-the API layer.
+The server opens the database and applies migrations at startup; the registry service is
+wired into the versioned HTTP API described in [`docs/api.md`](api.md), and the service
+contract remains the seam the routes call.
 
 ## 2. Storage engine and migrations
 
@@ -283,8 +285,9 @@ require a new label to be numerically greater, so publishing `0.9` after `2.0` s
 `2.0` historical. Authoring/ordering policy is left to the editor slice.
 
 While the next draft is in progress, the rulebook's catalogue `publicationStatus` is `draft`
-even though a published version remains retrievable. The API slice (#34) must expose the
-published version alongside the working state so catalogue consumers are not misled.
+even though a published version remains retrievable. The versioned API exposes the full
+version list alongside the working state (see [`docs/api.md`](api.md)), so catalogue
+consumers are not misled.
 
 ### 6.2 Content digest and artifact
 
@@ -320,9 +323,9 @@ the same content-addressed store.
   it, so a rulebook-provenance change made before publication requires a new version. This
   slice has no separate "edit version provenance" operation.
 
-Versions are not exportable yet: the public API (#34) and the detail/version-history UI (#37)
-own export and comparison. Version comparison is also #37; this slice stores the data needed
-for it.
+Version snapshot bytes are retrievable over the public API (`GET .../versions/{version}/content`,
+with a `Content-Digest` header) and comparison is owned by #37; this slice stores the data
+needed for it.
 
 ### 6.4 Immutability enforcement
 
@@ -409,7 +412,8 @@ The implementation is covered by real temporary SQLite files (not in-memory fake
   including idempotent re-import and conflict detection; see [`docs/import.md`](import.md).
 
 Run the suite with `bun run check` (format, lint, strict typecheck and tests). The tests cover
-the #28/#29/#30/#31 acceptance criteria; they do **not** claim HTTP contract coverage (#34),
+the #28/#29/#30/#31 acceptance criteria; HTTP contract coverage is added by #34 in
+`src/api/routes.test.ts` and the generated-OpenAPI tests. The suite does **not** claim
 URL/JSON import security beyond the #30 controls, automatic source updates, scheduled
 synchronization or credential validation (#32). The UI slice (#37) still needs to expose
 version history and comparison.
@@ -423,6 +427,7 @@ version history and comparison.
 - [`docs/traceability.md`](traceability.md) Matrix B — FR-001/FR-002/FR-003 test mapping.
 - [`docs/standards-adapter.md`](standards-adapter.md) — canonical model, wire codecs and the
   product-metadata boundary used by future version storage.
+- [`docs/api.md`](api.md) — the versioned REST contract that exposes this registry.
 - Issues [#30](https://github.com/ForkbombEu/credimi-attestbook/issues/30) (initial import,
   documented in [`docs/import.md`](import.md)),
   [#31](https://github.com/ForkbombEu/credimi-attestbook/issues/31) (idempotent re-import and

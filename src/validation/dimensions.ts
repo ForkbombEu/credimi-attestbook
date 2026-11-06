@@ -37,7 +37,7 @@ export interface DimensionDefinition {
   readonly owner: DimensionOwner
   /** Whether this build implements and executes the dimension. */
   readonly implemented: boolean
-  /** Applicability to a standalone `POST /api/credentials/validate` request. */
+  /** Applicability to a standalone `POST /api/v1/credentials/validate` request. */
   readonly applicability: DimensionApplicability
   /** What a real execution of the dimension would evaluate. */
   readonly scope: string
