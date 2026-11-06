@@ -15,6 +15,7 @@ import {
   buildPublicationExportManifest,
   publicationExportFilename,
   PUBLICATION_EXPORT_FORMAT,
+  PUBLICATION_EXPORT_PROVENANCE_FIELDS,
   PUBLICATION_SIGNATURE_REASON,
 } from './export'
 
@@ -56,7 +57,21 @@ const publishedVersion: RulebookVersion = {
   status: 'published',
   contentDigest,
   specVersion: 'ts11@1.0.1',
-  provenance: { adapter: 'ts11', sourceDigest: contentDigest },
+  provenance: {
+    adapter: 'ts11',
+    sourceUrl: 'https://catalog.example.org/entry',
+    contentDigest,
+    retrievedAt: '2026-01-01T00:00:00.000Z',
+    profile: 'ts11@1.0.1',
+    conformance: 'partial',
+    importedAt: '2026-01-01T00:00:01.000Z',
+    // Import-internal or untrusted fields that must not reach the public manifest.
+    sourceName: 'Untrusted source label',
+    requestedUrl: 'https://redirect.example.org/private',
+    redirects: ['https://redirect.example.org/private'],
+    envelope: { metadata: { personal: 'data' } },
+    entryIndex: 3,
+  },
   createdAt: '2026-01-01T00:00:00.000Z',
   publishedAt: '2026-01-01T00:00:01.000Z',
 }
@@ -90,7 +105,15 @@ describe('publication export manifest', () => {
       byteLength: bytes.byteLength,
       createdAt: '2026-01-01T00:00:00.000Z',
       publishedAt: '2026-01-01T00:00:01.000Z',
-      provenance: { adapter: 'ts11', sourceDigest: contentDigest },
+      provenance: {
+        adapter: 'ts11',
+        sourceUrl: 'https://catalog.example.org/entry',
+        contentDigest,
+        retrievedAt: '2026-01-01T00:00:00.000Z',
+        profile: 'ts11@1.0.1',
+        conformance: 'partial',
+        importedAt: '2026-01-01T00:00:01.000Z',
+      },
       integrity: { algorithm: 'sha256', verified: true },
     })
     expect(manifest.signature.status).toBe('unsupported')
@@ -98,6 +121,37 @@ describe('publication export manifest', () => {
     expect(manifest.signature.reason).toContain('OWF 0.5.4')
     expect(manifest.limitations.length).toBeGreaterThan(0)
     expect(manifest.limitations.join(' ')).toContain('SHA-256')
+  })
+
+  test('exposes only the bounded provenance projection', () => {
+    const manifest = buildPublicationExportManifest(input())
+    expect(Object.keys(manifest.provenance).sort()).toEqual(
+      [...PUBLICATION_EXPORT_PROVENANCE_FIELDS].sort(),
+    )
+    const serialized = JSON.stringify(manifest)
+    for (const excluded of [
+      'Untrusted source label',
+      'redirect.example.org',
+      'personal',
+      '"sourceName"',
+      '"requestedUrl"',
+      '"redirects"',
+      '"envelope"',
+      '"entryIndex"',
+    ]) {
+      expect(serialized).not.toContain(excluded)
+    }
+
+    // Non-string or empty values are dropped rather than coerced.
+    const filtered = buildPublicationExportManifest(
+      input({
+        version: {
+          ...publishedVersion,
+          provenance: { adapter: '', profile: { nested: true }, conformance: 'partial' },
+        },
+      }),
+    )
+    expect(filtered.provenance).toEqual({ conformance: 'partial' })
   })
 
   test('is deterministic for the same frozen version', () => {

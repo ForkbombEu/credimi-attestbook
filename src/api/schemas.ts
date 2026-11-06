@@ -224,6 +224,21 @@ export const publicationExportSignatureSchema = z.object({
 })
 
 /**
+ * Bounded provenance projection of a publication export. Import provenance can
+ * carry untrusted envelope metadata and optional source labels, so the public
+ * manifest carries only these stable fields (§15 personal-data minimisation).
+ */
+export const publicationExportProvenanceSchema = z.object({
+  adapter: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  contentDigest: z.string().optional(),
+  retrievedAt: z.string().optional(),
+  profile: z.string().optional(),
+  conformance: z.string().optional(),
+  importedAt: z.string().optional(),
+})
+
+/**
  * Manifest of one published or historical artifact. It is built only from
  * frozen version data, so exporting the same version always returns the same
  * manifest, independent of later working-copy edits.
@@ -242,7 +257,7 @@ export const publicationExportManifestSchema = z.object({
   byteLength: z.number().int().nonnegative(),
   createdAt: timestamp,
   publishedAt: timestamp,
-  provenance: z.record(z.string(), z.unknown()),
+  provenance: publicationExportProvenanceSchema,
   integrity: z.object({
     algorithm: z.literal('sha256'),
     verified: z.literal(true),

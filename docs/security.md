@@ -145,6 +145,10 @@ the OpenAPI responses of every protected operation.
   authentication or any request content.
 - The audit trail stores identifiers, actions, field names, version labels and content digests.
   It does not store raw tokens, token hashes, credential material or personal attributes.
+- The publication export manifest is public, so it carries only a bounded projection of the
+  version provenance (`adapter`, `sourceUrl`, `contentDigest`, `retrievedAt`, `profile`,
+  `conformance`, `importedAt`). Import-internal redirect chains, optional source labels and
+  untrusted envelope metadata are excluded (§15 personal-data minimisation).
 - Credential validation is synchronous and nothing is persisted; supplied credentials and
   schema documents are not logged or retained.
 - Operator provisioning returns the raw token once to the provisioning call and stores only

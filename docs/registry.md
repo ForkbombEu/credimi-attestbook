@@ -77,8 +77,13 @@ Implemented by #42:
   the version row, its provenance and the snapshot document. The rulebook working copy is
   never read, so the export of a published version is stable across repeated reads and later
   drafts, edits or supersession;
+- the manifest carries a bounded provenance projection (`adapter`, `sourceUrl`,
+  `contentDigest`, `retrievedAt`, `profile`, `conformance`, `importedAt`) rather than the raw
+  provenance row. Import provenance can include untrusted envelope metadata, redirect chains
+  and optional source labels, so the public manifest excludes them (§15 personal-data
+  minimisation);
 - the manifest carries the frozen rulebook identity, the exact byte length, the SHA-256
-  content digest, the publication time, version provenance and an explicit
+  content digest, the publication time, bounded provenance and an explicit
   `integrity: { algorithm: "sha256", verified: true }` result. The digest is recomputed
   before every export; a mismatch fails as a server fault rather than exporting corrupt
   bytes as verified;

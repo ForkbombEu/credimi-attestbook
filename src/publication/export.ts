@@ -52,6 +52,56 @@ export interface PublicationExportIntegrity {
 }
 
 /**
+ * Bounded provenance exported with a publication. Import provenance can carry
+ * untrusted envelope metadata, redirect chains and optional source labels, so
+ * the manifest exposes only these stable string fields instead of the raw
+ * registry row (personal-data minimisation, specification §15).
+ */
+export interface PublicationExportProvenance {
+  readonly adapter?: string
+  readonly sourceUrl?: string
+  readonly contentDigest?: string
+  readonly retrievedAt?: string
+  readonly profile?: string
+  readonly conformance?: string
+  readonly importedAt?: string
+}
+
+/** The only provenance fields a publication export manifest may carry. */
+export const PUBLICATION_EXPORT_PROVENANCE_FIELDS = [
+  'adapter',
+  'sourceUrl',
+  'contentDigest',
+  'retrievedAt',
+  'profile',
+  'conformance',
+  'importedAt',
+] as const
+
+function boundedProvenance(provenance: JsonObject): PublicationExportProvenance {
+  const read = (key: string): string | undefined => {
+    const value = provenance[key]
+    return typeof value === 'string' && value.trim() !== '' ? value : undefined
+  }
+  const adapter = read('adapter')
+  const sourceUrl = read('sourceUrl')
+  const contentDigest = read('contentDigest')
+  const retrievedAt = read('retrievedAt')
+  const profile = read('profile')
+  const conformance = read('conformance')
+  const importedAt = read('importedAt')
+  return {
+    ...(adapter === undefined ? {} : { adapter }),
+    ...(sourceUrl === undefined ? {} : { sourceUrl }),
+    ...(contentDigest === undefined ? {} : { contentDigest }),
+    ...(retrievedAt === undefined ? {} : { retrievedAt }),
+    ...(profile === undefined ? {} : { profile }),
+    ...(conformance === undefined ? {} : { conformance }),
+    ...(importedAt === undefined ? {} : { importedAt }),
+  }
+}
+
+/**
  * Manifest of one published artifact. Every field comes from frozen data; the
  * manifest for a given published version is therefore stable across exports and
  * independent of later working-copy edits.
@@ -70,11 +120,11 @@ export interface PublicationExportManifest {
   readonly mediaType: string
   readonly contentDigest: string
   readonly byteLength: number
-  /** Set exactly when the version was published; immutable afterwards. */
   readonly createdAt: string
+  /** Set exactly when the version was published; immutable afterwards. */
   readonly publishedAt: string
-  /** Version provenance frozen when the snapshot was created. */
-  readonly provenance: JsonObject
+  /** Bounded projection of the version provenance frozen with the snapshot. */
+  readonly provenance: PublicationExportProvenance
   readonly integrity: PublicationExportIntegrity
   readonly signature: PublicationExportSignature
   readonly limitations: readonly string[]
@@ -131,7 +181,7 @@ export function buildPublicationExportManifest(
     byteLength: input.bytes.byteLength,
     createdAt: version.createdAt,
     publishedAt: version.publishedAt,
-    provenance: version.provenance,
+    provenance: boundedProvenance(version.provenance),
     integrity: { algorithm: 'sha256', verified: true },
     signature: {
       status: 'unsupported',

@@ -8,6 +8,7 @@ export {
   publicationExportFilename,
   PUBLICATION_EXPORT_FORMAT,
   PUBLICATION_EXPORT_LIMITATIONS,
+  PUBLICATION_EXPORT_PROVENANCE_FIELDS,
   PUBLICATION_SIGNATURE_REASON,
 } from './export'
 export type {
@@ -15,6 +16,7 @@ export type {
   ExportablePublicationStatus,
   PublicationExportIntegrity,
   PublicationExportManifest,
+  PublicationExportProvenance,
   PublicationExportSignature,
   PublicationSignatureStatus,
 } from './export'

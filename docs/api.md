@@ -32,7 +32,7 @@ Implemented and exposed by this slice:
   publication-readiness checks (added by
   [issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41));
 - stable export of published/historical artifacts and a public publication export manifest
-  with the artifact digest, provenance and an explicit signature boundary (added by
+  with the artifact digest, bounded provenance and an explicit signature boundary (added by
   [issue #42](https://github.com/ForkbombEu/credimi-attestbook/issues/42));
 - authenticated import preview and import of URL/JSON sources;
 - structural credential validation against a pinned rulebook version.
@@ -102,7 +102,7 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/compare?to={version}` | no | `200` | Deterministic structural comparison of two snapshots. Identity fields are excluded and changes are JSON Pointer paths sorted by path. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publication-readiness` | no | `200` | Pre-publication checks and explicit limitations; never a publication or a conformance claim. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export` | no | `200` | Download the exact immutable bytes of a published or historical artifact; `Content-Digest`, `ETag` and an attachment filename are returned. Drafts answer `409 conflict`. |
-| `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export/manifest` | no | `200` | Publication export manifest: frozen identity, digest, provenance, integrity result and the explicit signature boundary. Drafts answer `409 conflict`. |
+| `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export/manifest` | no | `200` | Publication export manifest: frozen identity, digest, bounded provenance, integrity result and the explicit signature boundary. Drafts answer `409 conflict`. |
 | `POST` | `/api/v1/imports/preview` | yes | `200` | Bounded, read-only URL/JSON import preview. |
 | `POST` | `/api/v1/imports` | yes | `200` | Import compatible entries as drafts, reporting per-entry dispositions. |
 | `POST` | `/api/v1/credentials/validate` | no | `200` | Structural credential validation with per-dimension evidence. |
@@ -110,10 +110,13 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 Representations are the public projection of the services: rulebook `provenance`,
 `metadata` and `importKey`, attestation/schema-reference `metadata` and version `provenance`
 are **never** returned by the catalogue and version reads. The publication export manifest is
-the one deliberate exception for version `provenance`, because FR-008 requires published
-artifacts to be associated with provenance metadata; the manifest is a product artifact, not a
-standards document. The import preview omits the importer-internal canonical document; that
-document is derived data used only to commit an import.
+the one deliberate exception, because FR-008 requires published artifacts to be associated
+with provenance metadata; it carries a bounded projection (`adapter`, `sourceUrl`,
+`contentDigest`, `retrievedAt`, `profile`, `conformance`, `importedAt`) rather than the raw
+version provenance, so import-internal and untrusted source fields never reach the public
+manifest. The manifest is a product artifact, not a standards document. The import preview
+omits the importer-internal canonical document; that document is derived data used only to
+commit an import.
 
 ### 3.1 Success envelopes
 
@@ -296,11 +299,12 @@ artifact without copying it:
 }
 ```
 
-Every manifest field comes from frozen data: the version row, its provenance and the snapshot
-document. The rulebook's mutable working copy is never read, so the manifest for a published
-version is identical across repeated exports and is unaffected by later edits, a new draft
-version or supersession. `status` changes from `published` to `historical` when a newer
-version supersedes it; the digest, publication time, bytes and provenance do not change.
+Every manifest field comes from frozen data: the version row, a bounded projection of its
+provenance and the snapshot document. The rulebook's mutable working copy is never read, so the
+manifest for a published version is identical across repeated exports and is unaffected by later
+edits, a new draft version or supersession. `status` changes from `published` to `historical`
+when a newer version supersedes it; the digest, publication time, bytes and bounded provenance
+do not change.
 
 The manifest makes **no signature claim**. The mandatory OWF package provides only a bare
 OWF-profile `SchemaMeta` compact JWS (`signSchemaMeta`/`verifySchemaMeta`), which the

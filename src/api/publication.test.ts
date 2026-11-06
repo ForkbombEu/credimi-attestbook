@@ -52,6 +52,7 @@ function content(name = 'Publication Rulebook') {
 interface Setup {
   readonly app: Hono
   readonly database: Database
+  readonly registry: RegistryFixture['registry']
   readonly token: string
   readonly otherToken: string
   readonly providerId: string
@@ -73,6 +74,7 @@ function setup(): Setup {
   return {
     app: createApp({ registry: fixture.registry }),
     database: fixture.database,
+    registry: fixture.registry,
     token: owner.token.secret,
     otherToken: other.token.secret,
     providerId: owner.provider.id,
@@ -223,6 +225,53 @@ describe('publication export API', () => {
     expect(manifest.signature.status).toBe('unsupported')
     expect(manifest.signature.reason).toContain('OWF')
     expect(manifest.limitations.length).toBeGreaterThan(0)
+  })
+
+  test('exports only a bounded provenance projection of an imported rulebook', async () => {
+    const { app, token, registry } = setup()
+    // The importer stores source-internal and untrusted fields in provenance;
+    // the public manifest must expose only the stable projection.
+    const imported = registry.createRulebook(token, {
+      ...content('Imported Rulebook'),
+      provenance: {
+        adapter: 'ts11',
+        sourceUrl: 'https://catalog.example.org/entry',
+        contentDigest: 'a'.repeat(64),
+        retrievedAt: '2026-01-01T00:00:00.000Z',
+        profile: 'ts11@1.0.1',
+        conformance: 'partial',
+        importedAt: '2026-01-01T00:00:01.000Z',
+        sourceName: 'Private source label',
+        requestedUrl: 'https://private.example.org/redirect-target',
+        redirects: ['https://private.example.org/redirect-target'],
+        envelope: { metadata: { private: 'value' } },
+        entryIndex: 2,
+      },
+    })
+    registry.createRulebookVersion(token, imported.id, { version: '1.0' })
+    expect((await publish(app, imported.id, '1.0', token)).status).toBe(200)
+
+    const manifest = await readManifest(app, imported.id, '1.0')
+    expect(manifest.provenance).toEqual({
+      adapter: 'ts11',
+      sourceUrl: 'https://catalog.example.org/entry',
+      contentDigest: 'a'.repeat(64),
+      retrievedAt: '2026-01-01T00:00:00.000Z',
+      profile: 'ts11@1.0.1',
+      conformance: 'partial',
+      importedAt: '2026-01-01T00:00:01.000Z',
+    })
+    const serialized = JSON.stringify(manifest)
+    for (const excluded of [
+      'Private source label',
+      'private.example.org',
+      '"envelope"',
+      '"requestedUrl"',
+      '"redirects"',
+      '"entryIndex"',
+    ]) {
+      expect(serialized).not.toContain(excluded)
+    }
   })
 
   test('repeats the same export and manifest, and later draft edits do not change them', async () => {
