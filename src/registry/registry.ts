@@ -27,6 +27,7 @@ import {
 } from './errors'
 import { RegistryStore } from './store'
 import { generateBearerToken, hashBearerToken } from './tokens'
+import { assertRulebookTransition, assertVersionTransition } from './transitions'
 import type {
   AttestationType,
   AuthenticatedActor,
@@ -1003,6 +1004,11 @@ export class Registry {
     if (rulebook.publicationStatus === 'historical') {
       throw immutable('The rulebook is historical; a new version cannot be created for it.')
     }
+    if (rulebook.publicationStatus === 'published') {
+      // Creating the next version reopens the working copy. The version rows
+      // themselves stay immutable; only the rulebook status changes.
+      assertRulebookTransition(rulebook.publicationStatus, 'draft')
+    }
 
     const version = requireSemanticVersion(input.version, 'version')
     if (this.store.getRulebookVersion(rulebook.id, version) !== null) {
@@ -1128,9 +1134,7 @@ export class Registry {
     if (existing === null) {
       throw notFound('The rulebook version does not exist.')
     }
-    if (existing.status !== 'draft') {
-      throw immutable(`The version is ${existing.status}; only a draft version can be published.`)
-    }
+    assertVersionTransition(existing.status, 'published')
 
     // Publishing must not silently freeze content that changed after the draft
     // snapshot was taken; the provider refreshes the draft explicitly.
@@ -1138,6 +1142,7 @@ export class Registry {
     if (sha256Hex(currentBytes) !== existing.contentDigest) {
       throw conflict('The draft version content is stale; refresh it before publishing.')
     }
+    assertRulebookTransition(rulebook.publicationStatus, 'published')
 
     const supersededVersions = this.store
       .listRulebookVersions(rulebook.id)

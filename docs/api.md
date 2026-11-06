@@ -28,6 +28,9 @@ Implemented and exposed by this slice:
   create of a draft version and publication;
 - public read, authenticated full replacement and public live validation of a draft working
   copy (added by [issue #40](https://github.com/ForkbombEu/credimi-attestbook/issues/40));
+- deterministic version comparison, authenticated draft-snapshot refresh and public
+  publication-readiness checks (added by
+  [issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41));
 - authenticated import preview and import of URL/JSON sources;
 - structural credential validation against a pinned rulebook version.
 
@@ -39,11 +42,12 @@ Deliberately **not** in this slice:
   to offer them;
 - provider-management HTTP routes, rate limiting and token expiry/rotation — future hardening;
   the implemented write-auth model is documented in [`docs/security.md`](security.md);
-- draft lifecycle transitions, version comparison/diff, publication readiness and export —
-  later slices (#41 and #42). The editor's draft document is a working-copy projection, not
-  a version snapshot or a standards document. The catalog, rulebook-detail, credential
-  playground and draft-editor views are documented in [`docs/ui.md`](ui.md); they are UI
-  routes, not API routes.
+- stable retrieval/export of published artifacts, publication signing and the remaining
+  FR-008 publication work — later slice
+  ([issue #42](https://github.com/ForkbombEu/credimi-attestbook/issues/42)). The editor's
+  draft document is a working-copy projection, not a version snapshot or a standards
+  document. The catalog, rulebook-detail, credential playground and draft-editor views are
+  documented in [`docs/ui.md`](ui.md); they are UI routes, not API routes.
 
 Every handler calls the real registry, import or validation service. A service that is not
 wired answers `503` with a typed code instead of a placeholder success response.
@@ -58,8 +62,8 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.2.0`,
-  additive after the draft-editor operations added by #40); it is separate from the package
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.3.0`,
+  additive after the lifecycle and comparison operations added by #41); it is separate from the package
   version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
@@ -88,6 +92,9 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}` | no | `200` | One version record and its content digest. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/content` | no | `200` | The exact snapshot bytes; `Content-Digest` and `ETag` carry the SHA-256. |
 | `POST` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publish` | yes | `200` | Publish the owning provider's draft version. |
+| `POST` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/refresh` | yes | `200` | Re-snapshot a draft version from the current working copy; an unchanged snapshot is a no-op and published/historical versions answer `409 immutable`. |
+| `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/compare?to={version}` | no | `200` | Deterministic structural comparison of two snapshots. Identity fields are excluded and changes are JSON Pointer paths sorted by path. |
+| `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publication-readiness` | no | `200` | Pre-publication checks and explicit limitations; never a publication or a conformance claim. |
 | `POST` | `/api/v1/imports/preview` | yes | `200` | Bounded, read-only URL/JSON import preview. |
 | `POST` | `/api/v1/imports` | yes | `200` | Import compatible entries as drafts, reporting per-entry dispositions. |
 | `POST` | `/api/v1/credentials/validate` | no | `200` | Structural credential validation with per-dimension evidence. |
@@ -201,6 +208,36 @@ source URL stands in for the rulebook URI; a fixed placeholder is used when no s
 set) and runs the real adapter, so the editor reports actual adapter findings rather than a
 second hand-written rule set. It makes no TS11 or ETSI conformance claim.
 
+### 3.3 Version comparison and publication readiness
+
+`GET /api/v1/rulebooks/{rulebookId}/versions/{version}/compare?to={label}` compares the
+authored content of two stored snapshots. The path version is the baseline, `to` is the
+compared version, and both must belong to the same rulebook. The comparison is a structural
+diff, not a byte diff: the snapshot identity fields (`format`, `rulebookId` and the version
+label) are excluded, so two labels with the same content report `identical: true`. Object
+keys are visited in sorted order and the change list is sorted by JSON Pointer path, so the
+same two snapshots always produce the same response. Each change is `added`, `removed` or
+`changed` and carries the `before` and/or `after` value.
+
+`GET /api/v1/rulebooks/{rulebookId}/versions/{version}/publication-readiness` is a public,
+read-only assessment. It executes the checks this build can actually run and reports them
+individually:
+
+| Check | Meaning |
+| --- | --- |
+| `draft_version` | Only a `draft` version can be published; published and historical artifacts are immutable. |
+| `snapshot_integrity` | The stored bytes still hash to the recorded SHA-256 digest. |
+| `snapshot_current` | The draft snapshot still matches the current working copy; a stale draft must be refreshed. |
+| `content_valid` | The snapshot content passes the same structural and TS11 v1.0.1 standards validation the editor runs. |
+| `standards_profile` | Whether the profile baseline was actually validated; an unsupported profile is a warning, not a silent pass. |
+| `attestation_types` | The rulebook defines at least one attestation type. |
+
+`ready` is true only when no check reports `fail`. The response also carries explicit
+`limitations`: remote schema documents, issuer trust, signing and interoperability are not
+verified by these checks, and the assessment makes no TS11 or ETSI conformance claim.
+Readiness is advisory for direct API callers; `POST .../publish` remains the authoritative
+transition and still rejects a stale snapshot with `409 conflict`.
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -229,7 +266,7 @@ present where a stable sub-reason helps the client (currently import failures ca
 | API / registry | resource does not exist | `404` | `not_found` |
 | Registry | duplicate version label, stale draft snapshot | `409` | `conflict` |
 | Registry / draft editor | published or historical rulebook cannot be edited | `409` | `immutable` |
-| Registry / publish handler | published/historical immutability, historical republication | `409` | `immutable` |
+| Registry / version handlers | published/historical immutability, historical republication, refresh of a frozen version | `409` | `immutable` |
 | Body limit middleware | body larger than 4 MiB | `413` | `payload_too_large` |
 | Import | unsafe/malformed/unsupported source, limits, refused import | `422` | `import_rejected` |
 | Import | remote fetch failure, DNS failure, timeout, redirect limit, oversized remote response, unsupported remote status | `502` | `import_fetch_failed` |
@@ -279,6 +316,9 @@ Phase 1 supports idempotency where the domain provides a deterministic identity;
 | --- | --- |
 | `POST /api/v1/imports` | **Idempotent for unchanged content.** Each source entry has a deterministic import identity, so re-importing the same normalized entry is a `200` with disposition `unchanged` and no write. Changed content is reported as a `conflict` and never overwrites local or published content. A URL preview's `retrievedAt` changes between calls, but that is provenance, not identity. |
 | `POST .../versions/{version}/publish` | **Idempotent replay while the version is published:** the same call returns `200` and the published representation, and does not create another version. A version superseded to `historical` answers `409 immutable` and is never resurrected. |
+| `POST .../versions/{version}/refresh` | **Idempotent for unchanged content:** re-snapshotting an unchanged working copy returns `200` with the same digest and writes nothing. A changed working copy produces a new digest; a published/historical version answers `409 immutable`. |
+| `GET .../versions/{version}/compare` | Read-only; safe to retry. |
+| `GET .../versions/{version}/publication-readiness` | Read-only; safe to retry. |
 | `POST /api/v1/rulebooks` | **Not idempotent.** There is no server-side deduplication of authored rulebooks; a retried request can create a second draft. Clients that need a stable identity should use the import path or reconcile by `id`. |
 | `PUT /api/v1/rulebooks/{rulebookId}/draft` | **Idempotent full replacement.** The same authorized document produces the same working copy; a retried request does not create a duplicate rulebook. A published/historical rulebook still answers `409 immutable`. |
 | `POST /api/v1/rulebooks/validate-draft` | Read-only and side-effect free; safe to retry. |

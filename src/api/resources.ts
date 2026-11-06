@@ -15,6 +15,7 @@ import type {
   ImportDiagnostic,
   ImportedSchemaReference,
 } from '../import'
+import type { PublicationReadiness, VersionContentDiff } from '../lifecycle'
 import type {
   AttestationType,
   DraftContent,
@@ -32,10 +33,12 @@ import {
   importPreviewSchema,
   importResultSchema,
   providerSchema,
+  publicationReadinessSchema,
   rulebookSchema,
   rulebookVersionDocumentSchema,
   rulebookVersionSchema,
   schemaReferenceSchema,
+  versionDiffSchema,
 } from './schemas'
 
 /** Public catalogue projection of a provider; authority and metadata stay internal. */
@@ -147,6 +150,43 @@ export function toRulebookVersionResource(version: RulebookVersion) {
     specVersion: version.specVersion,
     createdAt: version.createdAt,
     publishedAt: version.publishedAt,
+  })
+}
+
+/** Public projection of a deterministic comparison of two versions (#41). */
+export function toVersionDiffResource(
+  from: RulebookVersion,
+  to: RulebookVersion,
+  diff: VersionContentDiff,
+) {
+  return versionDiffSchema.parse({
+    from: toRulebookVersionResource(from),
+    to: toRulebookVersionResource(to),
+    identical: diff.identical,
+    changes: diff.changes.map((change) => ({
+      path: change.path,
+      kind: change.kind,
+      ...(change.before === undefined ? {} : { before: change.before }),
+      ...(change.after === undefined ? {} : { after: change.after }),
+    })),
+    summary: { ...diff.summary },
+  })
+}
+
+/** Public projection of a publication-readiness assessment (#41). */
+export function toPublicationReadinessResource(
+  version: RulebookVersion,
+  readiness: PublicationReadiness,
+) {
+  return publicationReadinessSchema.parse({
+    version: toRulebookVersionResource(version),
+    ready: readiness.ready,
+    checks: readiness.checks.map((check) => ({
+      id: check.id,
+      status: check.status,
+      message: check.message,
+    })),
+    limitations: [...readiness.limitations],
   })
 }
 

@@ -11,12 +11,14 @@ import type {
   DraftRulebook,
   DraftValidationReport,
   Provider,
+  PublicationReadiness,
   Rulebook,
   RulebookPage,
   RulebookVersion,
   SaveDraftRequest,
   SchemaReference,
   ValidateCredentialRequest,
+  VersionDiff,
 } from './types'
 
 /** Hard cap of the catalogue API page size (`limit` maximum). */
@@ -38,6 +40,12 @@ export interface CatalogApi {
     signal?: AbortSignal,
   ): Promise<readonly SchemaReference[]>
   listVersions(rulebookId: string, signal?: AbortSignal): Promise<readonly RulebookVersion[]>
+  getVersionDiff(
+    rulebookId: string,
+    fromVersion: string,
+    toVersion: string,
+    signal?: AbortSignal,
+  ): Promise<VersionDiff>
 }
 
 /**
@@ -55,6 +63,31 @@ export interface EditorApi {
   ): Promise<DraftRulebook>
   createDraft(request: SaveDraftRequest, token: string, signal?: AbortSignal): Promise<Rulebook>
   validateDraft(request: SaveDraftRequest, signal?: AbortSignal): Promise<DraftValidationReport>
+  /** Draft lifecycle reads used by the editor's publication panel (#41). */
+  listVersions(rulebookId: string, signal?: AbortSignal): Promise<readonly RulebookVersion[]>
+  getPublicationReadiness(
+    rulebookId: string,
+    version: string,
+    signal?: AbortSignal,
+  ): Promise<PublicationReadiness>
+  createVersion(
+    rulebookId: string,
+    version: string,
+    token: string,
+    signal?: AbortSignal,
+  ): Promise<RulebookVersion>
+  refreshVersion(
+    rulebookId: string,
+    version: string,
+    token: string,
+    signal?: AbortSignal,
+  ): Promise<RulebookVersion>
+  publishVersion(
+    rulebookId: string,
+    version: string,
+    token: string,
+    signal?: AbortSignal,
+  ): Promise<RulebookVersion>
 }
 
 export function rulebookDraftPath(rulebookId: string): string {
@@ -154,6 +187,12 @@ export function createHttpCatalogApi(
       const body = await getJson<unknown>(fetchImpl, path, signal)
       return singleData<readonly RulebookVersion[]>(body)
     },
+    async getVersionDiff(rulebookId, fromVersion, toVersion, signal) {
+      const query = new URLSearchParams({ to: toVersion })
+      const path = `${rulebookPath(rulebookId)}/versions/${encodeURIComponent(fromVersion)}/compare?${query.toString()}`
+      const body = await getJson<unknown>(fetchImpl, path, signal)
+      return singleData<VersionDiff>(body, 'version comparison')
+    },
   }
 }
 
@@ -216,9 +255,9 @@ export function createHttpEditorApi(
     return singleData<T>(body, label)
   }
 
-  async function postJson<T>(
+  async function writeJson<T>(
     path: string,
-    request: SaveDraftRequest,
+    body: unknown,
     token: string | undefined,
     method: 'POST' | 'PUT',
     signal: AbortSignal | undefined,
@@ -231,11 +270,25 @@ export function createHttpEditorApi(
         'content-type': 'application/json',
         ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
       },
-      body: JSON.stringify(request),
+      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       ...(signal === undefined ? {} : { signal }),
     })
     return readData<T>(response, label)
   }
+
+  async function postJson<T>(
+    path: string,
+    request: SaveDraftRequest,
+    token: string | undefined,
+    method: 'POST' | 'PUT',
+    signal: AbortSignal | undefined,
+    label: string,
+  ): Promise<T> {
+    return writeJson<T>(path, request, token, method, signal, label)
+  }
+
+  const versionPath = (rulebookId: string, version: string) =>
+    `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/versions/${encodeURIComponent(version)}`
 
   return {
     async getDraft(rulebookId, signal) {
@@ -266,6 +319,56 @@ export function createHttpEditorApi(
         'POST',
         signal,
         'draft validation',
+      )
+    },
+    async listVersions(rulebookId, signal) {
+      const response = await fetchImpl(
+        `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/versions`,
+        {
+          headers: { accept: 'application/json' },
+          ...(signal === undefined ? {} : { signal }),
+        },
+      )
+      return readData<readonly RulebookVersion[]>(response, 'version history')
+    },
+    async getPublicationReadiness(rulebookId, version, signal) {
+      const response = await fetchImpl(
+        `${versionPath(rulebookId, version)}/publication-readiness`,
+        {
+          headers: { accept: 'application/json' },
+          ...(signal === undefined ? {} : { signal }),
+        },
+      )
+      return readData<PublicationReadiness>(response, 'publication readiness')
+    },
+    createVersion(rulebookId, version, token, signal) {
+      return writeJson<RulebookVersion>(
+        `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/versions`,
+        { version },
+        token,
+        'POST',
+        signal,
+        'version create',
+      )
+    },
+    refreshVersion(rulebookId, version, token, signal) {
+      return writeJson<RulebookVersion>(
+        `${versionPath(rulebookId, version)}/refresh`,
+        {},
+        token,
+        'POST',
+        signal,
+        'version refresh',
+      )
+    },
+    publishVersion(rulebookId, version, token, signal) {
+      return writeJson<RulebookVersion>(
+        `${versionPath(rulebookId, version)}/publish`,
+        {},
+        token,
+        'POST',
+        signal,
+        'version publish',
       )
     },
   }

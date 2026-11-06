@@ -21,6 +21,7 @@ describe('catalog loading, error and empty states', () => {
       listAttestations: () => new Promise(() => {}),
       listSchemaReferences: () => new Promise(() => {}),
       listVersions: () => new Promise(() => {}),
+      getVersionDiff: () => new Promise(() => {}),
     }
 
     renderCatalog(pending)

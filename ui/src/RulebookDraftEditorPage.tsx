@@ -4,6 +4,7 @@ import type { EditorApi } from './api'
 import { CatalogApiError, isAbortError } from './api'
 import { SeverityBadge } from './components/Badges'
 import { ErrorState, LoadingState } from './components/CatalogStates'
+import { DraftLifecyclePanel } from './components/DraftLifecyclePanel'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import {
   describeDiagnosticPath,
@@ -214,6 +215,21 @@ export function RulebookDraftEditorPage({
   }
 
   const reload = useCallback(() => setReloadToken((value) => value + 1), [])
+
+  /**
+   * Applies the status a lifecycle transition produced without re-fetching the
+   * working copy, so the transition's own result stays visible.
+   */
+  const handleLifecycleChange = useCallback(
+    (publicationStatus: DraftRulebook['publicationStatus']) => {
+      setState((current) =>
+        current.status === 'ready' && current.draft !== null
+          ? { status: 'ready', draft: { ...current.draft, publicationStatus } }
+          : current,
+      )
+    },
+    [],
+  )
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -580,6 +596,16 @@ export function RulebookDraftEditorPage({
               </AppLink>
             </div>
           </form>
+
+          {rulebookId === undefined || draft === null ? null : (
+            <DraftLifecyclePanel
+              api={api}
+              rulebookId={rulebookId}
+              token={token}
+              publicationStatus={draft.publicationStatus}
+              onChanged={handleLifecycleChange}
+            />
+          )}
         </div>
       </main>
       <SiteFooter />

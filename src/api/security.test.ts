@@ -64,7 +64,9 @@ async function errorJson(response: Response): Promise<ErrorEnvelope> {
 }
 
 function concretePath(route: ApiRouteSpec, rulebookId: string): string {
-  return route.path.replace(':rulebookId', rulebookId).replace(':version', '1.0')
+  const path = route.path.replace(':rulebookId', rulebookId).replace(':version', '1.0')
+  // The comparison route requires its target version as a query parameter.
+  return route.operationId === 'compareRulebookVersions' ? `${path}?to=1.0` : path
 }
 
 function bearer(secret: string): string {
@@ -108,6 +110,7 @@ describe('write operation security surface', () => {
       'importRulebooks',
       'previewImport',
       'publishRulebookVersion',
+      'refreshRulebookVersion',
       'replaceRulebookDraft',
     ])
 

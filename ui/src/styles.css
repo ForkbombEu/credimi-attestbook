@@ -1304,3 +1304,115 @@ h1 {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+/* --------------------------------------- version comparison and lifecycle */
+
+.comparison-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.comparison-controls .field {
+  min-width: 190px;
+}
+
+.diff-value {
+  display: inline-block;
+  max-width: 38ch;
+  overflow-wrap: anywhere;
+}
+
+.badge--diff-added {
+  background: #e7f6ea;
+  color: #1f6b36;
+}
+
+.badge--diff-removed {
+  background: #fdeaea;
+  color: #8a2020;
+}
+
+.badge--diff-changed {
+  background: #fff4dd;
+  color: #7a5200;
+}
+
+.lifecycle-create {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  margin: 0 0 18px;
+}
+
+.lifecycle-create .field {
+  min-width: 240px;
+  flex: 1 1 240px;
+}
+
+.lifecycle-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.readiness-panel {
+  margin-top: 20px;
+}
+
+.readiness-panel h3 {
+  margin: 0 0 8px;
+}
+
+.readiness-panel h4 {
+  margin: 0 0 6px;
+  font-size: 0.9rem;
+}
+
+.readiness-summary {
+  margin: 0 0 10px;
+  font-weight: 600;
+}
+
+.readiness-summary--ready {
+  color: #1f6b36;
+}
+
+.readiness-summary--blocked {
+  color: #8a2020;
+}
+
+.readiness-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.readiness-message {
+  overflow-wrap: anywhere;
+}
+
+.badge.readiness-badge--pass {
+  background: #e7f6ea;
+  color: #1f6b36;
+}
+
+.badge.readiness-badge--fail {
+  background: #fdeaea;
+  color: #8a2020;
+}
+
+.badge.readiness-badge--warn {
+  background: #fff4dd;
+  color: #7a5200;
+}
+
+.badge.readiness-badge--not_applicable {
+  background: #eef1f5;
+  color: #48566a;
+}
