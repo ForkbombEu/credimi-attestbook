@@ -13,14 +13,17 @@ import { validateDraftContent } from '../editor'
 import { RulebookImporter } from '../import'
 import type { ImportPreview, ImportResult, ImportSource } from '../import'
 import { assessPublicationReadiness, compareVersionDocuments } from '../lifecycle'
+import { buildPublicationExportManifest, publicationExportFilename } from '../publication'
+import type { PublicationExportManifest } from '../publication'
 import type { Registry } from '../registry/registry'
 import { invalidInput, unauthorized } from '../registry/errors'
 import type {
   CreateRulebookInput,
   CreateRulebookVersionInput,
   ReplaceDraftContentInput,
+  RulebookVersionContent,
 } from '../registry/types'
-import { parseRulebookVersionDocument } from '../registry/versioning'
+import { parseRulebookVersionDocument, type RulebookVersionDocument } from '../registry/versioning'
 import { CREDENTIAL_VALIDATION_PATH, type CredentialValidationService } from '../validation'
 
 import { apiError } from './errors'
@@ -33,6 +36,7 @@ import {
   toCredentialValidationResource,
   toImportPreviewResource,
   toImportResultResource,
+  toPublicationExportManifestResource,
   toPublicationReadinessResource,
   toRulebookResource,
   toRulebookVersionResource,
@@ -66,6 +70,8 @@ export type ApiOperationId =
   | 'publishRulebookVersion'
   | 'compareRulebookVersions'
   | 'getRulebookPublicationReadiness'
+  | 'exportRulebookVersion'
+  | 'getRulebookVersionExportManifest'
   | 'previewImport'
   | 'importRulebooks'
   | 'validateCredential'
@@ -540,6 +546,68 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         schema: 'PublicationReadinessResponse',
       },
       ...errors(400, 404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'exportRulebookVersion',
+    method: 'get',
+    path: '/api/v1/rulebooks/:rulebookId/versions/:version/export',
+    summary: 'Export a published rulebook artifact',
+    description:
+      'Public download of the exact, immutable bytes of a published or historical version. The `content-digest` and `ETag` headers carry the SHA-256 of the bytes, which are never re-serialized. Draft versions are not publication artifacts and answer `409 conflict`.',
+    tag: 'versions',
+    security: false,
+    parameters: pathParameters(['rulebookId', 'version']),
+    responses: [
+      {
+        status: 200,
+        description: 'The exact published artifact bytes.',
+        schema: 'RulebookVersionDocument',
+        mediaType: 'application/vnd.attestbook.rulebook-version+json',
+        headers: [
+          {
+            name: 'Content-Digest',
+            description: 'RFC 9530 structured SHA-256 digest of the exact bytes.',
+          },
+          { name: 'ETag', description: 'Quoted SHA-256 hex digest of the exact bytes.' },
+          {
+            name: 'Content-Disposition',
+            description: 'Attachment filename derived from the frozen rulebook name and version.',
+          },
+        ],
+      },
+      {
+        status: 409,
+        description:
+          'The version is a draft; only a published or historical artifact can be exported.',
+        schema: 'ErrorEnvelope',
+      },
+      ...errors(404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'getRulebookVersionExportManifest',
+    method: 'get',
+    path: '/api/v1/rulebooks/:rulebookId/versions/:version/export/manifest',
+    summary: 'Read a publication export manifest',
+    description:
+      'Public manifest of a published or historical artifact: stable identity, frozen rulebook fields, SHA-256 content digest, publication time, provenance, the integrity result and the explicit signature boundary. The manifest depends only on frozen version data, so repeated exports are identical. Draft versions answer `409 conflict`.',
+    tag: 'versions',
+    security: false,
+    parameters: pathParameters(['rulebookId', 'version']),
+    responses: [
+      {
+        status: 200,
+        description: 'The publication export manifest.',
+        schema: 'PublicationExportManifestResponse',
+      },
+      {
+        status: 409,
+        description:
+          'The version is a draft; only a published or historical artifact has a publication manifest.',
+        schema: 'ErrorEnvelope',
+      },
+      ...errors(404, 500, 503),
     ],
   },
   {
@@ -1213,6 +1281,76 @@ function getRulebookPublicationReadinessHandler(dependencies: ApiDependencies): 
   }
 }
 
+interface PublicationArtifactView {
+  readonly content: RulebookVersionContent
+  readonly document: RulebookVersionDocument
+  readonly manifest: PublicationExportManifest
+}
+
+/**
+ * Loads one exportable artifact and its manifest. Draft versions are rejected
+ * before any manifest is built: a working copy is not a publication artifact.
+ * The stored digest is recomputed by the manifest builder, so a corrupt
+ * artifact fails the request instead of being exported as verified.
+ */
+function requirePublicationArtifact(
+  dependencies: ApiDependencies,
+  context: Context,
+): PublicationArtifactView {
+  const registry = requireRegistry(dependencies)
+  const content = registry.getRulebookVersionContent(
+    context.req.param('rulebookId') ?? '',
+    context.req.param('version') ?? '',
+  )
+  if (content === null) {
+    throw apiError(404, 'not_found', 'The requested rulebook version does not exist.')
+  }
+  if (content.version.status === 'draft') {
+    throw apiError(
+      409,
+      'conflict',
+      'The version is a draft; only published or historical versions are publication artifacts and can be exported.',
+    )
+  }
+  const rulebook = registry.getRulebook(content.version.rulebookId)
+  if (rulebook === null) {
+    throw new Error('rulebook version references a missing rulebook')
+  }
+  // The snapshot shape is validated as on the content route; a malformed stored
+  // artifact is a server fault, never a successful export.
+  assertVersionDocument(content.bytes)
+  const document = parseRulebookVersionDocument(content.bytes)
+  const manifest = buildPublicationExportManifest({
+    version: content.version,
+    providerId: rulebook.providerId,
+    mediaType: content.mediaType,
+    bytes: content.bytes,
+    document,
+  })
+  return { content, document, manifest }
+}
+
+function exportRulebookVersionHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const { content, document } = requirePublicationArtifact(dependencies, context)
+    // Copy into a plain ArrayBuffer-backed view for Hono, as the content route does.
+    const bytes = new Uint8Array(content.bytes)
+    return context.body(bytes, 200, {
+      'content-type': content.mediaType,
+      'content-digest': sha256StructuredDigest(content.version.contentDigest),
+      etag: `"${content.version.contentDigest}"`,
+      'content-disposition': `attachment; filename="${publicationExportFilename(document.name, content.version.version)}"`,
+    })
+  }
+}
+
+function getRulebookVersionExportManifestHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const { manifest } = requirePublicationArtifact(dependencies, context)
+    return context.json({ data: toPublicationExportManifestResource(manifest) }, 200)
+  }
+}
+
 function previewImportHandler(importer: ImportService | undefined): ApiHandler {
   return async (context) => {
     const service = requireImporter(importer)
@@ -1273,6 +1411,8 @@ export function createApiHandlers(
     publishRulebookVersion: publishRulebookVersionHandler(dependencies),
     compareRulebookVersions: compareRulebookVersionsHandler(dependencies),
     getRulebookPublicationReadiness: getRulebookPublicationReadinessHandler(dependencies),
+    exportRulebookVersion: exportRulebookVersionHandler(dependencies),
+    getRulebookVersionExportManifest: getRulebookVersionExportManifestHandler(dependencies),
     previewImport: previewImportHandler(importer),
     importRulebooks: importRulebooksHandler(importer),
     validateCredential: validateCredentialHandler(dependencies),

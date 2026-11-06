@@ -70,10 +70,11 @@ The following rules implement that model:
   Imported drafts are owned by the importing provider; another provider importing the same
   source gets its own rows and cannot read or mutate the first provider's internal import
   identity.
-- **Public reads.** Provider, rulebook, attestation, schema-reference, version, snapshot and
-  digest reads need no token, including working drafts, by design. The one read-shaped route
-  that requires authentication is the import preview, because a URL preview performs a bounded
-  outbound fetch under the untrusted-import controls.
+- **Public reads.** Provider, rulebook, attestation, schema-reference, version, snapshot,
+  digest, publication-export and export-manifest reads need no token, including working
+  drafts, by design. The one read-shaped route that requires authentication is the import
+  preview, because a URL preview performs a bounded outbound fetch under the untrusted-import
+  controls.
 - **Provider administration.** Provider creation, token issuance for a provider without a
   token and audit inspection are operator actions. No HTTP route exposes
   `provisionProvider`.
@@ -144,6 +145,10 @@ the OpenAPI responses of every protected operation.
   authentication or any request content.
 - The audit trail stores identifiers, actions, field names, version labels and content digests.
   It does not store raw tokens, token hashes, credential material or personal attributes.
+- The publication export manifest is public, so it carries only a bounded projection of the
+  version provenance (`adapter`, `sourceUrl`, `contentDigest`, `retrievedAt`, `profile`,
+  `conformance`, `importedAt`). Import-internal redirect chains, optional source labels and
+  untrusted envelope metadata are excluded (§15 personal-data minimisation).
 - Credential validation is synchronous and nothing is persisted; supplied credentials and
   schema documents are not logged or retained.
 - Operator provisioning returns the raw token once to the provisioning call and stores only
@@ -156,8 +161,9 @@ Privileged mutations write an `audit_log` row with the acting provider (`actor_p
 `null` for operator provisioning), the action, the entity and safe detail. Rulebook creates,
 attestation/schema changes, version creation, version refresh and publication are covered.
 Publication records the version, content digest, profile and superseded versions, satisfying
-the specification §15 audit requirement for publication operations. The audit trail is not
-exposed over HTTP; it is read by operators from the database.
+the specification §15 audit requirement for publication operations. Export is a read of an
+artifact that was already public; it writes nothing and is not an audited mutation. The audit
+trail is not exposed over HTTP; it is read by operators from the database.
 
 ## 8. Limitations and non-goals
 

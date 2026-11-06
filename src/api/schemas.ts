@@ -215,6 +215,61 @@ export const publicationReadinessSchema = z.object({
 
 export const publicationReadinessResponseSchema = z.object({ data: publicationReadinessSchema })
 
+// ----------------------------------------------- publication export manifest
+
+/** The signature boundary reported by a publication export manifest (#42). */
+export const publicationExportSignatureSchema = z.object({
+  status: z.literal('unsupported'),
+  reason: z.string(),
+})
+
+/**
+ * Bounded provenance projection of a publication export. Import provenance can
+ * carry untrusted envelope metadata and optional source labels, so the public
+ * manifest carries only these stable fields (§15 personal-data minimisation).
+ */
+export const publicationExportProvenanceSchema = z.object({
+  adapter: z.string().optional(),
+  sourceUrl: z.string().optional(),
+  contentDigest: z.string().optional(),
+  retrievedAt: z.string().optional(),
+  profile: z.string().optional(),
+  conformance: z.string().optional(),
+  importedAt: z.string().optional(),
+})
+
+/**
+ * Manifest of one published or historical artifact. It is built only from
+ * frozen version data, so exporting the same version always returns the same
+ * manifest, independent of later working-copy edits.
+ */
+export const publicationExportManifestSchema = z.object({
+  format: z.literal('attestbook.publication-export@1'),
+  rulebookId: z.string(),
+  providerId: z.string(),
+  version: z.string(),
+  status: z.enum(['published', 'historical']),
+  name: z.string(),
+  sourceUrl: nullableString,
+  specVersion: z.string(),
+  mediaType: z.string(),
+  contentDigest: z.string(),
+  byteLength: z.number().int().nonnegative(),
+  createdAt: timestamp,
+  publishedAt: timestamp,
+  provenance: publicationExportProvenanceSchema,
+  integrity: z.object({
+    algorithm: z.literal('sha256'),
+    verified: z.literal(true),
+  }),
+  signature: publicationExportSignatureSchema,
+  limitations: z.array(z.string()),
+})
+
+export const publicationExportManifestResponseSchema = z.object({
+  data: publicationExportManifestSchema,
+})
+
 export const healthResponseSchema = z.object({
   status: z.literal('ok'),
   service: z.literal('attestbook'),
@@ -601,6 +656,8 @@ export const OPENAPI_COMPONENTS = {
   VersionDiffResponse: versionDiffResponseSchema,
   PublicationReadiness: publicationReadinessSchema,
   PublicationReadinessResponse: publicationReadinessResponseSchema,
+  PublicationExportManifest: publicationExportManifestSchema,
+  PublicationExportManifestResponse: publicationExportManifestResponseSchema,
   CreateRulebookRequest: createRulebookRequestSchema,
   CreateRulebookVersionRequest: createRulebookVersionRequestSchema,
   DraftRulebook: draftRulebookSchema,
@@ -660,6 +717,7 @@ export type VersionDiffResource = z.infer<typeof versionDiffSchema>
 export type VersionDiffChangeResource = z.infer<typeof versionDiffChangeSchema>
 export type PublicationReadinessResource = z.infer<typeof publicationReadinessSchema>
 export type PublicationReadinessCheckResource = z.infer<typeof publicationReadinessCheckSchema>
+export type PublicationExportManifestResource = z.infer<typeof publicationExportManifestSchema>
 export type DraftRulebookResource = z.infer<typeof draftRulebookSchema>
 export type DraftDiagnosticResource = z.infer<typeof draftDiagnosticSchema>
 export type DraftValidationResource = z.infer<typeof draftValidationSchema>
