@@ -178,9 +178,10 @@ Neither **Not tested** nor **Not applicable** is presented as a pass.
 
 `/playground` is a developer view over the real validation API, not a mock result screen:
 
-- the rulebook list comes from the public catalog page; a rulebook must be selected before its
-  versions and attestation types are loaded, and a failed related read degrades to a retryable
-  notice rather than hiding the page;
+- the rulebook list comes from the public catalog page (maximum 100 entries); a notice says so
+  when the API page is truncated and only the loaded rulebooks are selectable. A rulebook must
+  be selected before its versions and attestation types are loaded, and a failed related read
+  degrades to a retryable notice rather than hiding the page;
 - the optional format hint offers auto-detection plus exactly the pinned TS11 formats
   (`dc+sd-jwt`, `mso_mdoc`, `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc`);
 - a credential can be pasted or read from a local text file. The file size is bounded at
@@ -356,6 +357,8 @@ The catalog and detail slices' captures remain in the same directory
 - The playground supplies no schema documents, so schema validation remains **not tested**;
   a caller can still supply them through the API directly. Adding a schema-document editor is
   a later slice.
+- The rulebook selector is the Phase 1 API page (maximum 100 entries); a truncation notice
+  names the loaded and total counts, and there is no pagination control yet.
 - The attestation-type select comes from the public working-copy attestation read. Phase 1 has
   no working-copy mutation API, so the working copy and every pinned version currently carry
   the same types. A later editor slice must add a version-scoped attestation read so a draft
