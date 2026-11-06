@@ -101,11 +101,16 @@ describe('POST /api/credentials/validate', () => {
     const validation = post(app, body(seeded, credential))
     await new Promise((resolve) => setTimeout(resolve, 50))
 
-    const started = Date.now()
-    const health = await app.request('/health')
-    const elapsed = Date.now() - started
+    // Prove the HTTP process answers /health before the sandboxed validation
+    // finishes. A fixed millisecond threshold is too sensitive to CI load.
+    const healthPromise = Promise.resolve(app.request('/health'))
+    const winner = await Promise.race([
+      healthPromise.then(() => 'health' as const),
+      validation.then(() => 'validation' as const),
+    ])
+    expect(winner).toBe('health')
+    const health = await healthPromise
     expect(health.status).toBe(200)
-    expect(elapsed).toBeLessThan(200)
 
     const response = await validation
     expect(response.status).toBe(200)
