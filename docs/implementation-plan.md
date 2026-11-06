@@ -294,8 +294,8 @@ merged into them.
   The exact versions are pinned and tested in #32.
 - **UI:** React 19 + Vite 8, consuming the same public API, with the built assets served
   from `/` by the Bun server. Phase 1 builds UI-001, UI-002 and UI-005 only; the catalog
-  (#36) and rulebook-detail (#37) slices are implemented, and the editor, import UI,
-  capture explorer and credential playground are not claimed.
+  (#36), rulebook-detail (#37) and credential-playground (#38) slices are implemented, and
+  the editor, import UI and capture explorer are not claimed.
 - **Docker:** multi-stage image based on `oven/bun:1.3.1`, non-root runtime user, health
   endpoint, migration entrypoint, no secrets baked in.
 - **Observability:** structured logs with request ids and a redaction layer; no raw

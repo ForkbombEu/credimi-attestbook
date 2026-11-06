@@ -69,7 +69,7 @@ export function CatalogPage({ api, onNavigate }: CatalogPageProps) {
     <div className="app-shell">
       <SkipLink href="#catalog-results">Skip to catalog results</SkipLink>
 
-      <SiteHeader section="Rulebook catalog" />
+      <SiteHeader section="Rulebook catalog" onNavigate={onNavigate} />
 
       <main className="page" id="main-content">
         <div className="page-heading">

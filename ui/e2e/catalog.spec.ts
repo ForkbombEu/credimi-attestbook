@@ -9,7 +9,7 @@ test.describe('rulebook catalog against the real API', () => {
 
     await expect(page.getByRole('heading', { name: 'Rulebook catalog' })).toBeVisible()
     const rows = page.locator('tbody tr')
-    await expect(rows).toHaveCount(6)
+    await expect(rows).toHaveCount(7)
 
     const pid = page.getByRole('row', { name: /PID Rulebook/ })
     await expect(pid).toContainText('Example Issuer')
@@ -29,12 +29,12 @@ test.describe('rulebook catalog against the real API', () => {
   test('filters by search text, provider and status', async ({ page }) => {
     await page.goto('/')
     const rows = page.locator('tbody tr')
-    await expect(rows).toHaveCount(6)
+    await expect(rows).toHaveCount(7)
 
     await page.getByLabel('Search').fill('age')
     await expect(rows).toHaveCount(1)
     await expect(rows.first()).toContainText('Age Verification Rulebook')
-    await expect(page.getByRole('status')).toContainText('Showing 1 of 6 rulebooks')
+    await expect(page.getByRole('status')).toContainText('Showing 1 of 7 rulebooks')
 
     await page.getByLabel('Search').fill('')
     await page.getByLabel('Provider').selectOption({ label: 'Wallet Lab' })
@@ -43,17 +43,17 @@ test.describe('rulebook catalog against the real API', () => {
 
     await page.getByLabel('Provider').selectOption({ label: 'All providers' })
     await page.getByLabel('Status').selectOption({ label: 'Published' })
-    await expect(rows).toHaveCount(2)
+    await expect(rows).toHaveCount(3)
     await expect(page.getByRole('row', { name: /Health Insurance Card Rulebook/ })).toBeVisible()
     await expect(page.getByRole('row', { name: /PID Rulebook/ })).toHaveCount(0)
 
     await page.getByLabel('Status').selectOption({ label: 'All statuses' })
-    await expect(rows).toHaveCount(6)
+    await expect(rows).toHaveCount(7)
   })
 
   test('shows the filtered empty state and resets it', async ({ page }) => {
     await page.goto('/')
-    await expect(page.locator('tbody tr')).toHaveCount(6)
+    await expect(page.locator('tbody tr')).toHaveCount(7)
 
     await page.getByLabel('Search').fill('no-such-rulebook')
 
@@ -61,7 +61,7 @@ test.describe('rulebook catalog against the real API', () => {
       page.getByRole('heading', { name: 'No rulebooks match your filters' }),
     ).toBeVisible()
     await page.getByRole('button', { name: 'Reset search and filters' }).click()
-    await expect(page.locator('tbody tr')).toHaveCount(6)
+    await expect(page.locator('tbody tr')).toHaveCount(7)
     await expect(page.getByLabel('Search')).toHaveValue('')
   })
 
@@ -74,7 +74,7 @@ test.describe('rulebook catalog against the real API', () => {
     await page.goto('/')
 
     await expect(page.getByRole('status').first()).toContainText('Loading rulebooks…')
-    await expect(page.locator('tbody tr')).toHaveCount(6)
+    await expect(page.locator('tbody tr')).toHaveCount(7)
   })
 
   test('shows an API error and retries successfully', async ({ page }) => {
@@ -100,12 +100,12 @@ test.describe('rulebook catalog against the real API', () => {
     await page.unroute('**/api/v1/providers')
     await page.getByRole('button', { name: 'Retry' }).click()
 
-    await expect(page.locator('tbody tr')).toHaveCount(6)
+    await expect(page.locator('tbody tr')).toHaveCount(7)
   })
 
   test('has no detectable accessibility violations', async ({ page }) => {
     await page.goto('/')
-    await expect(page.locator('tbody tr')).toHaveCount(6)
+    await expect(page.locator('tbody tr')).toHaveCount(7)
 
     const results = await new AxeBuilder({ page }).analyze()
     expect(
@@ -125,7 +125,7 @@ test.describe('responsive catalog', () => {
   test('keeps the catalog readable without horizontal scrolling', async ({ page }) => {
     await page.goto('/')
     await expect(page.getByRole('heading', { name: 'Rulebook catalog' })).toBeVisible()
-    await expect(page.locator('tbody tr')).toHaveCount(6)
+    await expect(page.locator('tbody tr')).toHaveCount(7)
 
     const hasHorizontalOverflow = await page.evaluate(
       () => document.documentElement.scrollWidth > window.innerWidth + 1,

@@ -5,8 +5,9 @@ Attestation Rulebooks in the European Digital Identity Wallet ecosystem. This re
 currently contains the Phase 0 research and architecture documents, the Phase 1 application
 scaffold, the persistent provider/rulebook registry slice, the bounded URL/JSON rulebook
 import slice, SD-JWT VC structural validation with dimension-aware evidence, the
-versioned REST/OpenAPI contract over those services and the standalone searchable rulebook
-catalog and rulebook-detail UI (UI-001/UI-002).
+versioned REST/OpenAPI contract over those services and the standalone UI: a searchable
+rulebook catalog, rulebook detail/version history and a credential validation playground
+(UI-001/UI-002/UI-005).
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -34,9 +35,9 @@ bun run dev
 ```
 
 `bun run dev` rebuilds on change and listens on `http://localhost:3000`, serving the built
-catalog UI at `/` and the versioned API under `/api/v1`. Run `bun run build:ui` after UI
-changes, or use `bun run dev:ui` for Vite hot reload on port 5173 with `/api` proxied to the
-Bun server. The health check is:
+UI at `/`, `/rulebooks/<id>` and `/playground`, with the versioned API under `/api/v1`. Run
+`bun run build:ui` after UI changes, or use `bun run dev:ui` for Vite hot reload on port 5173
+with `/api` proxied to the Bun server. The health check is:
 
 ```bash
 curl --fail http://localhost:3000/health
@@ -52,8 +53,8 @@ bun run lint          # ESLint only
 bun run typecheck     # server tsc --noEmit only
 bun run typecheck:ui  # UI, Vitest and Playwright config typecheck only
 bun run test          # Bun server test runner only
-bun run test:ui       # Vitest catalog unit, component and axe-core tests
-bun run test:e2e      # Playwright catalog tests against the real seeded API
+bun run test:ui       # Vitest UI unit, component and axe-core tests
+bun run test:e2e      # Playwright catalog, detail and playground tests against the real API
 bun run openapi:check # generated OpenAPI 3.1 document validation
 bun run docs:check    # Phase 0 documentation consistency, plain Node
 ```
@@ -91,8 +92,8 @@ bun run docs:check    # Phase 0 documentation consistency, plain Node
   400/404/413/503 cases and non-disclosure of credential material;
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
   the Phase 0 verification gate for the persistence decision (D-7);
-- `ui/src/` — catalog data logic, API client and React component tests, including loading,
-  error, empty, search/filter and axe-core accessibility states;
+- `ui/src/` — catalog, detail and playground data logic, API client and React component tests,
+  including loading, error, empty, search/filter and axe-core accessibility states;
 - `ui/e2e/` — Playwright browser tests against the real registry and API with seeded data,
   a full axe-core scan and a narrow-viewport layout check. See [`docs/ui.md`](docs/ui.md).
 
@@ -185,7 +186,7 @@ implemented. The HTTP preview route requires a provider token because a URL prev
 a bounded outbound fetch; rate limiting remains future hardening work. See
 [`docs/import.md`](docs/import.md) for the full contract, limits and limitations.
 
-## Rulebook catalog UI
+## Rulebook UI
 
 The catalog at `/` is a standalone React client of the public API: it lists rulebook name,
 description, provider, latest version and version count, publication status, supported
@@ -195,6 +196,13 @@ and is responsive and keyboard accessible. Compatibility is always shown as **No
 the catalog does not infer validation, trust or interoperability results. The implementation,
 data flow, accessibility checks, pinned UI stack and limitations are documented in
 [`docs/ui.md`](docs/ui.md).
+
+The credential playground at `/playground` calls the real structural validation API for a
+selected rulebook version and attestation type. A credential can be pasted or read from a
+local file; the result shows the overall status, every FR-010 dimension with its
+applicability, execution, evidence and findings, the individual violations, the explicit
+limitations, and exports the typed JSON result. Untested and not-applicable dimensions are
+never presented as a pass, and the credential is never exported.
 
 ## Build and run
 

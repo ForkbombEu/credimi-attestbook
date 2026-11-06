@@ -81,7 +81,7 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
     <div className="app-shell">
       <SkipLink href="#rulebook-detail">Skip to rulebook details</SkipLink>
 
-      <SiteHeader section="Rulebook detail" />
+      <SiteHeader section="Rulebook detail" onNavigate={onNavigate} />
 
       <main className="page" id="main-content">
         <nav className="breadcrumb" aria-label="Breadcrumb">

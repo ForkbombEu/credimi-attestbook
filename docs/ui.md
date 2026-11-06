@@ -1,16 +1,18 @@
-# Rulebook catalog and detail UI
+# Rulebook catalog, detail and credential playground UI
 
 **Status:** Phase 1 implementation of
-[issue #36](https://github.com/ForkbombEu/credimi-attestbook/issues/36) (UI-001) and
-[issue #37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (UI-002). It
-delivers a responsive, searchable catalog of rulebooks and a rulebook detail view with
+[issue #36](https://github.com/ForkbombEu/credimi-attestbook/issues/36) (UI-001),
+[issue #37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (UI-002) and
+[issue #38](https://github.com/ForkbombEu/credimi-attestbook/issues/38) (UI-005). It
+delivers a responsive, searchable catalog of rulebooks, a rulebook detail view with
 attestation types, schema references, provenance, standards-compatibility disclosure and
-version history, all read from the public AttestBook API. It does not add the editor, import
-UI, publication controls or credential playground; those remain #38, #40–#42 and later
-follow-ups.
+version history, and a credential validation playground that calls the real
+`POST /api/v1/credentials/validate` API. All three views are clients of the public
+AttestBook API. The slice does not add the editor, import UI or publication controls; those
+remain #40–#42 and later follow-ups.
 
-**Authoritative spec:** [`docs/specification.md`](specification.md) §14 (UI-001/UI-002) and
-§2.2 (independent standalone UI).
+**Authoritative spec:** [`docs/specification.md`](specification.md) §14 (UI-001/UI-002/UI-005)
+and §2.2 (independent standalone UI).
 **Architecture:** [`docs/architecture.md`](architecture.md) §5 (the web UI is a client of
 the public API, not a bypass) and §6.
 **Decisions:** [`docs/implementation-plan.md`](implementation-plan.md) D-8/D-17
@@ -47,6 +49,15 @@ Implemented by these slices:
 - accessible markup (landmarks, breadcrumb, table semantics, labelled controls, live status,
   skip link, visible focus, reduced-motion support) checked by axe-core in component and
   browser tests;
+- a credential validation playground at `/playground`:
+  - paste a credential artifact or load it from a local file;
+  - select a rulebook, one of its versions and an attestation type, with an optional
+    credential-format hint;
+  - submit the real `POST /api/v1/credentials/validate` request and inspect the overall
+    status, the eight FR-010 dimensions (status, applicability, execution, evidence and
+    findings), the flattened violations, the explicit limitations and the schema references
+    of the pinned version;
+  - export the typed result as JSON, without the credential artifact or any claim value;
 - the public `GET /api/v1/providers` read the catalog needs to show provider names, plus the
   existing public rulebook, attestation, schema-reference and version reads. These are
   additive `v1` public projections; publication authority, internal metadata, provenance
@@ -54,11 +65,13 @@ Implemented by these slices:
 
 Deliberately **not** in these slices:
 
-- credential validation playground (UI-005,
-  [issue #38](https://github.com/ForkbombEu/credimi-attestbook/issues/38));
+- schema-document supply in the playground. The API accepts caller-supplied schema documents
+  for the pinned references, but UI-005 does not require an editor for them, so schema
+  validation is reported **not tested** unless a schema document is supplied through the
+  API directly;
 - editor, import UI, draft management, publication controls and version diff (UI-003/UI-004,
-  #40–#42 and a later import-UI issue). The detail view is read-only and claims no Phase 2
-  authoring functionality;
+  #40–#42 and a later import-UI issue). The detail view and playground are read-only and
+  claim no Phase 2 authoring functionality;
 - catalogue- or rulebook-level validation/compatibility evaluation. The catalog reports
   **Not tested** for every rulebook and the detail view repeats that result, because
   structural validation is a per-credential operation against a pinned rulebook version and
@@ -100,13 +113,18 @@ The browser is a client of the public API only:
    list, `GET /api/v1/rulebooks/{id}/schema-references` and the version list;
 6. exports are ordinary links to
    `GET /api/v1/rulebooks/{id}/versions/{version}/content`, which returns the exact stored
-   snapshot bytes with `Content-Digest` and `ETag` so a consumer can verify the shown digest.
+   snapshot bytes with `Content-Digest` and `ETag` so a consumer can verify the shown digest;
+7. on `/playground`: `GET /api/v1/rulebooks?limit=100&offset=0` for the rulebook select, then
+   `GET /api/v1/rulebooks/{id}/versions` and `GET /api/v1/rulebooks/{id}/attestations` for
+   the dependent selects, one `POST /api/v1/credentials/validate` per run, and a client-side
+   JSON download for the result.
 
 The client router uses real paths with the History API. The Bun server serves the built
-entry document for `/` and `/rulebooks/*`; `/api/*` stays separate and unknown non-UI paths
-keep the JSON not-found envelope. A deep link or a browser reload therefore reaches the same
-detail view. Browser back/forward is handled with a `popstate` listener; in-page links push a
-history entry. Modified clicks (new tab, copy address) keep the native anchor behaviour.
+entry document for `/`, `/rulebooks/*` and `/playground`; `/api/*` stays separate and unknown
+non-UI paths keep the JSON not-found envelope. A deep link or a browser reload therefore
+reaches the same view. Browser back/forward is handled with a `popstate` listener; in-page
+links push a history entry. Modified clicks (new tab, copy address) keep the native anchor
+behaviour.
 
 The latest displayed version is the most recently created **published** version, or the most
 recently created version of any status when nothing is published. Rulebook no. 1 in
@@ -156,6 +174,42 @@ The table mirrors `src/validation/dimensions.ts`; `ui/src/compatibility.test.ts`
 with `DIMENSION_DEFINITIONS`, so the UI cannot claim support the engine does not have.
 Neither **Not tested** nor **Not applicable** is presented as a pass.
 
+### 3.3 Credential playground
+
+`/playground` is a developer view over the real validation API, not a mock result screen:
+
+- the rulebook list comes from the public catalog page; a rulebook must be selected before its
+  versions and attestation types are loaded, and a failed related read degrades to a retryable
+  notice rather than hiding the page;
+- the optional format hint offers auto-detection plus exactly the pinned TS11 formats
+  (`dc+sd-jwt`, `mso_mdoc`, `jwt_vc_json`, `jwt_vc_json-ld`, `ldp_vc`);
+- a credential can be pasted or read from a local text file. The file size is bounded at
+  512 KiB before reading, and the pasted text is bounded client-side at the API's 512 KiB
+  credential limit. Leading and trailing whitespace is removed and the artifact is otherwise
+  sent unchanged in the POST body; it never enters a URL, browser storage, a log or the
+  displayed result;
+- required fields and the credential bound are checked in the browser before any request; an
+  incomplete request sends nothing;
+- the result shows the overall status, the eight FR-010 dimensions in normative order with
+  their status, applicability, execution flag, evidence scope/reason/details and findings, the
+  flattened violations (severity, dimension, code, JSON Pointer path, expected constraint and
+  message), the explicit limitations list, the pinned rulebook version and recomputed digest,
+  and non-sensitive credential facts (format, vct, disclosure count and key-binding presence);
+- a permanent notice counts how many applicable dimensions did not execute and how many are
+  not applicable, and the table states that neither is a pass; `Not tested` and `Not
+  applicable` never reuse the pass styling;
+- the schema references of the pinned version are listed with their integrity pin, detected
+  kind and whether this run applied them. The playground supplies no schema documents, so the
+  schema dimension stays **not tested** (see §6);
+- `Export result (JSON)` downloads the typed result as a Blob named from the run identity. It
+  contains the API result only: no credential artifact and no claim values.
+
+API failures use the safe message of the product API error envelope (for example a `400`, `413`
+or `503` message) and never echo the credential. An unexpected failure shows a generic message.
+Retrying re-sends the entered request; editing the form clears a stale result so the report
+cannot be mistaken for the new input. The page makes no validity claim beyond the returned
+dimensions.
+
 ## 4. Build, serve and develop
 
 ```bash
@@ -194,17 +248,27 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   and newest-first version history with digest and export URLs;
 - section-level degradation when versions or schema references fail, and empty-version and
   malformed-record rendering;
-- the router: path parsing, encoded ids, malformed paths, history navigation and modified
-  clicks keeping native anchor behaviour;
+- the credential playground: catalog loading/error/empty states, dependent version and
+  attestation loading, related-read failure and retry, client-side required-field and
+  credential-bound checks that send no request, request construction (trimmed artifact and
+  optional format wrapper), success rendering of all eight dimensions with executed/
+  not-executed and applicable/not-applicable labels, the untested-dimensions notice,
+  limitations, individual violations, safe API error display without the credential, retry,
+  file upload and oversized-file rejection, export of the typed JSON without the credential,
+  clear-form behaviour and axe-core checks for the form and result;
+- the router: path parsing (including `/playground`), encoded ids, malformed paths, history
+  navigation and modified clicks keeping native anchor behaviour;
 - an end-to-end component navigation test from the catalog to a detail page and back, plus a
   direct deep-link render;
 - axe-core accessibility checks for the catalog results/error states and the detail page and
   not-found state (colour contrast is disabled in jsdom because it cannot compute painted
   colours; the browser tests run the full rule set).
 
-Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, Playwright + Chromium):
+Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, `ui/e2e/playground.spec.ts`,
+Playwright + Chromium):
 
-- six seeded rulebooks from the real registry/API, with provider, version, status,
+- seven seeded rulebooks from the real registry/API, including the published validation-smoke
+  rulebook used by the playground, with provider, version, status,
   attestation, source and compatibility content;
 - search, provider and status filters, filtered-empty state and reset;
 - delayed-API loading state, injected API error and successful retry;
@@ -212,7 +276,14 @@ Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, Playwright + C
   attestations, schema references, provenance, compatibility labels, version history and
   export links;
 - unknown-rulebook not-found state, detail loading and detail API error + retry;
-- full axe-core scans and 390 px viewport checks for the catalog and detail views.
+- credential playground success against the real validation engine with a freshly signed
+  SD-JWT VC fixture, including the untested-dimensions notice, the dimension table and an
+  exported JSON download that contains no credential artifact;
+- a real validation `FAIL` with an individual attestation-constraint violation, an injected
+  `503` error surfaced without leaking the credential and a successful retry, an incomplete
+  request rejected in the browser with no API call, file upload validation and the exported
+  report;
+- full axe-core scans and 390 px viewport checks for the catalog, detail and playground views.
 
 CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test:e2e`. The
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves
@@ -232,10 +303,33 @@ viewport width (1280 px) and the same light theme:
 - [after, narrow viewport: `detail-after-mobile.png`](ui/detail-after-mobile.png) — the same
   detail page at 390 px.
 
-The catalog slice's captures remain in the same directory
+The pull request for the playground slice carries the same-viewport (1280 px) and theme
+comparison for the new view:
+
+- [before: `playground-before-catalog.png`](ui/playground-before-catalog.png) — baseline
+  `f8a107a` (`main` before the playground slice): the shared header has no playground
+  navigation;
+- [before: `playground-before-404.png`](ui/playground-before-404.png) — the same baseline
+  requesting `/playground`: the real server returns the JSON not-found envelope;
+- [after: `playground-after-catalog.png`](ui/playground-after-catalog.png) — this slice: the
+  header links to the new view;
+- [after: `playground-after-form.png`](ui/playground-after-form.png) — the request form with a
+  rulebook, version, attestation type and credential selected;
+- [after: `playground-after-result.png`](ui/playground-after-result.png) — a real run against
+  the seeded validation engine with the overall status, untested-dimensions notice, dimension
+  table, violations and limitations;
+- [after, narrow viewport: `playground-after-mobile.png`](ui/playground-after-mobile.png) — the
+  same result at 390 px.
+
+The catalog and detail slices' captures remain in the same directory
 ([`catalog-before.png`](ui/catalog-before.png),
 [`catalog-after.png`](ui/catalog-after.png),
-[`catalog-after-mobile.png`](ui/catalog-after-mobile.png)).
+[`catalog-after-mobile.png`](ui/catalog-after-mobile.png),
+[`detail-before-catalog.png`](ui/detail-before-catalog.png),
+[`detail-before-404.png`](ui/detail-before-404.png),
+[`detail-after-catalog.png`](ui/detail-after-catalog.png),
+[`detail-after.png`](ui/detail-after.png),
+[`detail-after-mobile.png`](ui/detail-after-mobile.png)).
 
 ## 6. Limitations
 
@@ -259,5 +353,16 @@ The catalog slice's captures remain in the same directory
 - UI responses set `X-Content-Type-Options: nosniff` and Vite assets are immutable-cached;
   a content security policy and the rest of the HTTP hardening remain
   [issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35).
-- No dark theme or offline cache; routing covers only the two Phase 1 views, and any other
-  path falls back to the catalog.
+- The playground supplies no schema documents, so schema validation remains **not tested**;
+  a caller can still supply them through the API directly. Adding a schema-document editor is
+  a later slice.
+- The attestation-type select comes from the public working-copy attestation read. Phase 1 has
+  no working-copy mutation API, so the working copy and every pinned version currently carry
+  the same types. A later editor slice must add a version-scoped attestation read so a draft
+  cannot offer a type that an older pinned version lacks.
+- Validation runs are not persisted. The exported JSON is the per-run result the API returned;
+  there is no run history, comparison or saved-result list.
+- The format hint covers the pinned TS11 format vocabulary, but only `dc+sd-jwt` has a
+  structural parser; other formats are recognised or reported and never mocked as parsed.
+- No dark theme or offline cache; routing covers the three Phase 1 views, and any other path
+  falls back to the catalog.

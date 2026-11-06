@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react'
 
+import { AppLink, CATALOG_PATH, PLAYGROUND_PATH } from '../router'
+
 export function SkipLink({
   href,
   children,
@@ -14,7 +16,17 @@ export function SkipLink({
   )
 }
 
-export function SiteHeader({ section }: { readonly section: string }) {
+interface SiteHeaderProps {
+  readonly section: string
+  readonly onNavigate: (path: string) => void
+}
+
+/**
+ * The shared header with the two Phase 1 product views. The long-form section
+ * label names the current view; the short navigation labels stay distinct from
+ * the breadcrumb links so assistive technology can address each destination.
+ */
+export function SiteHeader({ section, onNavigate }: SiteHeaderProps) {
   return (
     <header className="site-header">
       <div className="site-header__inner">
@@ -24,6 +36,24 @@ export function SiteHeader({ section }: { readonly section: string }) {
           </span>
           AttestBook
         </span>
+        <nav className="site-nav" aria-label="Primary">
+          <AppLink
+            href={CATALOG_PATH}
+            onNavigate={onNavigate}
+            {...(section === 'Rulebook catalog' || section === 'Rulebook detail'
+              ? { 'aria-current': 'page' as const }
+              : {})}
+          >
+            Catalog
+          </AppLink>
+          <AppLink
+            href={PLAYGROUND_PATH}
+            onNavigate={onNavigate}
+            {...(section === 'Credential playground' ? { 'aria-current': 'page' as const } : {})}
+          >
+            Validation playground
+          </AppLink>
+        </nav>
         <span className="site-header__section">{section}</span>
       </div>
     </header>
