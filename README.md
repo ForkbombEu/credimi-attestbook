@@ -11,8 +11,10 @@ rulebook catalog, rulebook detail/version history and a credential validation pl
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
-[`docs/specification.md`](docs/specification.md) for the authoritative requirements and
-[`docs/implementation-plan.md`](docs/implementation-plan.md) for the Phase 1 plan.
+[`docs/specification.md`](docs/specification.md) for the authoritative requirements,
+[`docs/implementation-plan.md`](docs/implementation-plan.md) for the Phase 1 plan and
+[`docs/acceptance-phase1.md`](docs/acceptance-phase1.md) for the Phase 1 acceptance report
+and its outstanding limitations.
 
 ## Prerequisites
 
@@ -55,8 +57,9 @@ bun run typecheck:ui  # UI, Vitest and Playwright config typecheck only
 bun run test          # Bun server test runner only
 bun run test:ui       # Vitest UI unit, component and axe-core tests
 bun run test:e2e      # Playwright catalog, detail and playground tests against the real API
+bun run acceptance    # Phase 1 end-to-end workflow; writes dimension-aware evidence
 bun run openapi:check # generated OpenAPI 3.1 document validation
-bun run docs:check    # Phase 0 documentation consistency, plain Node
+bun run docs:check    # documentation consistency, plain Node
 ```
 
 `bun run check` is the same sequence the `quality` and `test` CI jobs run. Tests include:
@@ -95,7 +98,11 @@ bun run docs:check    # Phase 0 documentation consistency, plain Node
 - `ui/src/` — catalog, detail and playground data logic, API client and React component tests,
   including loading, error, empty, search/filter and axe-core accessibility states;
 - `ui/e2e/` — Playwright browser tests against the real registry and API with seeded data,
-  a full axe-core scan and a narrow-viewport layout check. See [`docs/ui.md`](docs/ui.md).
+  a full axe-core scan and a narrow-viewport layout check. See [`docs/ui.md`](docs/ui.md);
+- `src/acceptance/` — the Phase 1 end-to-end acceptance workflow: TS11 import, version
+  inspection and publication, real SD-JWT VC validation, evidence export and the negative and
+  non-conflation cases, run as a Bun test and by `bun run acceptance`. See
+  [`docs/acceptance-phase1.md`](docs/acceptance-phase1.md).
 
 ## Registry persistence and versions
 
@@ -284,6 +291,8 @@ Application code still uses `strict`, `exactOptionalPropertyTypes` and
 | `openapi`           | Generated OpenAPI 3.1 document validation                            |
 | `build`             | Production bundle and bundle presence                                |
 | `docker smoke`      | Image build, container startup, health, catalogue and 404 round-trip |
+| `ui`                | UI typecheck, component/axe tests and Playwright browser flows       |
+| `acceptance`        | Phase 1 end-to-end workflow and dimension-aware evidence export      |
 | `docs`              | Phase 0 document consistency and the checker's own tests             |
 | `owf compatibility` | Phase 0 OWF probe on Node.js 22 and Bun 1.3.1                        |
 
@@ -293,6 +302,7 @@ No job deploys, publishes an image or needs a secret or a live external service.
 
 ```text
 src/                application code and Bun tests (api, registry, import, validation)
+src/acceptance/     Phase 1 end-to-end acceptance workflow and evidence export
 migrations/         ordered SQL schema migrations
 docs/               specification, architecture, registry, validation and Phase 0 documents
 research/owf-audit/ reproducible audit probe for the pinned OWF package
