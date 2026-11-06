@@ -132,6 +132,11 @@ export function createApp(options: AppOptions = {}): Hono {
       '/favicon.svg',
       staticFileHandler(resolve(uiRoot, 'favicon.svg'), 'public, max-age=3600'),
     )
+    // The client router owns `/rulebooks/<id>`. Serving the entry document for
+    // that path makes a deep link and a browser reload address the same detail
+    // view instead of a JSON 404; the API stays under `/api/*` and unknown
+    // non-UI paths keep the JSON not-found envelope.
+    app.get('/rulebooks/*', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.use('/assets/*', uiAssetHandler(uiRoot))
   }
 

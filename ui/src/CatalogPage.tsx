@@ -6,9 +6,11 @@ import { EMPTY_FILTERS, filterEntries, isFiltering, loadCatalog, providerOptions
 import { CatalogFilterBar } from './components/CatalogFilters'
 import { CatalogTable } from './components/CatalogTable'
 import { EmptyState, ErrorState, LoadingState } from './components/CatalogStates'
+import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 
 interface CatalogPageProps {
   readonly api: CatalogApi
+  readonly onNavigate: (path: string) => void
 }
 
 type LoadState =
@@ -16,7 +18,7 @@ type LoadState =
   | { readonly status: 'ready'; readonly snapshot: CatalogSnapshot }
   | { readonly status: 'error'; readonly message: string }
 
-export function CatalogPage({ api }: CatalogPageProps) {
+export function CatalogPage({ api, onNavigate }: CatalogPageProps) {
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [reloadToken, setReloadToken] = useState(0)
@@ -65,21 +67,9 @@ export function CatalogPage({ api }: CatalogPageProps) {
 
   return (
     <div className="app-shell">
-      <a className="skip-link" href="#catalog-results">
-        Skip to catalog results
-      </a>
+      <SkipLink href="#catalog-results">Skip to catalog results</SkipLink>
 
-      <header className="site-header">
-        <div className="site-header__inner">
-          <span className="wordmark">
-            <span className="wordmark__mark" aria-hidden="true">
-              A
-            </span>
-            AttestBook
-          </span>
-          <span className="site-header__section">Rulebook catalog</span>
-        </div>
-      </header>
+      <SiteHeader section="Rulebook catalog" />
 
       <main className="page" id="main-content">
         <div className="page-heading">
@@ -132,18 +122,13 @@ export function CatalogPage({ api }: CatalogPageProps) {
                 onClear={clearFilters}
               />
             ) : (
-              <CatalogTable entries={filteredEntries} />
+              <CatalogTable entries={filteredEntries} onNavigate={onNavigate} />
             )
           ) : null}
         </section>
       </main>
 
-      <footer className="site-footer">
-        <p>
-          Structural credential validation runs per credential against a pinned rulebook version.
-          This catalog does not test or claim trust, interoperability or standards conformance.
-        </p>
-      </footer>
+      <SiteFooter />
     </div>
   )
 }

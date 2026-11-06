@@ -53,6 +53,7 @@ const pidId = createPublished(
           {
             formatIdentifier: 'dc+sd-jwt',
             uri: 'https://issuer.example.org/schemas/pid',
+            integrity: 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=',
           },
         ],
       },

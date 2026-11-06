@@ -1,14 +1,15 @@
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import { describe, expect, test, vi } from 'vitest'
+import { afterEach, describe, expect, test, vi } from 'vitest'
 
+import { App } from './App'
 import type { CatalogApi } from './api'
 import { CatalogPage } from './CatalogPage'
-import { createFakeApi, SAMPLE_DATASET } from './test/fixtures'
+import { createFakeApi, PROVIDERS, SAMPLE_DATASET } from './test/fixtures'
 import { expectNoA11yViolations } from './test/a11y'
 
 function renderCatalog(api: CatalogApi = createFakeApi()) {
-  return render(<CatalogPage api={api} />)
+  return render(<CatalogPage api={api} onNavigate={() => {}} />)
 }
 
 describe('catalog loading, error and empty states', () => {
@@ -16,7 +17,9 @@ describe('catalog loading, error and empty states', () => {
     const pending: CatalogApi = {
       listProviders: () => new Promise(() => {}),
       listRulebooks: () => new Promise(() => {}),
+      getRulebook: () => new Promise(() => {}),
       listAttestations: () => new Promise(() => {}),
+      listSchemaReferences: () => new Promise(() => {}),
       listVersions: () => new Promise(() => {}),
     }
 
@@ -109,7 +112,7 @@ describe('catalog content from the public API', () => {
     await screen.findByText('PID Rulebook')
     expect(screen.getAllByText('Not tested')).toHaveLength(2)
     expect(
-      screen.getByText(/This catalog does not test or claim trust, interoperability/),
+      screen.getByText(/AttestBook does not test or claim trust, interoperability/),
     ).toBeInTheDocument()
   })
 
@@ -252,5 +255,81 @@ describe('catalog rendering details', () => {
     await screen.findByText('PID Rulebook')
     await waitFor(() => expect(listAttestations).toHaveBeenCalledTimes(2))
     expect(listAttestations).toHaveBeenCalledWith('rulebook-pid', expect.anything())
+  })
+})
+
+describe('app catalog and detail navigation', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    window.history.replaceState({}, '', '/')
+  })
+
+  function installFetch() {
+    const fetchMock = vi.fn(async (input: string) => {
+      const json = (body: unknown) =>
+        Promise.resolve(
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
+        )
+
+      if (input === '/api/v1/providers') {
+        return json({ data: PROVIDERS })
+      }
+      if (input.startsWith('/api/v1/rulebooks?')) {
+        return json({
+          data: SAMPLE_DATASET.rulebooks,
+          pagination: { limit: 100, offset: 0, total: SAMPLE_DATASET.rulebooks.length },
+        })
+      }
+      if (input === '/api/v1/rulebooks/rulebook-pid') {
+        return json({ data: SAMPLE_DATASET.rulebooks[0] })
+      }
+      if (input === '/api/v1/rulebooks/rulebook-pid/attestations') {
+        return json({ data: SAMPLE_DATASET.attestations['rulebook-pid'] })
+      }
+      if (input === '/api/v1/rulebooks/rulebook-pid/schema-references') {
+        return json({ data: SAMPLE_DATASET.schemaReferences['rulebook-pid'] })
+      }
+      if (input === '/api/v1/rulebooks/rulebook-pid/versions') {
+        return json({ data: SAMPLE_DATASET.versions['rulebook-pid'] })
+      }
+      return Promise.resolve(
+        new Response(
+          JSON.stringify({ error: { code: 'not_found', message: 'No route matches.' } }),
+          { status: 404, headers: { 'content-type': 'application/json' } },
+        ),
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    return fetchMock
+  }
+
+  test('opens a rulebook detail from the catalog and returns to the catalog', async () => {
+    const user = userEvent.setup()
+    installFetch()
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('link', { name: 'PID Rulebook' }))
+
+    expect(window.location.pathname).toBe('/rulebooks/rulebook-pid')
+    expect(await screen.findByRole('heading', { name: 'PID Rulebook' })).toBeInTheDocument()
+
+    await user.click(screen.getByRole('link', { name: 'Rulebook catalog' }))
+
+    expect(window.location.pathname).toBe('/')
+    expect(await screen.findByRole('heading', { name: 'Rulebook catalog' })).toBeInTheDocument()
+  })
+
+  test('renders a deep-linked detail path directly', async () => {
+    installFetch()
+    window.history.replaceState({}, '', '/rulebooks/rulebook-pid')
+
+    render(<App />)
+
+    expect(await screen.findByRole('heading', { name: 'PID Rulebook' })).toBeInTheDocument()
+    expect(screen.getByRole('heading', { name: 'Version history' })).toBeInTheDocument()
   })
 })

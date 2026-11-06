@@ -6,7 +6,7 @@ currently contains the Phase 0 research and architecture documents, the Phase 1 
 scaffold, the persistent provider/rulebook registry slice, the bounded URL/JSON rulebook
 import slice, SD-JWT VC structural validation with dimension-aware evidence, the
 versioned REST/OpenAPI contract over those services and the standalone searchable rulebook
-catalog UI (UI-001).
+catalog and rulebook-detail UI (UI-001/UI-002).
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See

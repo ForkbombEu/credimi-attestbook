@@ -1,5 +1,6 @@
 import type { CatalogEntry } from '../catalog'
 import { describeSource, formatDate, PUBLICATION_STATUS_LABELS } from '../catalog'
+import { AppLink, rulebookPath } from '../router'
 
 import { CompatibilityBadge, DetailsUnavailableBadge, StatusBadge } from './Badges'
 
@@ -69,7 +70,13 @@ function AttestationCell({ entry }: { readonly entry: CatalogEntry }) {
   )
 }
 
-export function CatalogTable({ entries }: { readonly entries: readonly CatalogEntry[] }) {
+export function CatalogTable({
+  entries,
+  onNavigate,
+}: {
+  readonly entries: readonly CatalogEntry[]
+  readonly onNavigate: (path: string) => void
+}) {
   return (
     <div className="table-wrap">
       <table className="catalog-table">
@@ -92,7 +99,13 @@ export function CatalogTable({ entries }: { readonly entries: readonly CatalogEn
           {entries.map((entry) => (
             <tr key={entry.id}>
               <td data-label="Rulebook">
-                <span className="rulebook-name">{entry.name}</span>
+                <AppLink
+                  className="rulebook-name"
+                  href={rulebookPath(entry.id)}
+                  onNavigate={onNavigate}
+                >
+                  {entry.name}
+                </AppLink>
                 {entry.description === '' ? null : (
                   <span className="rulebook-description">{entry.description}</span>
                 )}
