@@ -9,6 +9,7 @@
 import type { Context, Hono } from 'hono'
 
 import packageJson from '../../package.json'
+import { IssuerDiscovery, type IssuerDiscoveryService } from '../discovery'
 import { validateDraftContent } from '../editor'
 import { RulebookImporter } from '../import'
 import type { ImportPreview, ImportResult, ImportSource } from '../import'
@@ -36,6 +37,7 @@ import {
   toCredentialValidationResource,
   toImportPreviewResource,
   toImportResultResource,
+  toIssuerDiscoveryResource,
   toPublicationExportManifestResource,
   toPublicationReadinessResource,
   toRulebookResource,
@@ -74,6 +76,7 @@ export type ApiOperationId =
   | 'getRulebookVersionExportManifest'
   | 'previewImport'
   | 'importRulebooks'
+  | 'discoverIssuer'
   | 'validateCredential'
 
 export interface ApiParameterSpec {
@@ -108,7 +111,8 @@ export interface ApiRouteSpec {
   readonly path: string
   readonly summary: string
   readonly description: string
-  readonly tag: 'service' | 'providers' | 'rulebooks' | 'versions' | 'imports' | 'credentials'
+  readonly tag:
+    'service' | 'providers' | 'rulebooks' | 'versions' | 'imports' | 'issuers' | 'credentials'
   /** `true` marks a bearer-authenticated write operation. */
   readonly security: boolean
   readonly request?: ApiRequestBodySpec
@@ -659,6 +663,31 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     ],
   },
   {
+    operationId: 'discoverIssuer',
+    method: 'post',
+    path: '/api/v1/issuers/discover',
+    summary: 'Discover issuer credential configurations',
+    description:
+      'Authenticated, read-only OpenID4VCI credential issuer metadata discovery. Retrieval uses the bounded SSRF, timeout, redirect and size controls of the untrusted-import pipeline; the response reports formats, type identifiers, exposed schema references and candidate associations with exact published or historical rulebook versions. Ambiguous and unmatched configurations are reported explicitly. Issuer metadata is never treated as rulebook content.',
+    tag: 'issuers',
+    security: true,
+    request: {
+      schema: 'DiscoverIssuerRequest',
+      mediaType: 'application/json',
+      required: true,
+      description: 'Credential issuer identifier whose well-known metadata is discovered.',
+    },
+    responses: [
+      {
+        status: 200,
+        description:
+          'The discovered configurations, their candidate rulebook mappings, diagnostics and limitations.',
+        schema: 'IssuerDiscoveryResponse',
+      },
+      ...errors(400, 401, 413, 422, 500, 502, 503),
+    ],
+  },
+  {
     operationId: 'validateCredential',
     method: 'post',
     path: CREDENTIAL_VALIDATION_PATH,
@@ -694,6 +723,7 @@ export interface ApiDependencies {
   readonly registry?: Registry
   readonly validation?: CredentialValidationService
   readonly importer?: ImportService
+  readonly issuerDiscovery?: IssuerDiscoveryService
 }
 
 export type ApiHandler = (context: Context) => Response | Promise<Response>
@@ -729,6 +759,19 @@ function requireImporter(importer: ImportService | undefined): ImportService {
     )
   }
   return importer
+}
+
+function requireIssuerDiscovery(
+  service: IssuerDiscoveryService | undefined,
+): IssuerDiscoveryService {
+  if (service === undefined) {
+    throw apiError(
+      503,
+      'registry_unavailable',
+      'The issuer discovery pipeline is not configured on this server.',
+    )
+  }
+  return service
 }
 
 function bearerToken(context: Context): string {
@@ -1379,6 +1422,25 @@ function validateCredentialHandler(dependencies: ApiDependencies): ApiHandler {
   }
 }
 
+/** Reads only the public issuer identifier; every other member is ignored. */
+function parseDiscoverIssuerInput(body: unknown): { readonly credentialIssuer: string } {
+  const record = requireRecord(body, 'request body')
+  const credentialIssuer = record['credentialIssuer']
+  if (typeof credentialIssuer !== 'string' || credentialIssuer.trim() === '') {
+    throw invalidInput('credentialIssuer must be a non-empty string')
+  }
+  return { credentialIssuer }
+}
+
+function discoverIssuerHandler(service: IssuerDiscoveryService | undefined): ApiHandler {
+  return async (context) => {
+    const discovery = requireIssuerDiscovery(service)
+    const input = parseDiscoverIssuerInput(await readJsonBody(context))
+    const result = await discovery.discover(input.credentialIssuer)
+    return context.json({ data: toIssuerDiscoveryResource(result) }, 200)
+  }
+}
+
 /**
  * Builds the handler for every operation. The `Record<ApiOperationId, ...>`
  * type makes a route without a handler a compile-time error.
@@ -1391,6 +1453,11 @@ export function createApiHandlers(
     (dependencies.registry === undefined
       ? undefined
       : new RulebookImporter({ registry: dependencies.registry }))
+  const issuerDiscovery =
+    dependencies.issuerDiscovery ??
+    (dependencies.registry === undefined
+      ? undefined
+      : new IssuerDiscovery({ rulebooks: dependencies.registry }))
 
   return {
     getHealth: healthHandler(),
@@ -1415,6 +1482,7 @@ export function createApiHandlers(
     getRulebookVersionExportManifest: getRulebookVersionExportManifestHandler(dependencies),
     previewImport: previewImportHandler(importer),
     importRulebooks: importRulebooksHandler(importer),
+    discoverIssuer: discoverIssuerHandler(issuerDiscovery),
     validateCredential: validateCredentialHandler(dependencies),
   }
 }

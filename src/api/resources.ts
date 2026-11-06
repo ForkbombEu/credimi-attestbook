@@ -15,6 +15,7 @@ import type {
   ImportDiagnostic,
   ImportedSchemaReference,
 } from '../import'
+import type { IssuerDiscoveryResult } from '../discovery'
 import type { PublicationReadiness, VersionContentDiff } from '../lifecycle'
 import type { PublicationExportManifest } from '../publication'
 import type {
@@ -33,6 +34,7 @@ import {
   draftRulebookSchema,
   importPreviewSchema,
   importResultSchema,
+  issuerDiscoveryResultSchema,
   providerSchema,
   publicationExportManifestSchema,
   publicationReadinessSchema,
@@ -357,4 +359,64 @@ export function toImportResultResource(result: ImportResult) {
  */
 export function toCredentialValidationResource(result: CredentialValidationResult) {
   return credentialValidationResultSchema.parse(result)
+}
+
+/**
+ * Projects a discovery result. The result already contains only bounded,
+ * public fields (no raw metadata bytes and no internal registry rows); this
+ * projection copies them explicitly so a future internal field cannot leak.
+ */
+export function toIssuerDiscoveryResource(result: IssuerDiscoveryResult) {
+  return issuerDiscoveryResultSchema.parse({
+    source: {
+      issuerIdentifier: result.source.issuerIdentifier,
+      metadataUrl: result.source.metadataUrl,
+      requestedUrl: result.source.requestedUrl,
+      finalUrl: result.source.finalUrl,
+      retrievedAt: result.source.retrievedAt,
+      contentType: result.source.contentType,
+      status: result.source.status,
+      byteLength: result.source.byteLength,
+      contentDigest: result.source.contentDigest,
+      redirects: [...result.source.redirects],
+      metadataShape: result.source.metadataShape,
+    },
+    issuer: {
+      credentialIssuer: result.issuer.credentialIssuer,
+      credentialEndpoint: result.issuer.credentialEndpoint,
+      authorizationServers: [...result.issuer.authorizationServers],
+    },
+    configurations: result.configurations.map((configuration) => ({
+      configurationId: configuration.configurationId,
+      format: configuration.format,
+      displayName: configuration.displayName,
+      typeIdentifiers: configuration.typeIdentifiers.map((identifier) => ({
+        kind: identifier.kind,
+        value: identifier.value,
+      })),
+      schemaReferences: configuration.schemaReferences.map((reference) => ({
+        formatIdentifier: reference.formatIdentifier,
+        uri: reference.uri,
+        source: reference.source,
+      })),
+      mapping: {
+        status: configuration.mapping.status,
+        candidates: configuration.mapping.candidates.map((candidate) => ({
+          rulebookId: candidate.rulebookId,
+          rulebookName: candidate.rulebookName,
+          version: candidate.version,
+          contentDigest: candidate.contentDigest,
+          specVersion: candidate.specVersion,
+        })),
+        reason: configuration.mapping.reason,
+      },
+    })),
+    summary: { ...result.summary },
+    diagnostics: result.diagnostics.map((entry) => ({
+      code: entry.code,
+      message: entry.message,
+      ...(entry.path === undefined ? {} : { path: entry.path }),
+    })),
+    limitations: [...result.limitations],
+  })
 }

@@ -20,6 +20,7 @@ export type ImportErrorCode =
   | 'invalid_json'
   | 'json_limit'
   | 'invalid_catalog'
+  | 'invalid_issuer_metadata'
   | 'entry_limit'
   | 'schema_reference_invalid'
   | 'schema_reference_limit'

@@ -413,7 +413,7 @@ provides no relevant capability.
 | FR-003 Provider management | none | None | Provider identity, ownership, authorization, publication authority |
 | FR-004 External rulebook import | `resolveSchemaReferences` (caller supplies fetch), SRI verification | Partial | URL/file import, preview, compatibility report, conflict detection, provenance, catalog adapters |
 | FR-005 Catalog synchronization | none | None | Conditional fetch, idempotent sync, change detection, conflict reporting |
-| FR-006 Issuer metadata discovery | `buildCredentialConfigurationTemplate`, `validateIssuerMetadataAgainstProfile` | Partial | Discovery, fetch, configuration extraction, association, ambiguity reporting, manual mapping |
+| FR-006 Issuer metadata discovery | `buildCredentialConfigurationTemplate`, `validateIssuerMetadataAgainstProfile` | Partial | Bounded discovery, metadata validation, configuration extraction, pinned association and ambiguity reporting are implemented in #43 (`src/discovery/`); the OWF helpers are issuer-side catalogue-to-metadata helpers, not discovery, and manual mapping/persistence remain. |
 | FR-007 Rulebook editor | Builders, validator, JSON-preview primitives | Partial | Editor, diagnostics UX, version diff, draft management |
 | FR-008 Publication | `signSchemaMeta`, `verifySchemaMeta` | Partial | Publication workflow, immutable artifacts, key management, audit log, catalogue API envelope |
 | FR-009 Validation API | `validateSchemaMeta` validates metadata only | None | Credential validation request/response API and dimension-aware results |

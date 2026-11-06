@@ -33,7 +33,7 @@ split from the closed duplicates #15–#19.
 | FR-003 | Provider management, ownership and publication authority | Phase 1: #28, #35 | Provisional product auth only; TS11 catalogue auth is unspecified (D-10) |
 | FR-004 | External rulebook import: URL/JSON, preview, structural validation, compatibility, provenance, safe re-import | Phase 1: #30, #31, #36 | Adapter-based; no assumed full TS11 conformance (R4.4) |
 | FR-005 | Catalog synchronization: conditional fetch, idempotency, change detection, conflict reporting, availability | Phase 1 partial: #31; full sync later | Scheduled sync and source diagnostics are not an MVP dependency |
-| FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #43 | Not authoritative for rulebooks |
+| FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #43 (discovery, association, ambiguity reporting) | Implemented in #43; manual mapping and persistence remain later slices; never authoritative for rulebooks |
 | FR-007 | Rulebook editor and authoring workflow | Phase 2: #40 (working-copy editor and live validation), #41 (lifecycle/diff) | UI-003; not Phase 1; publication remains #42 |
 | FR-008 | Publication of validated, versioned, reproducible artifacts with provenance/integrity | Phase 1 subset: #29; full workflow Phase 2: #42 | Where signing applies, use OWF behind the JOSE policy |
 | FR-009 | Reusable validation API with structured results and evidence | Phase 1: #32, #33 | SD-JWT VC structural scope; per-dimension evidence and limitations added in #33 |
@@ -175,24 +175,35 @@ observed); treat unsigned SIROS JSON as the current reality and record `unsigned
 
 ### FR-006 — Issuer metadata discovery
 
-**R6.1 — OID4VCI discovery (VERIFIED mechanism; DESIGN integration).** Given a Credential
-Issuer URL, fetch `/.well-known/openid-credential-issuer`. EUDIPLO and Sphereon both
-implement/serve this (source-verified).
+**R6.1 — OID4VCI discovery (IMPLEMENTED in #43).** Given a Credential Issuer URL, fetch
+`/.well-known/openid-credential-issuer`. EUDIPLO and Sphereon both implement/serve this
+(source-verified). #43 inserts the well-known string between the host and the path as
+OpenID4VCI 1.0 §12.2.2 requires (and also accepts an explicit earlier appended-path metadata
+URL), reuses the import pipeline's SSRF/redirect/timeout/size controls and validates the
+retrieved document ([`docs/discovery.md`](discovery.md) §3, §6).
 
-**R6.2 — Version-aware metadata (VERIFIED need).** Sphereon ships metadata builders/clients
-for two OID4VCI draft generations (v1.0 and 1.15); the discovery adapter MUST be
-version-aware and not assume one metadata shape.
+**R6.2 — Version-aware metadata (IMPLEMENTED for the supported shapes).** Sphereon ships
+metadata builders/clients for two OID4VCI draft generations (v1.0 and 1.15); the discovery
+adapter MUST be version-aware and not assume one metadata shape. #43 reads the OpenID4VCI 1.0
+`credential_configurations_supported` object and the earlier `credentials_supported` array or
+object, and reports the detected shape. Signed/JWT-secured metadata and other draft shapes are
+reported invalid or unmatched rather than guessed.
 
-**R6.3 — Extract configurations, formats, type identifiers, schema refs (DESIGN).** Extract
-`credential_configurations_supported`, credential format, type identifier (`vct`/`doctype`)
-and any exposed schema references.
+**R6.3 — Extract configurations, formats, type identifiers, schema refs (IMPLEMENTED in
+#43).** Extract `credential_configurations_supported`, credential format, type identifier
+(`vct`/`doctype`/legacy `type`) and exposed schema references (`vct` and recognized extension
+schema members), under bounded counts and string lengths.
 
-**R6.4 — Rulebook association & manual mapping (DESIGN).** Attempt to associate
-configurations with known rulebooks; report unmatched/ambiguous configurations; allow
-explicit manual mapping.
+**R6.4 — Rulebook association & manual mapping (PARTIALLY IMPLEMENTED in #43).** #43
+associates configurations with exact published/historical rulebook versions by format and
+frozen schema-reference URI, reports unmatched and ambiguous configurations, and pins
+`rulebookId`, `version`, `contentDigest` and `specVersion`. Explicit manual mapping needs a
+persistence decision and is not implemented.
 
-**R6.5 — Not authoritative (DESIGN, per spec FR-006).** Issuer metadata MUST NOT be treated
-as an authoritative Attestation Rulebook.
+**R6.5 — Not authoritative (IMPLEMENTED boundary).** Issuer metadata MUST NOT be treated
+as an authoritative Attestation Rulebook. The discovery result states this in its
+`limitations` and exposes candidates only; no conformance, trust or authorisation result is
+derived from metadata.
 
 ### Security controls (import/discovery-relevant subset of specification section 15)
 
@@ -221,8 +232,10 @@ total import cost; do not log raw metadata responses, tokens, or embedded URIs.
 | R4.4 no assumed TS11 | SIROS, FIDES, EUDI | observed conformance signals | VERIFIED need |
 | R5.1 conditional fetch | SIROS | `ETag`/`Last-Modified`, `max-age=600` | VERIFIED |
 | R5.5 signature verification | FIDES (live JWS + JWKS), SIROS (documented only) | decoded JWS; JWKS 404 | VERIFIED / DOCUMENTED |
-| R6.1 OID4VCI discovery | EUDIPLO, Sphereon | source tree | VERIFIED mechanism |
-| R6.2 version-aware | Sphereon | v1.0 + 1.15 builders/clients | VERIFIED need |
+| R6.1 OID4VCI discovery | EUDIPLO, Sphereon | source tree; bounded discovery in `src/discovery/` | IMPLEMENTED (#43) |
+| R6.2 version-aware | Sphereon | v1.0 + 1.15 builders/clients; 1.0 and legacy shape tests | IMPLEMENTED for supported shapes (#43) |
+| R6.3 extraction | spec FR-006 | format/type/schema extraction tests | IMPLEMENTED (#43) |
+| R6.4 association | spec FR-006 | pinned-version, ambiguous and unmatched tests | PARTIAL: manual mapping not implemented |
 
 The normative-clause and requirements-to-test mappings are in
 [`docs/traceability.md`](traceability.md); the implementation decisions and Phase 1 order

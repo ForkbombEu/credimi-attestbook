@@ -66,9 +66,9 @@ the two without a current migrated issue are marked explicitly.
 - Full catalog synchronization scheduling (FR-005 beyond idempotent safe re-import) and
   the import UI (UI-004) — later phase; #30/#31 deliver the safe API path only, and no
   migrated issue currently owns these two follow-ups.
-- Issuer discovery (FR-006), issuer fixtures (FR-013) and verifier fixtures (FR-014) —
-  Phase 3, issues
-  [#43](https://github.com/ForkbombEu/credimi-attestbook/issues/43),
+- Issuer discovery (FR-006) was delivered by
+  [#43](https://github.com/ForkbombEu/credimi-attestbook/issues/43); issuer fixtures (FR-013)
+  and verifier fixtures (FR-014) remain Phase 3 work in
   [#44](https://github.com/ForkbombEu/credimi-attestbook/issues/44) and
   [#45](https://github.com/ForkbombEu/credimi-attestbook/issues/45).
 - Capture artifact ingestion, mock/real capture adapters and the capture explorer
