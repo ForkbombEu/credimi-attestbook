@@ -8,7 +8,7 @@
 import { Hono } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 
-import { errorEnvelope, toApiError } from './api/errors'
+import { BEARER_CHALLENGE, errorEnvelope, toApiError } from './api/errors'
 import { MAX_API_BODY_BYTES, registerApiRoutes, type ApiDependencies } from './api/routes'
 
 export type { ErrorEnvelope } from './api/errors'
@@ -63,7 +63,11 @@ export function createApp(options: AppOptions = {}): Hono {
   app.onError((error, c) => {
     const mapped = toApiError(error)
     if (mapped !== null) {
-      return c.json(mapped.body, mapped.status)
+      return c.json(
+        mapped.body,
+        mapped.status,
+        mapped.status === 401 ? { 'WWW-Authenticate': BEARER_CHALLENGE } : undefined,
+      )
     }
 
     // Never echo exception details to clients or log request payloads.

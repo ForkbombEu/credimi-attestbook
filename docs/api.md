@@ -32,8 +32,8 @@ Deliberately **not** in this slice:
   implemented separately and exactly if a later issue adds it (architecture §5);
 - issuer discovery, capture validation and validation-result persistence; no route pretends
   to offer them;
-- provider management, rate limits, HTTP security hardening and the write-authorization
-  audit — [issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35);
+- provider-management HTTP routes, rate limiting and token expiry/rotation — future hardening;
+  the implemented write-auth model is documented in [`docs/security.md`](security.md);
 - rulebook editor, version comparison/diff and UI routes — later Phase 2 slices.
 
 Every handler calls the real registry, import or validation service. A service that is not
@@ -140,9 +140,14 @@ present where a stable sub-reason helps the client (currently import failures ca
 
 Unknown routes under any path answer `404` with `not_found` and the same envelope. The
 mapping is implemented once in `src/api/errors.ts`; the OpenAPI document references the same
-`ErrorEnvelope` component for every error response.
+`ErrorEnvelope` component for every error response. Every `401` response also carries the
+RFC 6750 challenge `WWW-Authenticate: Bearer realm="attestbook"`.
 
 ## 5. Authentication and authorization
+
+The complete security model, including token lifecycle, the operation/ownership matrix and
+secret-handling guarantees, is documented in [`docs/security.md`](security.md). This section
+summarizes the HTTP contract.
 
 - Reads are public, mirroring TS11's public-read requirement and the registry service's
   public read surface. The single exception is the import preview: a URL preview makes the
@@ -152,17 +157,19 @@ mapping is implemented once in `src/api/errors.ts`; the OpenAPI document referen
   prefix and are stored only as SHA-256 hashes; the raw secret is returned once by operator
   provisioning, which is not an HTTP route. The API never echoes a token. The route table's
   `security` flag gates authentication centrally, before any request body is read, so a
-  protected operation cannot forget the check.
+  protected operation cannot forget the check. Missing, malformed, unknown and revoked
+  credentials all answer `401` with `unauthorized` and the bearer challenge.
 - Ownership is enforced by the registry service on the stored resource, not by the route.
-  The publish route additionally authenticates before its idempotent replay check so a
-  foreign or missing token cannot get a write-shaped success.
+  The publish route additionally authenticates and checks ownership before its idempotent
+  replay check so a foreign or missing token cannot get a write-shaped success or probe
+  version existence.
 - `metadata`, `provenance` and `importKey` are registry-internal. The create handler
   projects a whitelist of public fields, so a caller cannot inject them even though the
-  service type accepts them internally.
+  service type accepts them internally, and a rulebook is always attributed to the
+  authenticated provider.
 
-Rate limiting, request authentication policy review and provider-management routes are
-[issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35); this slice does not
-claim those controls.
+Rate limiting, token expiry/rotation and provider-administration routes are not implemented
+in Phase 1; [`docs/security.md`](security.md) §8 records those limitations.
 
 ## 6. Idempotency policy
 
@@ -236,8 +243,8 @@ claim coverage of HTTP rate limits, provider-management routes or the UI.
   parsing, and no HTTP rate limits for reads, preview or import. Rate limiting is still
   missing for preview and import, so an authenticated provider can repeat a bounded outbound
   fetch; the import service's own size, time, redirect and fan-out limits still apply to
-  every call. HTTP rate limiting is part of the broader security hardening tracked with
-  #35, which this slice does not claim.
+  every call. Rate limiting, token expiry/rotation and provider-administration routes remain
+  future hardening work documented in [`docs/security.md`](security.md) §8.
 - Import previews expose a projection (no internal canonical document) and do not persist a
   preview; an import re-runs the preview under the same controls.
 - Validation results are returned synchronously and are not persisted

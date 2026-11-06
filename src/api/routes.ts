@@ -110,6 +110,16 @@ function errors(...statuses: readonly number[]): readonly ApiResponseSpec[] {
     status,
     description: ERROR_DESCRIPTIONS[status] ?? 'Error response.',
     schema: 'ErrorEnvelope',
+    ...(status === 401
+      ? {
+          headers: [
+            {
+              name: 'WWW-Authenticate',
+              description: 'RFC 6750 bearer challenge; sent on every 401 response.',
+            },
+          ],
+        }
+      : {}),
   }))
 }
 

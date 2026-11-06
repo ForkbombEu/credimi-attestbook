@@ -178,7 +178,7 @@ function toCreateRulebookInput(
 }
 
 /**
- * Service-level import entry point. The HTTP API (#34/#35) will expose the
+ * Service-level import entry point. The HTTP API (issue #34) exposes the
  * preview and import operations; this class keeps the security and persistence
  * seams testable without a transport.
  */

@@ -15,6 +15,12 @@ import type { ImportError, ImportErrorCode } from '../import/errors'
 import { isRegistryError } from '../registry/errors'
 import type { JsonObject } from '../registry/types'
 
+/**
+ * RFC 6750 challenge sent with every `401` response. A missing credential and
+ * an unknown or revoked one deliberately produce the same challenge and body.
+ */
+export const BEARER_CHALLENGE = 'Bearer realm="attestbook"'
+
 /** Stable machine-readable error codes of the versioned product API. */
 export const API_ERROR_CODES = [
   'invalid_request',
