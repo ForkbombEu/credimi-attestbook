@@ -5,7 +5,10 @@
 // them. Tests build the same application without a listener, so the routes they
 // exercise are the routes the server exposes.
 
+import { resolve } from 'node:path'
+
 import { Hono } from 'hono'
+import { serveStatic } from 'hono/bun'
 import { bodyLimit } from 'hono/body-limit'
 
 import { BEARER_CHALLENGE, errorEnvelope, toApiError } from './api/errors'
@@ -19,7 +22,14 @@ export interface HealthResponse {
   readonly version: string
 }
 
-export type AppOptions = ApiDependencies
+export interface AppOptions extends ApiDependencies {
+  /**
+   * Directory of the built web UI (`index.html` plus Vite's `assets/`). When
+   * absent the UI routes are not registered and `/` keeps the JSON 404, so a
+   * source checkout without a UI build does not serve a broken page.
+   */
+  readonly uiRoot?: string
+}
 
 /** Body limit for the validation and write endpoints. */
 export const MAX_VALIDATION_BODY_BYTES = MAX_API_BODY_BYTES
@@ -47,6 +57,16 @@ export function createApp(options: AppOptions = {}): Hono {
   )
 
   registerApiRoutes(app, options)
+
+  if (options.uiRoot !== undefined) {
+    const uiRoot = resolve(options.uiRoot)
+    // The entry document and the icon are served from explicit paths; only
+    // Vite's content-addressed assets are served through the directory root,
+    // so a request cannot walk outside the build output.
+    app.get('/', serveStatic({ root: uiRoot, path: 'index.html' }))
+    app.get('/favicon.svg', serveStatic({ root: uiRoot, path: 'favicon.svg' }))
+    app.use('/assets/*', serveStatic({ root: uiRoot }))
+  }
 
   app.notFound((c) =>
     c.json(

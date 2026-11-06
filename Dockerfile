@@ -7,6 +7,7 @@ RUN bun install --frozen-lockfile
 COPY tsconfig.json ./
 COPY src ./src
 COPY migrations ./migrations
+COPY ui ./ui
 RUN bun run build
 
 FROM oven/bun:1.3.1 AS runtime

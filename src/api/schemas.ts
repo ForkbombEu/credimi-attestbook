@@ -51,6 +51,18 @@ export const IMPORT_DIAGNOSTIC_KIND_SCHEMA = z.enum([
 const timestamp = z.string()
 const nullableString = z.string().nullable()
 
+/**
+ * The public provider representation used by the catalogue. Publication
+ * authority, internal metadata and tokens stay inside the registry.
+ */
+export const providerSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  createdAt: timestamp,
+})
+
+export const providerListResponseSchema = z.object({ data: z.array(providerSchema) })
+
 /** The public rulebook representation: no provenance, metadata or import key. */
 export const rulebookSchema = z.object({
   id: z.string(),
@@ -434,6 +446,8 @@ export const credentialValidationResponseSchema = z.object({
 export const OPENAPI_COMPONENTS = {
   ErrorEnvelope: errorEnvelopeSchema,
   HealthResponse: healthResponseSchema,
+  Provider: providerSchema,
+  ProviderListResponse: providerListResponseSchema,
   Rulebook: rulebookSchema,
   RulebookResponse: rulebookResponseSchema,
   RulebookPageResponse: rulebookPageSchema,
@@ -485,6 +499,7 @@ export function componentJsonSchema(name: OpenApiComponentName): Record<string, 
 // Inferred public resource types. Handlers and tests use these so the wire
 // shape and the schema cannot disagree.
 export type HealthResource = z.infer<typeof healthResponseSchema>
+export type ProviderResource = z.infer<typeof providerSchema>
 export type RulebookResource = z.infer<typeof rulebookSchema>
 export type AttestationResource = z.infer<typeof attestationSchema>
 export type AttestationDetailResource = z.infer<typeof attestationDetailSchema>

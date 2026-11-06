@@ -4,8 +4,9 @@ AttestBook is a standalone, API-first platform for managing, validating and test
 Attestation Rulebooks in the European Digital Identity Wallet ecosystem. This repository
 currently contains the Phase 0 research and architecture documents, the Phase 1 application
 scaffold, the persistent provider/rulebook registry slice, the bounded URL/JSON rulebook
-import slice, SD-JWT VC structural validation with dimension-aware evidence and the
-versioned REST/OpenAPI contract over those services.
+import slice, SD-JWT VC structural validation with dimension-aware evidence, the
+versioned REST/OpenAPI contract over those services and the standalone searchable rulebook
+catalog UI (UI-001).
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -28,11 +29,14 @@ claimed.
 git clone https://github.com/ForkbombEu/credimi-attestbook.git
 cd credimi-attestbook
 bun install --frozen-lockfile
+bun run build
 bun run dev
 ```
 
-`bun run dev` rebuilds on change and listens on `http://localhost:3000`. The first endpoint is
-the health check:
+`bun run dev` rebuilds on change and listens on `http://localhost:3000`, serving the built
+catalog UI at `/` and the versioned API under `/api/v1`. Run `bun run build:ui` after UI
+changes, or use `bun run dev:ui` for Vite hot reload on port 5173 with `/api` proxied to the
+Bun server. The health check is:
 
 ```bash
 curl --fail http://localhost:3000/health
@@ -42,13 +46,16 @@ curl --fail http://localhost:3000/health
 ## Checks
 
 ```bash
-bun run check        # formatting, lint, strict typecheck and tests
-bun run format:check # Prettier only
-bun run lint         # ESLint only
-bun run typecheck    # tsc --noEmit only
-bun run test         # Bun test runner only
+bun run check         # formatting, lint, server + UI typecheck, unit and component tests
+bun run format:check  # Prettier only
+bun run lint          # ESLint only
+bun run typecheck     # server tsc --noEmit only
+bun run typecheck:ui  # UI, Vitest and Playwright config typecheck only
+bun run test          # Bun server test runner only
+bun run test:ui       # Vitest catalog unit, component and axe-core tests
+bun run test:e2e      # Playwright catalog tests against the real seeded API
 bun run openapi:check # generated OpenAPI 3.1 document validation
-bun run docs:check   # Phase 0 documentation consistency, plain Node
+bun run docs:check    # Phase 0 documentation consistency, plain Node
 ```
 
 `bun run check` is the same sequence the `quality` and `test` CI jobs run. Tests include:
@@ -83,7 +90,11 @@ bun run docs:check   # Phase 0 documentation consistency, plain Node
 - `src/app.validation.test.ts` — the typed `POST /api/v1/credentials/validate` contract,
   400/404/413/503 cases and non-disclosure of credential material;
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
-  the Phase 0 verification gate for the persistence decision (D-7).
+  the Phase 0 verification gate for the persistence decision (D-7);
+- `ui/src/` — catalog data logic, API client and React component tests, including loading,
+  error, empty, search/filter and axe-core accessibility states;
+- `ui/e2e/` — Playwright browser tests against the real registry and API with seeded data,
+  a full axe-core scan and a narrow-viewport layout check. See [`docs/ui.md`](docs/ui.md).
 
 ## Registry persistence and versions
 
@@ -174,16 +185,28 @@ implemented. The HTTP preview route requires a provider token because a URL prev
 a bounded outbound fetch; rate limiting remains future hardening work. See
 [`docs/import.md`](docs/import.md) for the full contract, limits and limitations.
 
+## Rulebook catalog UI
+
+The catalog at `/` is a standalone React client of the public API: it lists rulebook name,
+description, provider, latest version and version count, publication status, supported
+attestation types, source, last-updated date and compatibility status, with text search plus
+provider and status filters. It has loading, error/retry, empty-catalogue and no-match states,
+and is responsive and keyboard accessible. Compatibility is always shown as **Not tested**;
+the catalog does not infer validation, trust or interoperability results. The implementation,
+data flow, accessibility checks, pinned UI stack and limitations are documented in
+[`docs/ui.md`](docs/ui.md).
+
 ## Build and run
 
 ```bash
-bun run build   # bundles src/server.ts and the schema worker into dist/
-bun run start   # serves the built bundle from dist/server.js
+bun run build   # bundles the server, schema worker and Vite UI into dist/
+bun run start   # serves dist/server.js, including dist/ui at /
 ```
 
 The bundle is self-contained for the current dependency set; `bun run build` emits
-`dist/server.js` and the sandbox child at `dist/validation/schema-sandbox-entry.js`, so the runtime
-image needs only Bun and `dist/`. Use `bun run dev` for source watching during development.
+`dist/server.js`, the sandbox child at `dist/validation/schema-sandbox-entry.js` and the UI
+under `dist/ui/`, so the runtime image needs only Bun and `dist/`. Use `bun run dev` for
+source watching during development and `bun run dev:ui` for the Vite UI dev server.
 
 ## Docker
 
@@ -201,8 +224,9 @@ docker compose up --build --wait
 The image is multi-stage, runs as the non-root `bun` user and defines a `HEALTHCHECK` against
 `/health`. It bakes in no secrets. The server opens the SQLite database and applies migrations
 at startup; the image stores it at `/data/attestbook.sqlite` and Compose mounts a named volume
-there. CI builds the image, starts a container and verifies the `/health`, empty rulebook-catalogue
-and unknown-route API round-trip, so the image is exercised on every pull request.
+there. CI builds the image, starts a container and verifies the `/health`, the built catalog
+page at `/`, the empty rulebook-catalogue and unknown-route API round-trips, so the image is
+exercised on every pull request.
 
 ## Configuration
 

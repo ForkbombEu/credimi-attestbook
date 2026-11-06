@@ -21,6 +21,7 @@ import type { OpenApiComponentName } from './schemas'
 import {
   assertVersionDocument,
   toAttestationResource,
+  toProviderResource,
   toCredentialValidationResource,
   toImportPreviewResource,
   toImportResultResource,
@@ -38,6 +39,7 @@ const MAX_PAGE_LIMIT = 100
 /** Every operation is identified by a stable id in the OpenAPI document. */
 export type ApiOperationId =
   | 'getHealth'
+  | 'listProviders'
   | 'listRulebooks'
   | 'getRulebook'
   | 'listRulebookAttestations'
@@ -84,7 +86,7 @@ export interface ApiRouteSpec {
   readonly path: string
   readonly summary: string
   readonly description: string
-  readonly tag: 'service' | 'rulebooks' | 'versions' | 'imports' | 'credentials'
+  readonly tag: 'service' | 'providers' | 'rulebooks' | 'versions' | 'imports' | 'credentials'
   /** `true` marks a bearer-authenticated write operation. */
   readonly security: boolean
   readonly request?: ApiRequestBodySpec
@@ -165,6 +167,20 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     responses: [
       { status: 200, description: 'The service is running.', schema: 'HealthResponse' },
       ...errors(500),
+    ],
+  },
+  {
+    operationId: 'listProviders',
+    method: 'get',
+    path: '/api/v1/providers',
+    summary: 'List public providers',
+    description:
+      'Public catalogue read of the provider identities that own rulebooks. Only the public projection (id, name, createdAt) is returned; publication authority, internal metadata and tokens never leave the registry.',
+    tag: 'providers',
+    security: false,
+    responses: [
+      { status: 200, description: 'The known providers.', schema: 'ProviderListResponse' },
+      ...errors(500, 503),
     ],
   },
   {
@@ -689,6 +705,13 @@ function healthHandler(): ApiHandler {
     )
 }
 
+function listProvidersHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    return context.json({ data: registry.listProviders().map(toProviderResource) }, 200)
+  }
+}
+
 function listRulebooksHandler(dependencies: ApiDependencies): ApiHandler {
   return (context) => {
     const registry = requireRegistry(dependencies)
@@ -915,6 +938,7 @@ export function createApiHandlers(
 
   return {
     getHealth: healthHandler(),
+    listProviders: listProvidersHandler(dependencies),
     listRulebooks: listRulebooksHandler(dependencies),
     getRulebook: getRulebookHandler(dependencies),
     listRulebookAttestations: listRulebookAttestationsHandler(dependencies),

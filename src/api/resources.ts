@@ -15,7 +15,13 @@ import type {
   ImportDiagnostic,
   ImportedSchemaReference,
 } from '../import'
-import type { AttestationType, Rulebook, RulebookVersion, SchemaReference } from '../registry/types'
+import type {
+  AttestationType,
+  Provider,
+  Rulebook,
+  RulebookVersion,
+  SchemaReference,
+} from '../registry/types'
 import type { CredentialValidationResult } from '../validation'
 
 import {
@@ -23,11 +29,21 @@ import {
   credentialValidationResultSchema,
   importPreviewSchema,
   importResultSchema,
+  providerSchema,
   rulebookSchema,
   rulebookVersionDocumentSchema,
   rulebookVersionSchema,
   schemaReferenceSchema,
 } from './schemas'
+
+/** Public catalogue projection of a provider; authority and metadata stay internal. */
+export function toProviderResource(provider: Provider) {
+  return providerSchema.parse({
+    id: provider.id,
+    name: provider.name,
+    createdAt: provider.createdAt,
+  })
+}
 
 export function toRulebookResource(rulebook: Rulebook) {
   return rulebookSchema.parse({
