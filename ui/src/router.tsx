@@ -1,17 +1,20 @@
-// Small client-side router for the standalone UI (issue #37).
+// Small client-side router for the standalone UI (issues #36–#38).
 //
-// The server serves the built entry document for `/` and `/rulebooks/*`, so the
-// browser path names the view and a deep link (or a reload) still works. Only
-// the two Phase 1 routes exist; any other path falls back to the catalog rather
-// than rendering an empty page.
+// The server serves the built entry document for `/`, `/rulebooks/*` and
+// `/playground`, so the browser path names the view and a deep link (or a
+// reload) still works. Only the Phase 1 routes exist; any other path falls back
+// to the catalog rather than rendering an empty page.
 
 import type { AnchorHTMLAttributes, MouseEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
 
 export type Route =
-  { readonly name: 'catalog' } | { readonly name: 'rulebook'; readonly rulebookId: string }
+  | { readonly name: 'catalog' }
+  | { readonly name: 'playground' }
+  | { readonly name: 'rulebook'; readonly rulebookId: string }
 
 export const CATALOG_PATH = '/'
+export const PLAYGROUND_PATH = '/playground'
 
 export function rulebookPath(rulebookId: string): string {
   return `/rulebooks/${encodeURIComponent(rulebookId)}`
@@ -22,6 +25,9 @@ export function parseRoute(pathname: string): Route {
   let path = pathname
   while (path.length > 1 && path.endsWith('/')) {
     path = path.slice(0, -1)
+  }
+  if (path === PLAYGROUND_PATH) {
+    return { name: 'playground' }
   }
   const match = /^\/rulebooks\/([^/]+)$/.exec(path)
   if (match?.[1] === undefined) {

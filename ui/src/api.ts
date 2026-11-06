@@ -1,20 +1,26 @@
-// Typed client for the public AttestBook catalogue API (issue #36).
+// Typed client for the public AttestBook product API (issues #36–#38).
 //
-// The catalog is a client of the same versioned API the server exposes; it
-// never bypasses the API to read the registry. Error messages are the stable,
-// safe messages of the API error envelope.
+// The UI is a client of the same versioned API the server exposes; it never
+// bypasses the API to read the registry. Error messages are the stable, safe
+// messages of the API error envelope, so a credential or claim value can never
+// be echoed back through the client.
 
 import type {
   Attestation,
+  CredentialValidationResult,
   Provider,
   Rulebook,
   RulebookPage,
   RulebookVersion,
   SchemaReference,
+  ValidateCredentialRequest,
 } from './types'
 
 /** Hard cap of the catalogue API page size (`limit` maximum). */
 export const CATALOG_PAGE_LIMIT = 100
+
+/** The product-API path that runs structural credential validation. */
+export const CREDENTIAL_VALIDATION_PATH = '/api/v1/credentials/validate'
 
 export interface CatalogApi {
   listProviders(signal?: AbortSignal): Promise<readonly Provider[]>
@@ -26,6 +32,18 @@ export interface CatalogApi {
     signal?: AbortSignal,
   ): Promise<readonly SchemaReference[]>
   listVersions(rulebookId: string, signal?: AbortSignal): Promise<readonly RulebookVersion[]>
+}
+
+/**
+ * The validation endpoint used by the playground. It is separate from
+ * `CatalogApi` so the read-only catalog views do not depend on the mutating
+ * request path, and tests can provide a fake validator without faking reads.
+ */
+export interface ValidationApi {
+  validateCredential(
+    input: ValidateCredentialRequest,
+    signal?: AbortSignal,
+  ): Promise<CredentialValidationResult>
 }
 
 export class CatalogApiError extends Error {
@@ -46,7 +64,7 @@ interface ErrorEnvelope {
   }
 }
 
-async function readErrorMessage(response: Response): Promise<string> {
+async function readErrorMessage(response: Response, label = 'catalog'): Promise<string> {
   try {
     const body = (await response.json()) as ErrorEnvelope
     if (typeof body.error?.message === 'string' && body.error.message !== '') {
@@ -55,12 +73,12 @@ async function readErrorMessage(response: Response): Promise<string> {
   } catch {
     // A non-JSON error body must not replace the request failure.
   }
-  return `The catalog request failed with HTTP ${response.status}.`
+  return `The ${label} request failed with HTTP ${response.status}.`
 }
 
-function singleData<T>(body: unknown): T {
+function singleData<T>(body: unknown, label = 'catalog'): T {
   if (typeof body !== 'object' || body === null || !('data' in body)) {
-    throw new CatalogApiError('The catalog returned an unexpected response.', 0)
+    throw new CatalogApiError(`The ${label} returned an unexpected response.`, 0)
   }
   return (body as { readonly data: T }).data
 }
@@ -119,6 +137,36 @@ export function createHttpCatalogApi(
  */
 export function versionContentPath(rulebookId: string, version: string): string {
   return `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/versions/${encodeURIComponent(version)}/content`
+}
+
+/**
+ * Builds the HTTP client for `POST /api/v1/credentials/validate`. The credential
+ * is sent in the request body only; it never appears in a URL, the result or an
+ * error message.
+ */
+export function createHttpValidationApi(
+  fetchImpl: FetchLike = (input, init) => fetch(input, init),
+): ValidationApi {
+  return {
+    async validateCredential(input, signal) {
+      const response = await fetchImpl(CREDENTIAL_VALIDATION_PATH, {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify(input),
+        ...(signal === undefined ? {} : { signal }),
+      })
+      if (!response.ok) {
+        throw new CatalogApiError(await readErrorMessage(response, 'validation'), response.status)
+      }
+      let body: unknown
+      try {
+        body = await response.json()
+      } catch {
+        throw new CatalogApiError('The validation returned an unexpected response.', 0)
+      }
+      return singleData<CredentialValidationResult>(body, 'validation')
+    },
+  }
 }
 
 export function isAbortError(error: unknown): boolean {

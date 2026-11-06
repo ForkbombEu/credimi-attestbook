@@ -1,8 +1,13 @@
-// End-to-end server for the catalog UI tests (issue #36).
+// End-to-end server for the catalog and playground UI tests (issues #36–#38).
 //
-// It runs the real AttestBook HTTP application with the real registry and the
-// built UI, so the browser test searches and filters actual API data rather
-// than a mock. Data is seeded in an in-memory SQLite database at startup.
+// It runs the real AttestBook HTTP application with the real registry, the real
+// validation engine and the built UI, so the browser tests search, filter and
+// validate actual API data rather than a mock. Data is seeded in an in-memory
+// SQLite database at startup; the signed credential fixture is real SD-JWT VC
+// output from a throwaway test key and is written to a temporary file for the
+// browser tests to paste or upload.
+
+import { writeFileSync } from 'node:fs'
 
 import { createApp } from '../../src/app'
 import { openDatabase } from '../../src/db/database'
@@ -10,6 +15,10 @@ import { applyMigrations } from '../../src/db/migrations'
 import { Registry } from '../../src/registry'
 import { provisionProvider } from '../../src/registry/bootstrap'
 import type { CreateRulebookInput } from '../../src/registry/types'
+import { CredentialValidator } from '../../src/validation'
+import { issueTestCredential, seedPublishedRulebook } from '../../src/validation/test-support'
+
+import { PID_CREDENTIAL_FIXTURE } from './fixtures'
 
 const port = Number(Bun.env.E2E_PORT ?? '4173')
 const database = openDatabase(':memory:')
@@ -28,6 +37,22 @@ const authority = provisionProvider(database, {
   name: 'Digital Identity Authority',
   publicationAuthority: 'digital-identity-authority',
 })
+
+/**
+ * A pinned, published rulebook for the playground. Its TS11 binding type is
+ * valid so a real credential with an issuer-signed `cnf` claim passes the
+ * structural dimensions; cryptography, schema validation (no document supplied)
+ * and issuer trust stay explicitly not tested.
+ */
+const playgroundRulebook = seedPublishedRulebook(database, registry, {
+  authority: 'playground-authority',
+  rulebookName: 'Validator Sandbox Rulebook',
+  attestationName: 'Sandbox Credential',
+  schemaUri: 'https://example.org/vct/pid',
+})
+
+const pidCredential = await issueTestCredential()
+writeFileSync(PID_CREDENTIAL_FIXTURE, pidCredential, 'utf8')
 
 function createPublished(token: string, input: CreateRulebookInput, version: string): string {
   const rulebook = registry.createRulebook(token, input)
@@ -145,7 +170,9 @@ registry.createRulebook(lab.token.secret, {
   ],
 })
 
-const app = createApp({ registry, uiRoot: './dist/ui' })
+const validation = new CredentialValidator({ source: registry })
+
+const app = createApp({ registry, validation, uiRoot: './dist/ui' })
 
 const server = Bun.serve({
   hostname: '127.0.0.1',
@@ -153,4 +180,7 @@ const server = Bun.serve({
   fetch: app.fetch,
 })
 
-console.log(`AttestBook catalog E2E server listening on http://${server.hostname}:${server.port}`)
+console.log(
+  `AttestBook E2E server listening on http://${server.hostname}:${server.port} ` +
+    `(playground rulebook ${playgroundRulebook.rulebookId})`,
+)

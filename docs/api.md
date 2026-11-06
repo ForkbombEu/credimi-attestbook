@@ -36,9 +36,9 @@ Deliberately **not** in this slice:
   to offer them;
 - provider-management HTTP routes, rate limiting and token expiry/rotation — future hardening;
   the implemented write-auth model is documented in [`docs/security.md`](security.md);
-- rulebook editor, version comparison/diff, detail UI and credential playground UI — later
-  slices (#37, #38, #40–#42). The catalog UI at `/` is delivered by #36 and documented in
-  [`docs/ui.md`](ui.md); it is not an API route.
+- rulebook editor, version comparison/diff and import UI — later slices (#40–#42). The
+  catalog, rulebook-detail and credential-playground views are documented in
+  [`docs/ui.md`](ui.md); they are UI routes, not API routes.
 
 Every handler calls the real registry, import or validation service. A service that is not
 wired answers `503` with a typed code instead of a placeholder success response.

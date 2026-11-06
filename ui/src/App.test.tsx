@@ -323,6 +323,21 @@ describe('app catalog and detail navigation', () => {
     expect(await screen.findByRole('heading', { name: 'Rulebook catalog' })).toBeInTheDocument()
   })
 
+  test('opens the credential playground from the shared header', async () => {
+    const user = userEvent.setup()
+    installFetch()
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('link', { name: 'Validation playground' }))
+
+    expect(window.location.pathname).toBe('/playground')
+    expect(
+      await screen.findByRole('heading', { name: 'Credential playground' }),
+    ).toBeInTheDocument()
+    expect(await screen.findByLabelText('Rulebook')).toBeInTheDocument()
+  })
+
   test('renders a deep-linked detail path directly', async () => {
     installFetch()
     window.history.replaceState({}, '', '/rulebooks/rulebook-pid')

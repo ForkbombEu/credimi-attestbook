@@ -18,6 +18,12 @@ describe('parseRoute', () => {
     expect(parseRoute('')).toEqual({ name: 'catalog' })
   })
 
+  test('maps the playground path and its trailing slash', () => {
+    expect(parseRoute('/playground')).toEqual({ name: 'playground' })
+    expect(parseRoute('/playground/')).toEqual({ name: 'playground' })
+    expect(parseRoute('/playground/extra')).toEqual({ name: 'catalog' })
+  })
+
   test('decodes a rulebook id from a detail path', () => {
     expect(parseRoute('/rulebooks/rulebook-pid')).toEqual({
       name: 'rulebook',
