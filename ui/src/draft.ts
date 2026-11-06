@@ -125,7 +125,9 @@ export function draftRequest(
   return {
     name: metadata.name,
     description: metadata.description,
-    sourceUrl: sourceUrl === '' ? null : sourceUrl,
+    // One body works for create, save and validate. The create contract does
+    // not accept null, while PUT treats an omitted source URL as clearing it.
+    ...(sourceUrl === '' ? {} : { sourceUrl }),
     applicableSpec: metadata.applicableSpec,
     // Pass the parsed document through unchanged: the server's whitelist
     // projection and registry validation are authoritative, and rewriting

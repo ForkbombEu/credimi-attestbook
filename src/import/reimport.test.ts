@@ -121,6 +121,53 @@ describe('idempotent re-import', () => {
     expect(stored?.updatedAt).toBe(rulebook.updatedAt)
   })
 
+  test('keeps an imported draft idempotent after an unchanged editor save', async () => {
+    const context = setup()
+    const body = jsonBytes(validTs11Document)
+    const first = await importBody(context, body)
+    const rulebook = first.rulebooks[0]
+    if (rulebook === undefined) {
+      throw new Error('expected the first import to create a rulebook')
+    }
+
+    const draft = context.registry.getDraftContent(rulebook.id)
+    context.registry.replaceDraftContent(context.token, rulebook.id, {
+      name: draft.rulebook.name,
+      description: draft.rulebook.description,
+      sourceUrl: draft.rulebook.sourceUrl,
+      applicableSpec: draft.rulebook.applicableSpec,
+      attestations: draft.attestations.map((attestation) => ({
+        name: attestation.name,
+        attestationLoS: attestation.attestationLoS,
+        bindingType: attestation.bindingType,
+        supportedFormats: [...attestation.supportedFormats],
+        schemaReferences: draft.schemaReferences
+          .filter((reference) => reference.attestationId === attestation.id)
+          .map((reference) => ({
+            formatIdentifier: reference.formatIdentifier,
+            uri: reference.uri,
+            ...(reference.integrity === null ? {} : { integrity: reference.integrity }),
+          })),
+      })),
+      schemaReferences: draft.schemaReferences
+        .filter((reference) => reference.attestationId === null)
+        .map((reference) => ({
+          formatIdentifier: reference.formatIdentifier,
+          uri: reference.uri,
+          ...(reference.integrity === null ? {} : { integrity: reference.integrity }),
+        })),
+    })
+
+    const second = await importBody(context, body)
+
+    expect(second.entries[0]).toMatchObject({
+      disposition: 'unchanged',
+      rulebookId: rulebook.id,
+    })
+    expect(second.conflicts).toEqual([])
+    expect(second.rulebooks).toHaveLength(0)
+  })
+
   test('fingerprints the registry-normalized content and re-imports it idempotently', async () => {
     const context = setup()
     const body = jsonBytes(paddedFormatDocument())

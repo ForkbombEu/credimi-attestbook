@@ -222,6 +222,144 @@ describe('draft working-copy replacement', () => {
     expect(registry.getRulebook(rulebook.id)?.publicationStatus).toBe('draft')
   })
 
+  test('preserves unchanged internal metadata and row identity across a save', () => {
+    const { registry } = setup()
+    const provider = provision('one')
+    const rulebook = registry.createRulebook(provider.token.secret, {
+      name: 'Imported draft',
+      applicableSpec: 'ts11@1.0.1',
+      attestations: [
+        {
+          name: 'Imported attestation',
+          attestationLoS: 'iso_18045_high',
+          bindingType: 'key',
+          supportedFormats: ['dc+sd-jwt'],
+          metadata: { profile: 'ts11@1.0.1', conformance: 'conformant_subset' },
+          schemaReferences: [
+            {
+              formatIdentifier: 'dc+sd-jwt',
+              uri: 'https://issuer.example.org/schemas/pid',
+              metadata: { meta: { vct: 'eu.example.pid' }, unknownMembers: { u: 2 } },
+            },
+          ],
+        },
+        {
+          name: 'Unchanged attestation',
+          attestationLoS: 'iso_18045_moderate',
+          bindingType: 'key',
+          supportedFormats: ['mso_mdoc'],
+          metadata: { profile: 'ts11@1.0.1', conformance: 'partial' },
+          schemaReferences: [
+            {
+              formatIdentifier: 'mso_mdoc',
+              uri: 'https://issuer.example.org/schemas/mdl',
+              metadata: { meta: { doctype_value: 'eu.example.mdl' } },
+            },
+          ],
+        },
+      ],
+      schemaReferences: [
+        {
+          formatIdentifier: 'vc+sd-jwt',
+          uri: 'https://issuer.example.org/schemas/rulebook',
+          metadata: { meta: { r: 1 } },
+        },
+      ],
+    })
+    const before = registry.getDraftContent(rulebook.id)
+    const attestation = before.attestations[0]
+    const rulebookReference = before.schemaReferences.find(
+      (reference) => reference.attestationId === null,
+    )
+    if (attestation === undefined || rulebookReference === undefined) {
+      throw new Error('expected the seeded draft content')
+    }
+
+    const replacement = {
+      name: before.rulebook.name,
+      description: before.rulebook.description,
+      sourceUrl: before.rulebook.sourceUrl,
+      applicableSpec: before.rulebook.applicableSpec,
+      attestations: before.attestations.map((candidate) => ({
+        name: candidate.name,
+        attestationLoS: candidate.attestationLoS,
+        bindingType: candidate.bindingType,
+        supportedFormats: [...candidate.supportedFormats],
+        schemaReferences: before.schemaReferences
+          .filter((reference) => reference.attestationId === candidate.id)
+          .map((reference) => ({
+            formatIdentifier: reference.formatIdentifier,
+            uri: reference.uri,
+            ...(reference.integrity === null ? {} : { integrity: reference.integrity }),
+          })),
+      })),
+      schemaReferences: before.schemaReferences
+        .filter((reference) => reference.attestationId === null)
+        .map((reference) => ({
+          formatIdentifier: reference.formatIdentifier,
+          uri: reference.uri,
+          ...(reference.integrity === null ? {} : { integrity: reference.integrity }),
+        })),
+    }
+
+    const saved = registry.replaceDraftContent(provider.token.secret, rulebook.id, replacement)
+
+    expect(saved.attestations[0]).toMatchObject({
+      id: attestation.id,
+      metadata: { profile: 'ts11@1.0.1', conformance: 'conformant_subset' },
+    })
+    expect(
+      saved.schemaReferences.find((reference) => reference.attestationId === null),
+    ).toMatchObject({
+      id: rulebookReference.id,
+      metadata: { meta: { r: 1 } },
+    })
+    expect(
+      saved.schemaReferences.find((reference) => reference.attestationId === attestation.id),
+    ).toMatchObject({
+      metadata: { meta: { vct: 'eu.example.pid' }, unknownMembers: { u: 2 } },
+    })
+
+    // Changing an entry clears only that entry's internal metadata.
+    const changed = registry.replaceDraftContent(provider.token.secret, rulebook.id, {
+      ...replacement,
+      attestations: [
+        {
+          ...replacement.attestations[0]!,
+          name: 'Renamed attestation',
+        },
+        replacement.attestations[1]!,
+      ],
+      schemaReferences: [
+        {
+          ...replacement.schemaReferences[0]!,
+          uri: 'https://issuer.example.org/schemas/rulebook-v2',
+        },
+      ],
+    })
+    expect(changed.attestations[0]).toMatchObject({
+      name: 'Renamed attestation',
+      metadata: {},
+    })
+    expect(changed.attestations[0]?.id).not.toBe(attestation.id)
+    expect(
+      changed.schemaReferences.find((reference) => reference.attestationId === null),
+    ).toMatchObject({ metadata: {} })
+    const unchangedAttestation = changed.attestations.find(
+      (attestation) => attestation.name === 'Unchanged attestation',
+    )
+    expect(unchangedAttestation).toMatchObject({
+      metadata: { profile: 'ts11@1.0.1', conformance: 'partial' },
+    })
+    expect(
+      changed.schemaReferences.find(
+        (reference) => reference.attestationId === unchangedAttestation?.id,
+      ),
+    ).toMatchObject({
+      metadata: { meta: { doctype_value: 'eu.example.mdl' } },
+    })
+  })
+
   test('leaves the previous working copy intact when validation fails', () => {
     const { registry } = setup()
     const provider = provision('one')

@@ -160,6 +160,27 @@ test.describe('rulebook draft editor against the real API', () => {
     expect(((await attempt.json()) as { error: { code: string } }).error.code).toBe('immutable')
   })
 
+  test('creates a new rulebook with an empty source URL and opens its editor', async ({ page }) => {
+    const name = `Created by the browser suite ${Date.now()}`
+
+    await page.goto('/rulebooks/new')
+    await page.getByLabel('Name').fill(name)
+    await fillToken(page)
+    await page.getByRole('button', { name: 'Create draft' }).click()
+
+    await expect(page).toHaveURL(/\/rulebooks\/[0-9a-f-]+\/edit$/)
+    await expect(page.getByRole('heading', { name: `Edit ${name} draft`, level: 1 })).toBeVisible()
+    await expect(page.getByLabel('Name')).toHaveValue(name)
+    await expect(page.getByLabel('Source URL (optional)')).toHaveValue('')
+
+    const id = new URL(page.url()).pathname.split('/')[2]
+    const draft = await page.request.get(`/api/v1/rulebooks/${id}/draft`)
+    expect(draft.ok()).toBe(true)
+    expect(
+      ((await draft.json()) as { data: { sourceUrl: string | null } }).data.sourceUrl,
+    ).toBeNull()
+  })
+
   test('renders the new-rulebook editor without creating anything', async ({ page }) => {
     const before = await page.request.get('/api/v1/rulebooks?limit=100')
     const beforeTotal = ((await before.json()) as { pagination: { total: number } }).pagination

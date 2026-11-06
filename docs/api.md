@@ -76,7 +76,7 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `GET` | `/health` | no | `200` | Liveness and build version (unversioned). |
 | `GET` | `/api/v1/providers` | no | `200` | Public provider projection (`id`, `name`, `createdAt`) used by the catalog UI. |
 | `GET` | `/api/v1/rulebooks` | no | `200` | Filtered, paginated catalogue listing. Query parameters: `providerId`, `status`, `limit` (default 50, max 100), `offset` (default 0). |
-| `POST` | `/api/v1/rulebooks` | yes | `201` + `Location` | Create a draft rulebook, its attestation types and their schema references. An optional top-level `schemaReferences` array adds rulebook-level references. |
+| `POST` | `/api/v1/rulebooks` | yes | `201` + `Location` | Create a draft rulebook, its attestation types and their schema references. An optional top-level `schemaReferences` array adds rulebook-level references. `sourceUrl` is optional and may be omitted or `null`. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}` | no | `200` | One rulebook's public product metadata. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/draft` | no | `200` | The draft working copy as one editable document (metadata, attestation types with references, rulebook-level references). |
 | `PUT` | `/api/v1/rulebooks/{rulebookId}/draft` | yes | `200` | Full replacement of the owning provider's draft working copy. `409 immutable` for a published/historical rulebook; frozen version snapshots and artifacts are never changed. |
@@ -159,7 +159,10 @@ snapshot and not on a TS11/OWF wire document:
 `PUT /api/v1/rulebooks/{rulebookId}/draft` replaces the whole document in one transaction:
 rulebook metadata, attestation types and both per-attestation and rulebook-level schema
 references. Internal provenance, metadata, the import identity and publication state are not
-accepted from the caller; a whitelist projection strips them first. The write is
+accepted from the caller; a whitelist projection strips them first. An attestation matched by
+name and a reference matched by attestation, `formatIdentifier` and `uri` keep their
+registry-internal metadata and identity, so saving an imported draft unchanged does not
+reset its importer provenance; new or changed entries start with `{}`. The write is
 **idempotent** (the same document produces the same working copy), authorized by the owning
 provider's bearer token, and allowed only while the rulebook's working copy status is
 `draft`. Published and historical rulebooks answer `409 immutable`; an invalid document

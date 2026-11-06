@@ -99,9 +99,19 @@ describe('live draft validation', () => {
     )
 
     expect(report.valid).toBe(false)
-    expect(paths(report)).toContain('attestations.0.supportedFormats.1')
+    expect(paths(report)).toContain('attestations.0.supportedFormats')
     expect(paths(report)).toContain('attestations.0.schemaReferences.0.integrity')
     expect(paths(report)).toContain('attestations.0.schemaReferences.1.uri')
+  })
+
+  test('matches the save contract for a source URL containing a control character', () => {
+    const report = validateDraftContent(
+      validDraft({ sourceUrl: 'https://issuer.example.org/a\tb' }),
+    )
+
+    expect(report.valid).toBe(false)
+    expect(report.saveable).toBe(false)
+    expect(paths(report)).toContain('sourceUrl')
   })
 
   test('reports duplicate attestation names and formats', () => {

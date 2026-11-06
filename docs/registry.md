@@ -278,7 +278,7 @@ copy:
 | `createRulebookVersion(rulebookId, { version, provenance? })` | owning provider; rulebook not `historical`; unique SemVer label | snapshots current content as a `draft` version; reopens a `published` rulebook to `draft` |
 | `refreshDraftRulebookVersion(rulebookId, version)` | owning provider; version is `draft` | re-snapshots current content and updates the digest; no-op for identical content |
 | `publishRulebookVersion(rulebookId, version)` | owning provider; version is `draft`; stored digest matches current content | freezes the version as `published`, demotes previously published versions to `historical`, sets the rulebook to `published` |
-| `replaceDraftContent(rulebookId, document)` | owning provider; rulebook's working copy is `draft` | replaces metadata, attestation types and schema references in one transaction; frozen/published version rows and artifacts are untouched, and a later publish of a stale draft version still answers `conflict` until it is refreshed |
+| `replaceDraftContent(rulebookId, document)` | owning provider; rulebook's working copy is `draft` | replaces metadata, attestation types and schema references in one transaction; frozen/published version rows and artifacts are untouched, and a later publish of a stale draft version still answers `conflict` until it is refreshed. Internal row metadata (the importer's `profile`/`conformance` and OWF `meta`/`unknownMembers`) is kept for an attestation matched by name and a reference matched by attestation, `formatIdentifier` and `uri`; new or changed entries start with `{}` |
 | `deleteRulebook(rulebookId)` | owning provider; rulebook is `draft` and has no published/historical versions | deletes draft versions; published/historical rows can never be deleted |
 
 `historical` is only produced by supersession: a version that was never published cannot jump
@@ -300,6 +300,13 @@ failed validation leaves the previous working copy byte-for-byte intact. It dele
 re-inserts the mutable working-copy rows (with audit entries), never version or artifact
 rows; `requireOwnedDraft` refuses published and historical rulebooks with `immutable`. This
 is the service guarantee behind UI-003's "no published artifact mutation".
+
+The editable document deliberately omits registry-internal row metadata. An attestation
+whose name is unchanged keeps its previous row id, creation time and internal metadata; a
+schema reference whose attestation, `formatIdentifier` and `uri` are unchanged does the same.
+A renamed attestation or a changed reference starts fresh, so an unchanged editor save does
+not reset importer provenance and does not make a later re-import report a false
+`locally_modified` conflict.
 
 While the next draft is in progress, the rulebook's catalogue `publicationStatus` is `draft`
 even though a published version remains retrievable. The versioned API exposes the full

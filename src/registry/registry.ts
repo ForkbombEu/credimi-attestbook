@@ -361,11 +361,40 @@ export class Registry {
         : requireAbsoluteHttpUrl(input.sourceUrl, 'sourceUrl')
     const applicableSpec = requireText(input.applicableSpec, 'applicableSpec', MAX_SPEC_LENGTH)
 
+    const previousAttestations = this.store.listAttestations(existing.id)
+    const previousReferences = this.store.listSchemaReferences(existing.id)
+    const previousAttestationsByName = new Map(
+      previousAttestations.map((attestation) => [attestation.name, attestation]),
+    )
+    const referenceKey = (attestationId: string | null, formatIdentifier: string, uri: string) =>
+      `${attestationId ?? ''}\u0000${formatIdentifier}\u0000${uri}`
+    const previousReferencesByKey = new Map(
+      previousReferences.map((reference) => [
+        referenceKey(reference.attestationId, reference.formatIdentifier, reference.uri),
+        reference,
+      ]),
+    )
+
     const attestationInputs = input.attestations ?? []
     assertArray(attestationInputs, 'attestations', MAX_ATTESTATIONS_PER_RULEBOOK)
-    const attestations = attestationInputs.map((attestation, index) =>
-      this.buildAttestation(existing.id, attestation, index, at),
-    )
+    const previousAttestationIds: Array<string | undefined> = []
+    const attestations = attestationInputs.map((attestationInput, index) => {
+      const built = this.buildAttestation(existing.id, attestationInput, index, at)
+      const previous = previousAttestationsByName.get(built.name)
+      previousAttestationIds[index] = previous?.id
+      if (previous === undefined || attestationInput.metadata !== undefined) {
+        return built
+      }
+      // Internal metadata is not part of the editable document, so an unchanged
+      // save must keep the row's metadata (and identity) instead of resetting it.
+      // The importer stores the source profile/conformance and OWF meta here.
+      return {
+        ...built,
+        id: previous.id,
+        metadata: previous.metadata,
+        createdAt: previous.createdAt,
+      }
+    })
 
     const names = new Set<string>()
     for (const attestation of attestations) {
@@ -389,19 +418,34 @@ export class Registry {
       )
       const formats = new Set<string>()
       referenceInputs.forEach((referenceInput, referenceIndex) => {
-        const reference = this.buildAttestationSchemaReference(
+        const built = this.buildAttestationSchemaReference(
           attestation,
           referenceInput,
           at,
           `attestations[${index}].schemaReferences[${referenceIndex}]`,
         )
-        if (formats.has(reference.formatIdentifier)) {
+        if (formats.has(built.formatIdentifier)) {
           throw invalidInput(
-            `attestations[${index}].schemaReferences must not repeat the formatIdentifier "${reference.formatIdentifier}"`,
+            `attestations[${index}].schemaReferences must not repeat the formatIdentifier "${built.formatIdentifier}"`,
           )
         }
-        formats.add(reference.formatIdentifier)
-        schemaReferences.push(reference)
+        formats.add(built.formatIdentifier)
+        // A renamed attestation keeps matching its own references because the
+        // previous row is looked up through the previous attestation id.
+        const previousAttestationId = previousAttestationIds[index] ?? attestation.id
+        const previous = previousReferencesByKey.get(
+          referenceKey(previousAttestationId, built.formatIdentifier, built.uri),
+        )
+        schemaReferences.push(
+          previous === undefined || referenceInput.metadata !== undefined
+            ? built
+            : {
+                ...built,
+                id: previous.id,
+                metadata: previous.metadata,
+                createdAt: previous.createdAt,
+              },
+        )
       })
     })
 
@@ -410,34 +454,26 @@ export class Registry {
     const rulebookLevelFormats = new Set<string>()
     rulebookReferenceInputs.forEach((referenceInput, index) => {
       const path = `schemaReferences[${index}]`
-      assertObject(referenceInput, path)
-      const formatIdentifier = requireText(
-        referenceInput.formatIdentifier,
-        `${path}.formatIdentifier`,
-        MAX_NAME_LENGTH,
-      )
-      if (rulebookLevelFormats.has(formatIdentifier)) {
+      const built = this.buildRulebookSchemaReference(existing.id, referenceInput, at, path)
+      if (rulebookLevelFormats.has(built.formatIdentifier)) {
         throw invalidInput(
-          `schemaReferences must not repeat the formatIdentifier "${formatIdentifier}"`,
+          `schemaReferences must not repeat the formatIdentifier "${built.formatIdentifier}"`,
         )
       }
-      rulebookLevelFormats.add(formatIdentifier)
-      schemaReferences.push({
-        id: this.generateId(),
-        rulebookId: existing.id,
-        attestationId: null,
-        formatIdentifier,
-        uri: requireAbsoluteHttpUrl(referenceInput.uri, `${path}.uri`),
-        integrity:
-          referenceInput.integrity === undefined
-            ? null
-            : requireIntegrity(referenceInput.integrity, `${path}.integrity`),
-        metadata:
-          referenceInput.metadata === undefined
-            ? {}
-            : requireJsonObject(referenceInput.metadata, `${path}.metadata`),
-        createdAt: at,
-      })
+      rulebookLevelFormats.add(built.formatIdentifier)
+      const previous = previousReferencesByKey.get(
+        referenceKey(null, built.formatIdentifier, built.uri),
+      )
+      schemaReferences.push(
+        previous === undefined || referenceInput.metadata !== undefined
+          ? built
+          : {
+              ...built,
+              id: previous.id,
+              metadata: previous.metadata,
+              createdAt: previous.createdAt,
+            },
+      )
     })
 
     const candidate: Rulebook = {
@@ -449,8 +485,6 @@ export class Registry {
     }
     const changed = changedFields(existing, candidate)
     const updated: Rulebook = { ...candidate, updatedAt: at }
-    const previousAttestations = this.store.listAttestations(existing.id)
-    const previousReferences = this.store.listSchemaReferences(existing.id)
 
     this.transaction(() => {
       for (const reference of previousReferences) {
@@ -1148,7 +1182,9 @@ export class Registry {
     const description =
       input.description === undefined ? '' : requireDescription(input.description, 'description')
     const sourceUrl =
-      input.sourceUrl === undefined ? null : requireAbsoluteHttpUrl(input.sourceUrl, 'sourceUrl')
+      input.sourceUrl === undefined || input.sourceUrl === null
+        ? null
+        : requireAbsoluteHttpUrl(input.sourceUrl, 'sourceUrl')
     const provenance =
       input.provenance === undefined ? {} : requireJsonObject(input.provenance, 'provenance')
     const applicableSpec = requireText(input.applicableSpec, 'applicableSpec', MAX_SPEC_LENGTH)

@@ -23,16 +23,17 @@ import {
   type AdapterDiagnostic,
   type SupportedProfile,
 } from '../standards'
+import { isRegistryError } from '../registry/errors'
 import {
   MAX_ATTESTATIONS_PER_RULEBOOK,
-  MAX_DESCRIPTION_LENGTH,
-  MAX_INTEGRITY_LENGTH,
   MAX_NAME_LENGTH,
   MAX_SCHEMA_REFERENCES_PER_ATTESTATION,
   MAX_SPEC_LENGTH,
-  MAX_STRING_ARRAY_ITEMS,
-  MAX_TEXT_LENGTH,
-  MAX_URL_LENGTH,
+  requireAbsoluteHttpUrl,
+  requireDescription,
+  requireIntegrity,
+  requireStringArray,
+  requireText,
 } from '../registry/validation'
 
 /** Baseline used for standards-level live validation. */
@@ -97,12 +98,6 @@ interface ParseResult {
   readonly diagnostics: readonly DraftDiagnostic[]
 }
 
-const SRI_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]*-[A-Za-z0-9+/=_-]+$/
-// Tabs, newlines and carriage returns are allowed in a description; every
-// other ASCII control character is refused, mirroring the registry.
-// eslint-disable-next-line no-control-regex -- the rule's purpose is to reject these characters
-const CONTROL_CHARACTER_PATTERN = /[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/
-
 /** Placeholders used only to project an attestation into a SchemaMeta document. */
 const PLACEHOLDER_RULEBOOK_ID = '00000000-0000-4000-8000-000000000000'
 const PLACEHOLDER_RULEBOOK_URI = 'https://attestbook.invalid/rulebooks/draft'
@@ -124,65 +119,33 @@ function warning(code: string, message: string, path?: string): DraftDiagnostic 
     : { severity: 'warning', code, message, path }
 }
 
+/**
+ * Runs one registry input helper and turns its typed failure into a diagnostic.
+ * This keeps the live report's structural rules identical to the save path.
+ */
+function attempt<T>(path: string, action: () => T, diagnostics: DraftDiagnostic[]): T | undefined {
+  try {
+    return action()
+  } catch (caught) {
+    if (isRegistryError(caught)) {
+      diagnostics.push(error('invalid_member_value', caught.message, path))
+      return undefined
+    }
+    throw caught
+  }
+}
+
 function readRequiredText(
   value: unknown,
   path: string,
   maxLength: number,
   diagnostics: DraftDiagnostic[],
 ): string | undefined {
-  if (typeof value !== 'string') {
-    diagnostics.push(error('invalid_member_value', 'expected a string', path))
-    return undefined
-  }
-  const trimmed = value.trim()
-  if (trimmed === '') {
-    diagnostics.push(error('invalid_member_value', 'must not be empty', path))
-    return undefined
-  }
-  if (trimmed.length > maxLength) {
-    diagnostics.push(error('invalid_member_value', `must be at most ${maxLength} characters`, path))
-    return undefined
-  }
-  if (CONTROL_CHARACTER_PATTERN.test(trimmed)) {
-    diagnostics.push(error('invalid_member_value', 'must not contain control characters', path))
-    return undefined
-  }
-  return trimmed
+  return attempt(path, () => requireText(value, path, maxLength), diagnostics)
 }
 
 function readUrl(value: unknown, path: string, diagnostics: DraftDiagnostic[]): string | undefined {
-  if (typeof value !== 'string') {
-    diagnostics.push(error('invalid_member_value', 'expected an absolute http(s) URL', path))
-    return undefined
-  }
-  if (value.length > MAX_URL_LENGTH) {
-    diagnostics.push(
-      error('invalid_member_value', `must be at most ${MAX_URL_LENGTH} characters`, path),
-    )
-    return undefined
-  }
-  let parsed: URL
-  try {
-    parsed = new URL(value)
-  } catch {
-    diagnostics.push(error('invalid_member_value', 'must be an absolute URL', path))
-    return undefined
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    diagnostics.push(error('invalid_member_value', 'must use http or https', path))
-    return undefined
-  }
-  if (parsed.username !== '' || parsed.password !== '') {
-    diagnostics.push(error('invalid_member_value', 'must not embed credentials', path))
-    return undefined
-  }
-  if (parsed.href.length > MAX_URL_LENGTH) {
-    diagnostics.push(
-      error('invalid_member_value', `must be at most ${MAX_URL_LENGTH} characters`, path),
-    )
-    return undefined
-  }
-  return parsed.href
+  return attempt(path, () => requireAbsoluteHttpUrl(value, path), diagnostics)
 }
 
 function readSchemaReference(
@@ -203,22 +166,12 @@ function readSchemaReference(
   const uri = readUrl(value.uri, `${path}.uri`, diagnostics)
   let integrity: string | null = null
   if (value.integrity !== undefined && value.integrity !== null) {
-    if (
-      typeof value.integrity !== 'string' ||
-      value.integrity.trim() === '' ||
-      value.integrity.length > MAX_INTEGRITY_LENGTH ||
-      !SRI_PATTERN.test(value.integrity.trim())
-    ) {
-      diagnostics.push(
-        error(
-          'invalid_member_value',
-          'integrity must be a W3C SRI value such as sha256-<base64>',
-          `${path}.integrity`,
-        ),
-      )
-    } else {
-      integrity = value.integrity.trim()
-    }
+    integrity =
+      attempt(
+        `${path}.integrity`,
+        () => requireIntegrity(value.integrity, `${path}.integrity`),
+        diagnostics,
+      ) ?? null
   }
   if (formatIdentifier === undefined || uri === undefined) {
     return undefined
@@ -282,38 +235,12 @@ function readSupportedFormats(
   if (value === undefined) {
     return []
   }
-  if (!Array.isArray(value)) {
-    diagnostics.push(error('invalid_member_value', 'expected an array', path))
+  const formats = attempt(path, () => requireStringArray(value, path), diagnostics)
+  if (formats === undefined) {
     return undefined
   }
-  if (value.length > MAX_STRING_ARRAY_ITEMS) {
-    diagnostics.push(
-      error('invalid_member_value', `must contain at most ${MAX_STRING_ARRAY_ITEMS} items`, path),
-    )
-    return undefined
-  }
-  const formats: string[] = []
-  let valid = true
-  value.forEach((entry, index) => {
-    const format = readRequiredText(entry, `${path}.${index}`, MAX_TEXT_LENGTH, diagnostics)
-    if (format === undefined) {
-      valid = false
-      return
-    }
-    if (formats.includes(format)) {
-      diagnostics.push(
-        error(
-          'duplicate_format_identifier',
-          `duplicate supported format "${format}"`,
-          `${path}.${index}`,
-        ),
-      )
-      valid = false
-      return
-    }
-    formats.push(format)
-  })
-  return valid ? formats : undefined
+  // The shared helper enforces the array bound, item type and uniqueness.
+  return [...formats]
 }
 
 function readAttestation(
@@ -374,27 +301,12 @@ function parseDraftDocument(value: unknown): ParseResult {
 
   let description = ''
   if (value.description !== undefined && value.description !== null) {
-    if (typeof value.description !== 'string') {
-      diagnostics.push(error('invalid_member_value', 'expected a string', 'description'))
-    } else if (value.description.length > MAX_DESCRIPTION_LENGTH) {
-      diagnostics.push(
-        error(
-          'invalid_member_value',
-          `must be at most ${MAX_DESCRIPTION_LENGTH} characters`,
-          'description',
-        ),
-      )
-    } else if (CONTROL_CHARACTER_PATTERN.test(value.description)) {
-      diagnostics.push(
-        error(
-          'invalid_member_value',
-          'must not contain control characters other than tabs and newlines',
-          'description',
-        ),
-      )
-    } else {
-      description = value.description
-    }
+    description =
+      attempt(
+        'description',
+        () => requireDescription(value.description, 'description'),
+        diagnostics,
+      ) ?? ''
   }
 
   let sourceUrl: string | null = null

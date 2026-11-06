@@ -203,7 +203,7 @@ const attestationInputSchema = z.object({
 export const createRulebookRequestSchema = z.object({
   name: z.string(),
   description: z.string().optional(),
-  sourceUrl: z.string().optional(),
+  sourceUrl: z.string().nullable().optional(),
   applicableSpec: z.string(),
   attestations: z.array(attestationInputSchema).optional(),
   schemaReferences: z.array(schemaReferenceInputSchema).optional(),

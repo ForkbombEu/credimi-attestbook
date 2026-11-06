@@ -7,6 +7,10 @@ import { defineConfig, devices } from '@playwright/test'
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: false,
+  // One shared in-memory registry backs every spec. The editor suite creates a
+  // rulebook to exercise the authorized create flow, so specs must not run in
+  // parallel or the catalog's seeded counts would change mid-run.
+  workers: 1,
   forbidOnly: Boolean(process.env.CI),
   retries: 0,
   reporter: [['list']],

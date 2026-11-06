@@ -104,15 +104,20 @@ describe('draft JSON helpers', () => {
     expect(documentFromDraft(draft())).toEqual(DOCUMENT)
   })
 
-  test('builds a save request and clears an empty source URL', () => {
-    expect(draftRequest(EMPTY_METADATA, DOCUMENT)).toEqual({
+  test('builds one request body for create and save, omitting an empty source URL', () => {
+    const request = draftRequest(EMPTY_METADATA, DOCUMENT)
+    expect(request).toEqual({
       name: '',
       description: '',
-      sourceUrl: null,
       applicableSpec: 'ts11@1.0.1',
       attestations: DOCUMENT.attestations,
       schemaReferences: DOCUMENT.schemaReferences,
     })
+    expect(request).not.toHaveProperty('sourceUrl')
+    expect(
+      draftRequest({ ...EMPTY_METADATA, name: 'X', sourceUrl: ' https://a.example/x ' }, DOCUMENT)
+        .sourceUrl,
+    ).toBe('https://a.example/x')
   })
 
   test('summarizes diagnostics and paths', () => {

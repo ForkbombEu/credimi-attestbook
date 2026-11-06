@@ -203,6 +203,76 @@ describe('draft editor write API', () => {
     ])
   })
 
+  test('keeps registry-internal metadata when the editable projection is saved back', async () => {
+    const { app, registry, token } = setup()
+    const created = registry.createRulebook(token, {
+      name: 'Imported draft',
+      applicableSpec: 'ts11@1.0.1',
+      attestations: [
+        {
+          name: 'Imported attestation',
+          attestationLoS: 'iso_18045_high',
+          bindingType: 'key',
+          supportedFormats: ['dc+sd-jwt'],
+          metadata: { profile: 'ts11@1.0.1', conformance: 'conformant_subset' },
+          schemaReferences: [
+            {
+              formatIdentifier: 'dc+sd-jwt',
+              uri: 'https://issuer.example.org/schemas/pid',
+              metadata: { meta: { vct: 'eu.example.pid' } },
+            },
+          ],
+        },
+      ],
+    })
+
+    const draftResponse = await app.request(`/api/v1/rulebooks/${created.id}/draft`)
+    const draft = (await json<{ data: DraftRulebookResource }>(draftResponse)).data
+    const save = await app.request(`/api/v1/rulebooks/${created.id}/draft`, {
+      method: 'PUT',
+      headers: headers(token),
+      body: JSON.stringify({
+        name: draft.name,
+        description: draft.description,
+        sourceUrl: draft.sourceUrl,
+        applicableSpec: draft.applicableSpec,
+        attestations: draft.attestations,
+        schemaReferences: draft.schemaReferences,
+      }),
+    })
+    expect(save.status).toBe(200)
+
+    expect(registry.listAttestations(created.id)[0]?.metadata).toEqual({
+      profile: 'ts11@1.0.1',
+      conformance: 'conformant_subset',
+    })
+    expect(registry.listSchemaReferences(created.id)[0]?.metadata).toEqual({
+      meta: { vct: 'eu.example.pid' },
+    })
+  })
+
+  test('creates a rulebook when sourceUrl is null or omitted', async () => {
+    const { app, token } = setup()
+    const withoutUrl = {
+      name: 'No source URL',
+      description: '',
+      applicableSpec: 'ts11@1.0.1',
+      attestations: [],
+      schemaReferences: [],
+    }
+
+    for (const body of [withoutUrl, { ...withoutUrl, sourceUrl: null }]) {
+      const response = await app.request('/api/v1/rulebooks', {
+        method: 'POST',
+        headers: headers(token),
+        body: JSON.stringify(body),
+      })
+      expect(response.status).toBe(201)
+      const created = await json<{ data: { id: string; sourceUrl: string | null } }>(response)
+      expect(created.data.sourceUrl).toBeNull()
+    }
+  })
+
   test('requires a bearer token before reading the body', async () => {
     const { app, rulebookId } = setup()
     for (const authorization of [undefined, 'Bearer bogus']) {

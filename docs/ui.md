@@ -360,6 +360,10 @@ Playwright + Chromium):
   working copy, an unchanged published snapshot's exact bytes and `Content-Digest` after a
   working-copy edit, the API's `409 immutable` for a published rulebook, the read-only UI
   state, and an unchanged catalog total when the new-rulebook page renders;
+- an authorized `Create draft` with the Source URL left empty, which must navigate to the new
+  draft's editor and persist a `null` source URL; because this spec creates a rulebook in the
+  one shared in-memory registry, the Playwright suite runs with one worker and catalog specs
+  run before it;
 - full axe-core scans and 390 px viewport checks for the catalog, detail, playground and
   editor views.
 

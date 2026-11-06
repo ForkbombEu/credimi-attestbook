@@ -218,7 +218,8 @@ export interface CreateRulebookSchemaReferenceInput {
 export interface CreateRulebookInput {
   readonly name: string
   readonly description?: string
-  readonly sourceUrl?: string
+  /** `null` behaves like an omitted value, matching the draft-replace contract. */
+  readonly sourceUrl?: string | null
   /**
    * Server-computed identity of the external import entry (#31). Re-import uses
    * it to find the rulebook instead of creating a duplicate; local creates omit
