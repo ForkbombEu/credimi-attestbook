@@ -251,7 +251,7 @@ describe('public read behavior is preserved', () => {
       (candidate) => candidate.method === 'get' && !candidate.security,
     )) {
       const response = await app.request(concretePath(route, seeded.rulebookId))
-      expect([200, 404], `${route.operationId} must not require a token`).toContain(response.status)
+      expect(response.status, `${route.operationId} must be publicly readable`).toBe(200)
     }
 
     // A provider's working draft is public catalogue data by design (TS11

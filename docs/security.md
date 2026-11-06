@@ -102,6 +102,8 @@ The following rules implement that model:
   table, and tests compare it with the routes Hono actually registered.
 - Ownership is checked again inside the service (`requireOwnedRulebook`) for every mutation.
   Route-level authentication and service-level authorization are independent layers.
+- The shared 4 MiB body limit on `/api/*` runs before route authentication, so a request
+  whose declared body exceeds it is rejected with `413` without being read or authenticated.
 
 ## 5. Error consistency
 

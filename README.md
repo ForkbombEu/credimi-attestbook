@@ -103,8 +103,8 @@ implemented by the import pipeline; the version-history UI comes in a later issu
 The server opens the registry database and applies migrations at startup, so credential
 validation can read rulebooks from the same process. The versioned REST API exposes the
 implemented registry, import and validation resources; its authentication, provider
-ownership and secret-handling model is documented in [`docs/security.md`](security.md). The
-service contract, stable identifier rules,
+ownership and secret-handling model is documented in
+[`docs/security.md`](docs/security.md). The service contract, stable identifier rules,
 standards-metadata boundary, authorization model and version lifecycle are documented in
 [`docs/registry.md`](docs/registry.md).
 
