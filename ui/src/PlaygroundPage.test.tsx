@@ -1,4 +1,4 @@
-import { render, screen, waitFor, within } from '@testing-library/react'
+import { act, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 
@@ -70,6 +70,24 @@ describe('playground rulebook loading', () => {
     await user.click(screen.getByRole('button', { name: 'Retry' }))
     expect(await screen.findByLabelText('Rulebook')).toBeInTheDocument()
     expect(attempts).toBe(2)
+  })
+
+  test('keeps the rulebook selector usable when the API page is truncated', async () => {
+    const truncated: CatalogApi = {
+      ...createFakeApi(),
+      listRulebooks: async () => ({
+        data: SAMPLE_DATASET.rulebooks,
+        pagination: { limit: 100, offset: 0, total: 140 },
+      }),
+    }
+    renderPlayground(truncated)
+
+    expect(
+      await screen.findByText(
+        'Showing the first 2 of 140 rulebooks; the rulebook selector covers only these 2.',
+      ),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Rulebook')).toBeInTheDocument()
   })
 
   test('shows an empty state when no rulebook is registered', async () => {
@@ -165,6 +183,31 @@ describe('playground request form', () => {
     await user.upload(upload, oversized)
 
     expect(screen.getByText('The selected file is larger than 512 KiB.')).toBeInTheDocument()
+  })
+
+  test('ignores a file read that finishes after the form was cleared', async () => {
+    const user = userEvent.setup()
+    renderPlayground()
+    await screen.findByLabelText('Rulebook')
+
+    let resolveRead: (text: string) => void = () => undefined
+    const file = new File(['late'], 'late.txt', { type: 'text/plain' })
+    Object.defineProperty(file, 'text', {
+      value: () =>
+        new Promise<string>((resolve) => {
+          resolveRead = resolve
+        }),
+    })
+
+    await user.upload(screen.getByLabelText('Upload a credential file'), file)
+    await user.click(screen.getByRole('button', { name: 'Clear form' }))
+
+    await act(async () => {
+      resolveRead('late credential text')
+      await Promise.resolve()
+    })
+
+    expect(screen.getByLabelText('Credential')).toHaveValue('')
   })
 
   test('clears the form and any displayed result', async () => {

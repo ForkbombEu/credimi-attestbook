@@ -91,9 +91,10 @@ export function validatePlaygroundForm(values: PlaygroundFormValues): Playground
   if (values.attestationType === '') {
     errors.attestation = 'Select an attestation type.'
   }
-  if (values.credential.trim() === '') {
+  const credential = values.credential.trim()
+  if (credential === '') {
     errors.credential = 'Paste or upload a credential.'
-  } else if (values.credential.length > MAX_CREDENTIAL_LENGTH) {
+  } else if (credential.length > MAX_CREDENTIAL_LENGTH) {
     errors.credential = 'The credential must be at most 512 KiB of text.'
   }
   return errors

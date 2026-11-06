@@ -28,7 +28,11 @@ interface PlaygroundPageProps {
 
 type CatalogState =
   | { readonly status: 'loading' }
-  | { readonly status: 'ready'; readonly rulebooks: readonly Rulebook[] }
+  | {
+      readonly status: 'ready'
+      readonly rulebooks: readonly Rulebook[]
+      readonly total: number
+    }
   | { readonly status: 'error'; readonly message: string }
 
 type RelatedLoadState =
@@ -81,6 +85,9 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
   const [run, setRun] = useState<RunState>({ status: 'idle' })
   const [exported, setExported] = useState(false)
   const runController = useRef<AbortController | null>(null)
+  // Bumped whenever the form changes; a file read only applies when its token
+  // is still current, so a late read cannot overwrite a newer form state.
+  const fileReadToken = useRef(0)
 
   useEffect(() => {
     document.title = 'Credential playground · AttestBook'
@@ -96,7 +103,7 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
       .listRulebooks(controller.signal)
       .then((page) => {
         if (!controller.signal.aborted) {
-          setCatalog({ status: 'ready', rulebooks: page.data })
+          setCatalog({ status: 'ready', rulebooks: page.data, total: page.pagination.total })
         }
       })
       .catch((error: unknown) => {
@@ -168,7 +175,9 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
   }, [])
 
   const handleChange = useCallback((patch: Partial<PlaygroundFormValues>) => {
-    // Editing the request invalidates an in-flight or displayed result.
+    // Editing the request invalidates an in-flight run, a pending file read or
+    // a displayed result.
+    fileReadToken.current += 1
     runController.current?.abort()
     runController.current = null
     setValues((current) => {
@@ -193,6 +202,7 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
   }, [])
 
   const handleClear = useCallback(() => {
+    fileReadToken.current += 1
     runController.current?.abort()
     runController.current = null
     setValues(EMPTY_PLAYGROUND_FORM)
@@ -239,6 +249,8 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
 
   const handleFile = useCallback((file: File) => {
     // Reading a new file invalidates an in-flight or displayed result.
+    const readToken = fileReadToken.current + 1
+    fileReadToken.current = readToken
     runController.current?.abort()
     runController.current = null
     setFileError(null)
@@ -249,13 +261,22 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
     file
       .text()
       .then((text) => {
+        if (fileReadToken.current !== readToken) {
+          return
+        }
+        // A run started while the read was pending belongs to the previous
+        // text; abort it before replacing the credential.
+        runController.current?.abort()
+        runController.current = null
         setValues((current) => ({ ...current, credential: text }))
         setErrors({})
         setRun({ status: 'idle' })
         setExported(false)
       })
       .catch(() => {
-        setFileError('The selected file could not be read. Choose a text file and try again.')
+        if (fileReadToken.current === readToken) {
+          setFileError('The selected file could not be read. Choose a text file and try again.')
+        }
       })
   }, [])
 
@@ -322,6 +343,12 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
 
           {catalog.status === 'ready' && catalog.rulebooks.length > 0 ? (
             <>
+              {catalog.total > catalog.rulebooks.length ? (
+                <p className="notice">
+                  Showing the first {catalog.rulebooks.length} of {catalog.total} rulebooks; the
+                  rulebook selector covers only these {catalog.rulebooks.length}.
+                </p>
+              ) : null}
               <PlaygroundForm
                 rulebooks={catalog.rulebooks}
                 versions={versions}

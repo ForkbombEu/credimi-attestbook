@@ -76,9 +76,9 @@ async function readErrorMessage(response: Response, label = 'catalog'): Promise<
   return `The ${label} request failed with HTTP ${response.status}.`
 }
 
-function singleData<T>(body: unknown): T {
+function singleData<T>(body: unknown, label = 'catalog'): T {
   if (typeof body !== 'object' || body === null || !('data' in body)) {
-    throw new CatalogApiError('The catalog returned an unexpected response.', 0)
+    throw new CatalogApiError(`The ${label} returned an unexpected response.`, 0)
   }
   return (body as { readonly data: T }).data
 }
@@ -164,7 +164,7 @@ export function createHttpValidationApi(
       } catch {
         throw new CatalogApiError('The validation returned an unexpected response.', 0)
       }
-      return singleData<CredentialValidationResult>(body)
+      return singleData<CredentialValidationResult>(body, 'validation')
     },
   }
 }

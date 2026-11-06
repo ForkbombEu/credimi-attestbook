@@ -49,6 +49,17 @@ describe('form validation', () => {
     expect(errors).toEqual({ credential: 'Paste or upload a credential.' })
   })
 
+  test('measures the 512 KiB bound after trimming, matching what is sent', () => {
+    const errors = validatePlaygroundForm({
+      ...EMPTY_PLAYGROUND_FORM,
+      rulebookId: 'rulebook-pid',
+      rulebookVersion: '1.0',
+      attestationType: 'Person Identification Data',
+      credential: `${'a'.repeat(MAX_CREDENTIAL_LENGTH)}${' '.repeat(1024)}`,
+    })
+    expect(errors).toEqual({})
+  })
+
   test('rejects a credential above the 512 KiB API bound', () => {
     const errors = validatePlaygroundForm({
       ...EMPTY_PLAYGROUND_FORM,

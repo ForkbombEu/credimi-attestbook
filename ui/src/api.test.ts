@@ -3,11 +3,12 @@ import { describe, expect, test, vi } from 'vitest'
 import {
   CatalogApiError,
   createHttpCatalogApi,
+  createHttpValidationApi,
   isAbortError,
   versionContentPath,
   type FetchLike,
 } from './api'
-import { PROVIDERS } from './test/fixtures'
+import { makeValidationResult, PROVIDERS } from './test/fixtures'
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
@@ -139,5 +140,72 @@ describe('isAbortError', () => {
     expect(isAbortError(Object.assign(new Error('aborted'), { name: 'AbortError' }))).toBe(true)
     expect(isAbortError(new Error('other'))).toBe(false)
     expect(isAbortError('AbortError')).toBe(false)
+  })
+})
+
+describe('createHttpValidationApi', () => {
+  const request = {
+    rulebookId: 'rulebook-pid',
+    rulebookVersion: '1.0',
+    attestationType: 'Person Identification Data',
+    credential: 'secret-credential-artifact-value',
+  } as const
+
+  test('posts the typed request and returns the validation result', async () => {
+    const result = makeValidationResult()
+    const fetchImpl = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({ data: result })))
+    const api = createHttpValidationApi(fetchImpl)
+
+    expect(await api.validateCredential(request)).toEqual(result)
+
+    const [path, init] = fetchImpl.mock.calls[0] ?? []
+    expect(path).toBe('/api/v1/credentials/validate')
+    expect(init?.method).toBe('POST')
+    expect(init?.headers).toEqual({
+      accept: 'application/json',
+      'content-type': 'application/json',
+    })
+    expect(init?.body).toBe(JSON.stringify(request))
+    expect(path).not.toContain(request.credential)
+  })
+
+  test('surfaces the safe API error message and status', async () => {
+    const fetchImpl = vi.fn<FetchLike>(() =>
+      Promise.resolve(
+        jsonResponse(
+          { error: { code: 'invalid_input', message: 'credential must be a string' } },
+          400,
+        ),
+      ),
+    )
+
+    const error = await createHttpValidationApi(fetchImpl)
+      .validateCredential(request)
+      .catch((reason: unknown) => reason)
+
+    expect(error).toBeInstanceOf(CatalogApiError)
+    expect(error).toMatchObject({ message: 'credential must be a string', status: 400 })
+  })
+
+  test('falls back to the HTTP status when the error body is not JSON', async () => {
+    const fetchImpl = vi.fn<FetchLike>(() =>
+      Promise.resolve(new Response('upstream failure', { status: 500 })),
+    )
+
+    await expect(createHttpValidationApi(fetchImpl).validateCredential(request)).rejects.toThrow(
+      'The validation request failed with HTTP 500.',
+    )
+  })
+
+  test('rejects a non-JSON success body and an unexpected envelope', async () => {
+    const nonJson = vi.fn<FetchLike>(() => Promise.resolve(new Response('ok', { status: 200 })))
+    await expect(createHttpValidationApi(nonJson).validateCredential(request)).rejects.toThrow(
+      'The validation returned an unexpected response.',
+    )
+
+    const missingData = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({})))
+    await expect(createHttpValidationApi(missingData).validateCredential(request)).rejects.toThrow(
+      'The validation returned an unexpected response.',
+    )
   })
 })
