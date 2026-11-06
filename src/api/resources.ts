@@ -16,6 +16,7 @@ import type {
   ImportedSchemaReference,
 } from '../import'
 import type { PublicationReadiness, VersionContentDiff } from '../lifecycle'
+import type { PublicationExportManifest } from '../publication'
 import type {
   AttestationType,
   DraftContent,
@@ -33,6 +34,7 @@ import {
   importPreviewSchema,
   importResultSchema,
   providerSchema,
+  publicationExportManifestSchema,
   publicationReadinessSchema,
   rulebookSchema,
   rulebookVersionDocumentSchema,
@@ -187,6 +189,35 @@ export function toPublicationReadinessResource(
       message: check.message,
     })),
     limitations: [...readiness.limitations],
+  })
+}
+
+/** Public projection of a publication export manifest (#42). */
+export function toPublicationExportManifestResource(manifest: PublicationExportManifest) {
+  return publicationExportManifestSchema.parse({
+    format: manifest.format,
+    rulebookId: manifest.rulebookId,
+    providerId: manifest.providerId,
+    version: manifest.version,
+    status: manifest.status,
+    name: manifest.name,
+    sourceUrl: manifest.sourceUrl,
+    specVersion: manifest.specVersion,
+    mediaType: manifest.mediaType,
+    contentDigest: manifest.contentDigest,
+    byteLength: manifest.byteLength,
+    createdAt: manifest.createdAt,
+    publishedAt: manifest.publishedAt,
+    provenance: { ...manifest.provenance },
+    integrity: {
+      algorithm: manifest.integrity.algorithm,
+      verified: manifest.integrity.verified,
+    },
+    signature: {
+      status: manifest.signature.status,
+      reason: manifest.signature.reason,
+    },
+    limitations: [...manifest.limitations],
   })
 }
 

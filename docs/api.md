@@ -31,6 +31,9 @@ Implemented and exposed by this slice:
 - deterministic version comparison, authenticated draft-snapshot refresh and public
   publication-readiness checks (added by
   [issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41));
+- stable export of published/historical artifacts and a public publication export manifest
+  with the artifact digest, provenance and an explicit signature boundary (added by
+  [issue #42](https://github.com/ForkbombEu/credimi-attestbook/issues/42));
 - authenticated import preview and import of URL/JSON sources;
 - structural credential validation against a pinned rulebook version.
 
@@ -42,12 +45,14 @@ Deliberately **not** in this slice:
   to offer them;
 - provider-management HTTP routes, rate limiting and token expiry/rotation — future hardening;
   the implemented write-auth model is documented in [`docs/security.md`](security.md);
-- stable retrieval/export of published artifacts, publication signing and the remaining
-  FR-008 publication work — later slice
-  ([issue #42](https://github.com/ForkbombEu/credimi-attestbook/issues/42)). The editor's
-  draft document is a working-copy projection, not a version snapshot or a standards
-  document. The catalog, rulebook-detail, credential playground and draft-editor views are
-  documented in [`docs/ui.md`](ui.md); they are UI routes, not API routes.
+- a publication signature: no export claims one. OWF 0.5.4 signs only a bare OWF-profile
+  `SchemaMeta` compact JWS and does not implement the TS11 v1.0.1 catalogue-response JWS,
+  while a version snapshot is not a `SchemaMeta` document; the manifest reports this boundary
+  instead of inventing proprietary signing semantics
+  ([`docs/standards.md`](standards.md) §5.8 and §6.2). The editor's draft document is a
+  working-copy projection, not a version snapshot or a standards document. The catalog,
+  rulebook-detail, credential playground and draft-editor views are documented in
+  [`docs/ui.md`](ui.md); they are UI routes, not API routes.
 
 Every handler calls the real registry, import or validation service. A service that is not
 wired answers `503` with a typed code instead of a placeholder success response.
@@ -63,8 +68,9 @@ wired answers `503` with a typed code instead of a placeholder success response.
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
 - The OpenAPI document's `info.version` tracks the contract document (currently `1.3.0`,
-  additive after the lifecycle and comparison operations added by #41); it is separate from the package
-  version reported by `/health`.
+  additive after the lifecycle and comparison operations added by #41 and the publication
+  export operations added by #42); it is separate from the package version reported by
+  `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -95,14 +101,19 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `POST` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/refresh` | yes | `200` | Re-snapshot a draft version from the current working copy; an unchanged snapshot is a no-op and published/historical versions answer `409 immutable`. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/compare?to={version}` | no | `200` | Deterministic structural comparison of two snapshots. Identity fields are excluded and changes are JSON Pointer paths sorted by path. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publication-readiness` | no | `200` | Pre-publication checks and explicit limitations; never a publication or a conformance claim. |
+| `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export` | no | `200` | Download the exact immutable bytes of a published or historical artifact; `Content-Digest`, `ETag` and an attachment filename are returned. Drafts answer `409 conflict`. |
+| `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export/manifest` | no | `200` | Publication export manifest: frozen identity, digest, provenance, integrity result and the explicit signature boundary. Drafts answer `409 conflict`. |
 | `POST` | `/api/v1/imports/preview` | yes | `200` | Bounded, read-only URL/JSON import preview. |
 | `POST` | `/api/v1/imports` | yes | `200` | Import compatible entries as drafts, reporting per-entry dispositions. |
 | `POST` | `/api/v1/credentials/validate` | no | `200` | Structural credential validation with per-dimension evidence. |
 
 Representations are the public projection of the services: rulebook `provenance`,
 `metadata` and `importKey`, attestation/schema-reference `metadata` and version `provenance`
-are **never** returned. The import preview omits the importer-internal canonical document;
-that document is derived data used only to commit an import.
+are **never** returned by the catalogue and version reads. The publication export manifest is
+the one deliberate exception for version `provenance`, because FR-008 requires published
+artifacts to be associated with provenance metadata; the manifest is a product artifact, not a
+standards document. The import preview omits the importer-internal canonical document; that
+document is derived data used only to commit an import.
 
 ### 3.1 Success envelopes
 
@@ -243,6 +254,67 @@ The rulebook-status check mirrors the publish transition exactly: a draft versio
 published while its rulebook is `published` (it answers `409 immutable`) or `historical`.
 Creating the next version returns a `published` rulebook to `draft`, after which a leftover
 draft version can be published and supersedes the current published version.
+
+### 3.4 Publication export and integrity
+
+`GET /api/v1/rulebooks/{rulebookId}/versions/{version}/export` is the publication-grade
+retrieval route. It returns the exact stored bytes of a **published or historical** version,
+never a re-serialization: the bytes must still hash to the recorded digest or the request
+fails as a server fault. `Content-Digest` carries the RFC 9530 structured SHA-256 value,
+`ETag` carries the quoted hex digest, and `Content-Disposition` names the download from the
+frozen rulebook name and version label. A draft version is a working copy, not a publication
+artifact, and answers `409 conflict`. The existing `/content` route remains the unbounded
+exact-bytes read for any version, including drafts.
+
+`GET /api/v1/rulebooks/{rulebookId}/versions/{version}/export/manifest` describes the same
+artifact without copying it:
+
+```json
+{
+  "data": {
+    "format": "attestbook.publication-export@1",
+    "rulebookId": "...",
+    "providerId": "...",
+    "version": "1.0",
+    "status": "published",
+    "name": "PID Rulebook",
+    "sourceUrl": "https://issuer.example.org/rulebooks/pid",
+    "specVersion": "ts11@1.0.1",
+    "mediaType": "application/vnd.attestbook.rulebook-version+json",
+    "contentDigest": "…64 lowercase hex characters…",
+    "byteLength": 1234,
+    "createdAt": "…",
+    "publishedAt": "…",
+    "provenance": {},
+    "integrity": { "algorithm": "sha256", "verified": true },
+    "signature": {
+      "status": "unsupported",
+      "reason": "OWF 0.5.4 signs only a bare OWF-profile SchemaMeta compact JWS. …"
+    },
+    "limitations": ["…"]
+  }
+}
+```
+
+Every manifest field comes from frozen data: the version row, its provenance and the snapshot
+document. The rulebook's mutable working copy is never read, so the manifest for a published
+version is identical across repeated exports and is unaffected by later edits, a new draft
+version or supersession. `status` changes from `published` to `historical` when a newer
+version supersedes it; the digest, publication time, bytes and provenance do not change.
+
+The manifest makes **no signature claim**. The mandatory OWF package provides only a bare
+OWF-profile `SchemaMeta` compact JWS (`signSchemaMeta`/`verifySchemaMeta`), which the
+standards adapter already uses for that supported operation
+([`docs/standards-adapter.md`](standards-adapter.md) §6). A version snapshot is not a
+`SchemaMeta` document and OWF 0.5.4 does not implement the TS11 v1.0.1 catalogue-response
+JWS, so the export reports `signature.status: "unsupported"` instead of inventing a
+proprietary signature. Integrity is the SHA-256 digest, which consumers must recompute over
+the exported bytes.
+
+Publication itself stays an authenticated, owner-scoped transition
+(`POST .../publish`); the export reads are public, matching the public catalogue reads. Each
+publication writes the `version.publish` audit row with the actor provider, version,
+digest, profile and superseded versions, in the same transaction as the state change.
 
 ## 4. Errors
 

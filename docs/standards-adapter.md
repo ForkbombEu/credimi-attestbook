@@ -186,7 +186,10 @@ The following are explicitly out of scope or unsupported, and are reported rathe
 silently approximated:
 
 - TS11 catalogue response envelope signing (`{ iss, iat, data }`) and any catalogue API
-  server/client.
+  server/client. The publication export (#42, [`docs/api.md`](api.md) §3.4) therefore reports
+  `signature.status: "unsupported"` rather than signing the internal version snapshot with
+  `signSchemaMeta`, which is defined only for a bare OWF-profile `SchemaMeta`; the export
+  integrity is the SHA-256 digest of the exact bytes.
 - Certificate-chain, trust-anchor, trusted-list and `trustedAuthorities` verification
   (reported `trust_not_tested`).
 - `sha384`/`sha512` SRI verification or resolution through OWF (sha256 only). The SRI

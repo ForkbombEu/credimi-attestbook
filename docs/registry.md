@@ -5,14 +5,16 @@
 [issue #29](https://github.com/ForkbombEu/credimi-attestbook/issues/29), the initial
 bounded import slice by [issue #30](https://github.com/ForkbombEu/credimi-attestbook/issues/30)
 the idempotent re-import slice by
-[issue #31](https://github.com/ForkbombEu/credimi-attestbook/issues/31) and the lifecycle and
-comparison slice by [issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41).
+[issue #31](https://github.com/ForkbombEu/credimi-attestbook/issues/31), the lifecycle and
+comparison slice by [issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41)
+and the publication export slice by
+[issue #42](https://github.com/ForkbombEu/credimi-attestbook/issues/42).
 They provide a persistent SQLite registry for providers, rulebooks, attestation types, schema
 references, write credentials and an audit trail, plus draft/published/historical rulebook
-versions with content-addressed artifacts, SHA-256 digests, provenance and immutable
-publication, and a provider-scoped import identity that makes re-import idempotent. They are
-**not** the HTTP contract, credential validation or a conformance
-claim; see [`docs/import.md`](import.md) for the import pipeline.
+versions with content-addressed artifacts, SHA-256 digests, provenance, immutable publication
+and a reproducible publication export manifest, and a provider-scoped import identity that
+makes re-import idempotent. They are **not** the HTTP contract, credential validation or a
+conformance claim; see [`docs/import.md`](import.md) for the import pipeline.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) (FR-001, FR-002, FR-003,
 FR-008, §13, §15, §17)
@@ -69,6 +71,28 @@ Implemented by #41:
   re-taken from the current working copy, while a published or historical version stays
   immutable.
 
+Implemented by #42:
+
+- `src/publication/export.ts` builds the publication export manifest from frozen data only:
+  the version row, its provenance and the snapshot document. The rulebook working copy is
+  never read, so the export of a published version is stable across repeated reads and later
+  drafts, edits or supersession;
+- the manifest carries the frozen rulebook identity, the exact byte length, the SHA-256
+  content digest, the publication time, version provenance and an explicit
+  `integrity: { algorithm: "sha256", verified: true }` result. The digest is recomputed
+  before every export; a mismatch fails as a server fault rather than exporting corrupt
+  bytes as verified;
+- there is no publication signature: OWF 0.5.4 signs only a bare OWF-profile `SchemaMeta`
+  compact JWS, a version snapshot is not a `SchemaMeta`, and the TS11 v1.0.1
+  catalogue-response JWS is not implemented by the package. The manifest reports
+  `signature.status: "unsupported"` with the concrete reason instead of inventing
+  proprietary signing semantics (FR-008, [`docs/standards.md`](standards.md) §5.8 and §6.2);
+- the HTTP layer exposes `GET .../versions/{version}/export` (exact attachment bytes with
+  `Content-Digest`, `ETag` and a sanitised `Content-Disposition` filename) and
+  `GET .../versions/{version}/export/manifest`. Both are public and accept only published or
+  historical versions; a draft answers `409 conflict`. The existing `/content` route remains
+  the exact-bytes read for any version.
+
 Implemented by #40:
 
 - rulebook-level schema references on create (owned by no attestation type);
@@ -116,9 +140,11 @@ Deliberately **not** in #28/#29/#30/#31:
 - HTTP rate limiting, token expiry/rotation and provider-management HTTP routes — not
   implemented in Phase 1; the write API's authentication, provider ownership and secret
   handling are documented in [`docs/security.md`](security.md);
-- artifact export, publication signing and the remaining FR-008 publication surface
-  ([issue #42](https://github.com/ForkbombEu/credimi-attestbook/issues/42)); the draft
-  lifecycle, comparison and readiness checks themselves are implemented by #41;
+- a publication signature and a TS11/OWF wire-document export — the export is the frozen
+  AttestBook snapshot plus its manifest; signing is deliberately not fabricated because the
+  pinned OWF package does not support the TS11 catalogue-response JWS. The draft lifecycle,
+  comparison and readiness checks themselves are implemented by #41, and the export surface
+  by #42;
 - semantic content canonicalization — explicitly out of scope (D-6, R-17).
 
 The server opens the database and applies migrations at startup; the registry service is
@@ -373,8 +399,9 @@ the same content-addressed store.
   slice has no separate "edit version provenance" operation.
 
 Version snapshot bytes are retrievable over the public API (`GET .../versions/{version}/content`,
-with a `Content-Digest` header) and comparison is owned by #37; this slice stores the data
-needed for it.
+with a `Content-Digest` header), and published or historical artifacts additionally have the
+publication-grade `GET .../versions/{version}/export` download and `.../export/manifest`
+routes (§6.5). Comparison is owned by #37; this slice stores the data needed for it.
 
 ### 6.4 Immutability enforcement
 
@@ -403,6 +430,27 @@ append-only: deleting a draft rulebook removes its draft version rows but does n
 artifact bytes, because there is no safe way to delete content-addressed bytes in this slice.
 Garbage collection is not implemented; retention is an operator concern until a slice adds it
 explicitly.
+
+### 6.5 Publication export
+
+`src/publication/export.ts` (issue #42) turns a published or historical version into a stable
+export: the exact stored bytes plus a manifest. The manifest is assembled only from frozen
+data — the version row, its provenance and the snapshot document — so it never reads the
+rulebook's mutable working copy. Consequently:
+
+- exporting the same published version always returns the same bytes and the same manifest,
+  including after the rulebook is renamed, edited, given a new draft version or superseded;
+- supersession changes only `status` (`published` → `historical`), never the digest, byte
+  length, publication time, provenance or exported bytes;
+- the builder recomputes the SHA-256 digest over the exact bytes before producing a manifest.
+  A mismatch is a server fault; corrupt bytes are never exported as verified.
+
+The manifest's `signature.status` is always `"unsupported"` with a fixed reason. FR-008 asks
+for signing only where the standard defines it; the pinned OWF package signs a bare OWF
+`SchemaMeta` compact JWS only, while the exported artifact is AttestBook's internal snapshot.
+Using `signSchemaMeta` for it would invent proprietary signing semantics, so the registry does
+not. Integrity is the content digest, and consumers verify it themselves. The full HTTP
+contract is in [`docs/api.md`](api.md) §3.4.
 
 ## 7. Validation and failure model
 
@@ -459,13 +507,19 @@ The implementation is covered by real temporary SQLite files (not in-memory fake
   the identity from a version snapshot.
 - `src/import/` — the bounded URL/JSON import preview and authenticated draft import,
   including idempotent re-import and conflict detection; see [`docs/import.md`](import.md).
+- `src/publication/export.test.ts` — frozen manifest fields, deterministic output, the
+  absence of a fabricated signature, digest-mismatch and draft-version refusal, and safe
+  attachment filenames for untrusted rulebook names.
+- `src/api/publication.test.ts` — authorized publication and its audit row, exact exported
+  bytes with `Content-Digest`/`ETag`/`Content-Disposition`, identical repeated exports and
+  manifests, manifest stability across later draft edits, draft `409 conflict`, historical
+  export after supersession and public/missing-resource behaviour.
 
 Run the suite with `bun run check` (format, lint, strict typecheck and tests). The tests cover
-the #28/#29/#30/#31 acceptance criteria; HTTP contract coverage is added by #34 in
+the #28/#29/#30/#31/#41/#42 acceptance criteria; HTTP contract coverage is added by #34 in
 `src/api/routes.test.ts` and the generated-OpenAPI tests. The suite does **not** claim
 URL/JSON import security beyond the #30 controls, automatic source updates, scheduled
-synchronization or credential validation (#32). The UI slice (#37) still needs to expose
-version history and comparison.
+synchronization or credential validation (#32), and it does not claim a publication signature.
 
 ## 9. Related work
 

@@ -13,8 +13,9 @@ deterministic version comparison, a credential validation playground that calls 
 `POST /api/v1/credentials/validate` API, and a draft editor for rulebook creation, metadata
 editing, JSON/schema editing, live validation and the draft lifecycle (freeze, refresh,
 readiness and publish). All views are clients of the public AttestBook API. The slice does
-not add the import UI, artifact export/signing or the remaining FR-008 publication work;
-those remain #42 and later follow-ups.
+not add the import UI or a dedicated publication-export view; the extra publication export
+endpoints delivered by #42 are public API reads (the detail view keeps its exact-snapshot
+export link), and later follow-ups cover an import UI.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) §14 (UI-001/UI-002/UI-005)
 and §2.2 (independent standalone UI).
@@ -108,9 +109,12 @@ Deliberately **not** in these slices:
   for the pinned references, but UI-005 does not require an editor for them, so schema
   validation is reported **not tested** unless a schema document is supplied through the
   API directly;
-- stable artifact export beyond the existing exact-bytes link, publication signing and the
-  remaining FR-008 publication work (UI-003/UI-004, #42 and a later import-UI issue). The
-  comparison and readiness views make no conformance or publication claim of their own;
+- a dedicated publication-export view beyond the existing exact-bytes link, and a publication
+  signature. The #42 export artifact and manifest endpoints are public API reads; the UI only
+  links the exact snapshot bytes, and OWF 0.5.4 does not support the TS11 catalogue-response
+  JWS, so no signature is claimed. The remaining FR-008 publication work and the import UI
+  (UI-003/UI-004 and a later import-UI issue) stay future slices. The comparison and
+  readiness views make no conformance or publication claim of their own;
 - catalogue- or rulebook-level validation/compatibility evaluation. The catalog reports
   **Not tested** for every rulebook and the detail view repeats that result, because
   structural validation is a per-credential operation against a pinned rulebook version and
@@ -299,8 +303,8 @@ dimensions.
   summary and table semantics for the findings. It is covered by component tests and a
   Playwright spec that runs against the real server, including a full axe-core scan and a
   390 px viewport check. The version comparison and lifecycle panels are covered by their own
-  component tests and the lifecycle Playwright spec; artifact export/signing and the remaining
-  FR-008 publication work are not exposed here.
+  component tests and the lifecycle Playwright spec; a dedicated publication-export view and
+  a publication signature are not exposed here (the #42 export endpoints are API-level).
 
 ## 4. Build, serve and develop
 
@@ -494,8 +498,9 @@ The catalog and detail slices' captures remain in the same directory
   says so rather than inventing it.
 - The detail view stays a read-only projection and only links to the draft editor. Version
   comparison is a public read; lifecycle writes live in the editor's publication panel.
-  Stable artifact export beyond the exact-bytes link, signing and the remaining FR-008
-  publication work remain #42 or later slices, and readiness is not a conformance claim.
+  A dedicated publication-export view beyond the exact-bytes link, a publication signature
+  and the remaining FR-008 publication work remain later slices; the #42 export endpoints are
+  public API reads, and readiness is not a conformance claim.
 - UI responses set `X-Content-Type-Options: nosniff` and Vite assets are immutable-cached;
   a content security policy and the rest of the HTTP hardening remain
   [issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35).
