@@ -2,8 +2,9 @@
 //
 // The server serves the built entry document for `/`, `/rulebooks/*` and
 // `/playground`, so the browser path names the view and a deep link (or a
-// reload) still works. Only the Phase 1 routes exist; any other path falls back
-// to the catalog rather than rendering an empty page.
+// reload) still works. The rulebook editor is under `/rulebooks/new` and
+// `/rulebooks/<id>/edit`; any other path falls back to the catalog rather than
+// rendering an empty page.
 
 import type { AnchorHTMLAttributes, MouseEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
@@ -12,12 +13,19 @@ export type Route =
   | { readonly name: 'catalog' }
   | { readonly name: 'playground' }
   | { readonly name: 'rulebook'; readonly rulebookId: string }
+  | { readonly name: 'editor'; readonly rulebookId: string }
+  | { readonly name: 'editor-new' }
 
 export const CATALOG_PATH = '/'
 export const PLAYGROUND_PATH = '/playground'
+export const NEW_RULEBOOK_PATH = '/rulebooks/new'
 
 export function rulebookPath(rulebookId: string): string {
   return `/rulebooks/${encodeURIComponent(rulebookId)}`
+}
+
+export function rulebookEditorPath(rulebookId: string): string {
+  return `${rulebookPath(rulebookId)}/edit`
 }
 
 /** Parses a browser path into one of the known views. */
@@ -28,6 +36,18 @@ export function parseRoute(pathname: string): Route {
   }
   if (path === PLAYGROUND_PATH) {
     return { name: 'playground' }
+  }
+  if (path === NEW_RULEBOOK_PATH) {
+    return { name: 'editor-new' }
+  }
+  const editorMatch = /^\/rulebooks\/([^/]+)\/edit$/.exec(path)
+  if (editorMatch?.[1] !== undefined) {
+    try {
+      const rulebookId = decodeURIComponent(editorMatch[1])
+      return rulebookId === '' ? { name: 'catalog' } : { name: 'editor', rulebookId }
+    } catch {
+      return { name: 'catalog' }
+    }
   }
   const match = /^\/rulebooks\/([^/]+)$/.exec(path)
   if (match?.[1] === undefined) {

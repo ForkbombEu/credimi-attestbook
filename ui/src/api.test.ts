@@ -3,6 +3,7 @@ import { describe, expect, test, vi } from 'vitest'
 import {
   CatalogApiError,
   createHttpCatalogApi,
+  createHttpEditorApi,
   createHttpValidationApi,
   isAbortError,
   versionContentPath,
@@ -207,5 +208,113 @@ describe('createHttpValidationApi', () => {
     await expect(createHttpValidationApi(missingData).validateCredential(request)).rejects.toThrow(
       'The validation returned an unexpected response.',
     )
+  })
+})
+
+describe('createHttpEditorApi', () => {
+  const draft = {
+    id: 'rulebook-1',
+    providerId: 'provider-1',
+    name: 'PID Rulebook',
+    description: '',
+    sourceUrl: null,
+    applicableSpec: 'ts11@1.0.1',
+    publicationStatus: 'draft' as const,
+    attestations: [],
+    schemaReferences: [],
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
+  }
+  const request = {
+    name: 'PID Rulebook',
+    applicableSpec: 'ts11@1.0.1',
+    attestations: [],
+    schemaReferences: [],
+  }
+
+  test('reads a draft working copy from its public path', async () => {
+    const fetchImpl = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({ data: draft })))
+    const api = createHttpEditorApi(fetchImpl)
+
+    expect(await api.getDraft('rulebook-1')).toEqual(draft)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/v1/rulebooks/rulebook-1/draft',
+      expect.objectContaining({ headers: { accept: 'application/json' } }),
+    )
+  })
+
+  test('replaces a draft with a bearer token and the PUT method', async () => {
+    const fetchImpl = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({ data: draft })))
+    const api = createHttpEditorApi(fetchImpl)
+
+    expect(await api.replaceDraft('rulebook-1', request, 'att_secret')).toEqual(draft)
+    const [path, init] = fetchImpl.mock.calls[0] ?? []
+    expect(path).toBe('/api/v1/rulebooks/rulebook-1/draft')
+    expect(init).toMatchObject({
+      method: 'PUT',
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        authorization: 'Bearer att_secret',
+      },
+    })
+    expect(JSON.parse(init?.body as string)).toEqual(request)
+  })
+
+  test('creates a draft and validates one without a token', async () => {
+    const fetchImpl = vi.fn<FetchLike>((path) => {
+      if (path === '/api/v1/rulebooks') {
+        return Promise.resolve(jsonResponse({ data: draft }, 201))
+      }
+      return Promise.resolve(
+        jsonResponse({
+          data: {
+            valid: true,
+            saveable: true,
+            profile: 'ts11@1.0.1',
+            diagnostics: [],
+            limitations: [],
+          },
+        }),
+      )
+    })
+    const api = createHttpEditorApi(fetchImpl)
+
+    expect(await api.createDraft(request, 'att_secret')).toEqual(draft)
+    const [createPath, createInit] = fetchImpl.mock.calls[0] ?? []
+    expect(createPath).toBe('/api/v1/rulebooks')
+    expect(createInit?.method).toBe('POST')
+    expect((createInit?.headers as Record<string, string>).authorization).toBe('Bearer att_secret')
+
+    expect(await api.validateDraft(request)).toEqual({
+      valid: true,
+      saveable: true,
+      profile: 'ts11@1.0.1',
+      diagnostics: [],
+      limitations: [],
+    })
+    const [validatePath, validateInit] = fetchImpl.mock.calls[1] ?? []
+    expect(validatePath).toBe('/api/v1/rulebooks/validate-draft')
+    expect(validateInit?.method).toBe('POST')
+    expect((validateInit?.headers as Record<string, string>).authorization).toBeUndefined()
+  })
+
+  test('uses the safe error envelope for a rejected write', async () => {
+    const fetchImpl = vi.fn<FetchLike>(() =>
+      Promise.resolve(
+        jsonResponse(
+          { error: { code: 'immutable', message: 'Only draft rulebooks can be changed.' } },
+          409,
+        ),
+      ),
+    )
+    const api = createHttpEditorApi(fetchImpl)
+
+    await expect(api.replaceDraft('rulebook-1', request, 'att_secret')).rejects.toThrow(
+      'Only draft rulebooks can be changed.',
+    )
+    await expect(api.replaceDraft('rulebook-1', request, 'att_secret')).rejects.toMatchObject({
+      status: 409,
+    })
   })
 })

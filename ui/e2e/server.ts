@@ -18,7 +18,7 @@ import type { CreateRulebookInput } from '../../src/registry/types'
 import { CredentialValidator } from '../../src/validation'
 import { issueTestCredential, seedPublishedRulebook } from '../../src/validation/test-support'
 
-import { PID_CREDENTIAL_FIXTURE } from './fixtures'
+import { AUTHORITY_TOKEN_FIXTURE, EDITOR_TOKEN_FIXTURE, PID_CREDENTIAL_FIXTURE } from './fixtures'
 
 const port = Number(Bun.env.E2E_PORT ?? '4173')
 const database = openDatabase(':memory:')
@@ -53,6 +53,8 @@ const playgroundRulebook = seedPublishedRulebook(database, registry, {
 
 const pidCredential = await issueTestCredential()
 writeFileSync(PID_CREDENTIAL_FIXTURE, pidCredential, 'utf8')
+writeFileSync(EDITOR_TOKEN_FIXTURE, issuer.token.secret, 'utf8')
+writeFileSync(AUTHORITY_TOKEN_FIXTURE, authority.token.secret, 'utf8')
 
 function createPublished(token: string, input: CreateRulebookInput, version: string): string {
   const rulebook = registry.createRulebook(token, input)

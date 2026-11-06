@@ -108,13 +108,14 @@ describe('write operation security surface', () => {
       'importRulebooks',
       'previewImport',
       'publishRulebookVersion',
+      'replaceRulebookDraft',
     ])
 
     // Credential validation is a read-only POST and stays public.
     const publicPosts = API_ROUTES.filter(
       (route) => route.method === 'post' && !route.security,
     ).map((route) => route.operationId)
-    expect(publicPosts).toEqual(['validateCredential'])
+    expect(publicPosts).toEqual(['validateRulebookDraft', 'validateCredential'])
   })
 
   test('every protected route rejects missing, malformed, unknown and revoked credentials', async () => {

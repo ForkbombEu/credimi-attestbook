@@ -86,11 +86,20 @@ The following rules implement that model:
 | `GET /api/v1/rulebooks`, `GET /api/v1/rulebooks/{id}` | no | n/a | `404` for an unknown id |
 | `GET …/attestations`, `…/schema-references`, `…/versions`, `…/versions/{version}`, `…/content` | no | n/a | `404` for an unknown resource |
 | `POST /api/v1/rulebooks` | yes | New rulebook is owned by the actor; the body cannot set its provider | `401`; `400` for invalid input |
+| `GET /api/v1/rulebooks/{id}/draft` | no | Public working-copy projection; no internal metadata | `404` for an unknown id |
+| `PUT /api/v1/rulebooks/{id}/draft` | yes | Actor must own the stored rulebook and its working copy must be `draft` | `401`; `403` when foreign; `409 immutable` for published/historical; `400` for invalid input |
+| `POST /api/v1/rulebooks/validate-draft` | no | Read-only, pure validation; writes nothing | `400` for a non-JSON body; `413` over the body limit |
 | `POST …/versions` | yes | Actor must own the stored rulebook | `401`; `403` when foreign; `409` for a duplicate label or immutable state |
 | `POST …/versions/{version}/publish` | yes | Actor must own the stored rulebook; ownership is checked before replay and version lookup | `401`; `403` when foreign; `404` only for the owner; `409` for stale or immutable state |
 | `POST /api/v1/imports/preview` | yes | No write; the token gates the outbound fetch | `401`; `400`/`422`/`502` for the source |
 | `POST /api/v1/imports` | yes | Import identity and created drafts are scoped to the actor's provider | `401`; `422` for a refused source |
 | `POST /api/v1/credentials/validate` | no | Read-only, public by design | `400`/`404`/`503` |
+
+The browser editor never persists its provider token: it lives in the app's React memory for
+the current page session only, is sent only in the `Authorization` header of the save request,
+and is cleared by a full page reload. It is never placed in a URL, request body, browser
+storage, log or rendered document, and the live-validation endpoint is public because it
+writes nothing.
 
 ## 4. How protection is enforced
 

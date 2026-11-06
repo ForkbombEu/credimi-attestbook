@@ -176,3 +176,85 @@ export interface ValidateCredentialRequest {
   readonly attestationType: string
   readonly credential: string | { readonly format: CredentialFormatHint; readonly value: string }
 }
+
+// ------------------------------------------------------ rulebook draft editor
+//
+// Wire types of the draft editor API (issue #40). They mirror the public
+// projections in `src/api/schemas.ts`: the draft document carries the working
+// copy only, never registry-internal provenance, metadata or tokens.
+
+export interface DraftSchemaReference {
+  readonly formatIdentifier: string
+  readonly uri: string
+  readonly integrity: string | null
+}
+
+export interface DraftAttestation {
+  readonly name: string
+  readonly attestationLoS: string
+  readonly bindingType: string
+  readonly supportedFormats: readonly string[]
+  readonly schemaReferences: readonly DraftSchemaReference[]
+}
+
+export interface DraftRulebook {
+  readonly id: string
+  readonly providerId: string
+  readonly name: string
+  readonly description: string
+  readonly sourceUrl: string | null
+  readonly applicableSpec: string
+  readonly publicationStatus: PublicationStatus
+  readonly attestations: readonly DraftAttestation[]
+  readonly schemaReferences: readonly DraftSchemaReference[]
+  readonly createdAt: string
+  readonly updatedAt: string
+}
+
+/** The part of the draft edited as JSON: attestation types and references. */
+export interface DraftContentDocument {
+  readonly attestations: readonly DraftAttestation[]
+  readonly schemaReferences: readonly DraftSchemaReference[]
+}
+
+export interface DraftSchemaReferenceInput {
+  readonly formatIdentifier: string
+  readonly uri: string
+  readonly integrity?: string
+}
+
+export interface DraftAttestationInput {
+  readonly name: string
+  readonly attestationLoS: string
+  readonly bindingType: string
+  readonly supportedFormats?: readonly string[]
+  readonly schemaReferences?: readonly DraftSchemaReferenceInput[]
+}
+
+/** Full draft document submitted to create, replace or validate. */
+export interface SaveDraftRequest {
+  readonly name: string
+  readonly description?: string
+  readonly sourceUrl?: string | null
+  readonly applicableSpec: string
+  readonly attestations?: readonly DraftAttestationInput[]
+  readonly schemaReferences?: readonly DraftSchemaReferenceInput[]
+}
+
+export type DraftDiagnosticSeverity = 'error' | 'warning'
+
+export interface DraftDiagnostic {
+  readonly severity: DraftDiagnosticSeverity
+  readonly code: string
+  readonly message: string
+  readonly path?: string
+}
+
+export interface DraftValidationReport {
+  readonly valid: boolean
+  /** Whether structural rules allow a save; standards warnings/errors do not block it. */
+  readonly saveable: boolean
+  readonly profile: 'ts11@1.0.1' | 'owf@0.5.4' | null
+  readonly diagnostics: readonly DraftDiagnostic[]
+  readonly limitations: readonly string[]
+}

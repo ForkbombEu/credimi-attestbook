@@ -206,11 +206,90 @@ export const createRulebookRequestSchema = z.object({
   sourceUrl: z.string().optional(),
   applicableSpec: z.string(),
   attestations: z.array(attestationInputSchema).optional(),
+  schemaReferences: z.array(schemaReferenceInputSchema).optional(),
 })
 
 export const createRulebookVersionRequestSchema = z.object({
   version: z.string(),
 })
+
+// ------------------------------------------------------- rulebook editor
+
+/** A schema reference as edited in a draft document (id belongs to the registry). */
+export const draftSchemaReferenceSchema = z.object({
+  formatIdentifier: z.string(),
+  uri: z.string(),
+  integrity: nullableString,
+})
+
+/** An attestation type as edited in a draft document. */
+export const draftAttestationSchema = z.object({
+  name: z.string(),
+  attestationLoS: z.string(),
+  bindingType: z.string(),
+  supportedFormats: z.array(z.string()),
+  schemaReferences: z.array(draftSchemaReferenceSchema),
+})
+
+/** The draft working copy as one editable document. */
+export const draftRulebookSchema = z.object({
+  id: z.string(),
+  providerId: z.string(),
+  name: z.string(),
+  description: z.string(),
+  sourceUrl: nullableString,
+  applicableSpec: z.string(),
+  publicationStatus: PUBLICATION_STATUS_SCHEMA,
+  attestations: z.array(draftAttestationSchema),
+  schemaReferences: z.array(draftSchemaReferenceSchema),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+})
+
+export const draftRulebookResponseSchema = z.object({ data: draftRulebookSchema })
+
+const draftSchemaReferenceInputSchema = z.object({
+  formatIdentifier: z.string(),
+  uri: z.string(),
+  integrity: z.string().optional(),
+})
+
+const draftAttestationInputSchema = z.object({
+  name: z.string(),
+  attestationLoS: z.string(),
+  bindingType: z.string(),
+  supportedFormats: z.array(z.string()).optional(),
+  schemaReferences: z.array(draftSchemaReferenceInputSchema).optional(),
+})
+
+export const saveDraftRequestSchema = z.object({
+  name: z.string(),
+  description: z.string().optional(),
+  sourceUrl: z.string().nullable().optional(),
+  applicableSpec: z.string(),
+  attestations: z.array(draftAttestationInputSchema).optional(),
+  schemaReferences: z.array(draftSchemaReferenceInputSchema).optional(),
+})
+
+/** Validation uses the same document shape as a save; nothing is persisted. */
+export const validateDraftRequestSchema = saveDraftRequestSchema
+
+export const draftDiagnosticSchema = z.object({
+  severity: z.enum(['error', 'warning']),
+  code: z.string(),
+  message: z.string(),
+  path: z.string().optional(),
+})
+
+export const draftValidationSchema = z.object({
+  valid: z.boolean(),
+  saveable: z.boolean(),
+  profile: z.enum(['ts11@1.0.1', 'owf@0.5.4']).nullable(),
+  diagnostics: z.array(draftDiagnosticSchema),
+  limitations: z.array(z.string()),
+})
+
+export const draftValidationResponseSchema = z.object({ data: draftValidationSchema })
 
 export const importSourceSchema = z.union([
   z.object({
@@ -462,6 +541,13 @@ export const OPENAPI_COMPONENTS = {
   RulebookVersionDocument: rulebookVersionDocumentSchema,
   CreateRulebookRequest: createRulebookRequestSchema,
   CreateRulebookVersionRequest: createRulebookVersionRequestSchema,
+  DraftRulebook: draftRulebookSchema,
+  DraftRulebookResponse: draftRulebookResponseSchema,
+  SaveDraftRequest: saveDraftRequestSchema,
+  ValidateDraftRequest: validateDraftRequestSchema,
+  DraftDiagnostic: draftDiagnosticSchema,
+  DraftValidation: draftValidationSchema,
+  DraftValidationResponse: draftValidationResponseSchema,
   ImportRequest: importRequestSchema,
   ImportPreview: importPreviewSchema,
   ImportPreviewResponse: importPreviewResponseSchema,
@@ -482,6 +568,8 @@ export type OpenApiComponentName = keyof typeof OPENAPI_COMPONENTS
 const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
   'CreateRulebookRequest',
   'CreateRulebookVersionRequest',
+  'SaveDraftRequest',
+  'ValidateDraftRequest',
   'ImportRequest',
   'ValidateCredentialRequest',
 ])
@@ -506,6 +594,10 @@ export type AttestationDetailResource = z.infer<typeof attestationDetailSchema>
 export type SchemaReferenceResource = z.infer<typeof schemaReferenceSchema>
 export type RulebookVersionResource = z.infer<typeof rulebookVersionSchema>
 export type RulebookVersionDocumentResource = z.infer<typeof rulebookVersionDocumentSchema>
+export type DraftRulebookResource = z.infer<typeof draftRulebookSchema>
+export type DraftDiagnosticResource = z.infer<typeof draftDiagnosticSchema>
+export type DraftValidationResource = z.infer<typeof draftValidationSchema>
+export type SaveDraftRequestResource = z.infer<typeof saveDraftRequestSchema>
 export type RulebookPageResource = z.infer<typeof rulebookPageSchema>
 export type ImportPreviewResource = z.infer<typeof importPreviewSchema>
 export type ImportResultResource = z.infer<typeof importResultSchema>

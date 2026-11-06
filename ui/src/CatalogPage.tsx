@@ -7,6 +7,7 @@ import { CatalogFilterBar } from './components/CatalogFilters'
 import { CatalogTable } from './components/CatalogTable'
 import { EmptyState, ErrorState, LoadingState } from './components/CatalogStates'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { AppLink, NEW_RULEBOOK_PATH } from './router'
 
 interface CatalogPageProps {
   readonly api: CatalogApi
@@ -78,6 +79,15 @@ export function CatalogPage({ api, onNavigate }: CatalogPageProps) {
           <p className="lede">
             Browse attestation rulebooks by provider, version, publication status and attestation
             type. Every entry comes from the public AttestBook API.
+          </p>
+          <p className="page-heading__actions">
+            <AppLink
+              className="button button--primary"
+              href={NEW_RULEBOOK_PATH}
+              onNavigate={onNavigate}
+            >
+              New rulebook
+            </AppLink>
           </p>
         </div>
 

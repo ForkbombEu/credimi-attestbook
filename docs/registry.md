@@ -46,6 +46,13 @@ Implemented by #29 (`migrations/0002_versions_artifacts.sql`):
 - version provenance recorded on every version and a publication audit entry recording who
   published which digest under which profile, and which versions were superseded.
 
+Implemented by #40:
+
+- rulebook-level schema references on create (owned by no attestation type);
+- `getDraftContent` and `replaceDraftContent`: the draft working copy is readable and
+  replaceable as one document through the same normalized rows, in one authorized
+  transaction, without touching version snapshots or their content-addressed artifacts.
+
 Implemented by #30:
 
 - `RulebookImporter` creates drafts from a compatible, bounded URL/JSON preview through
@@ -271,6 +278,7 @@ copy:
 | `createRulebookVersion(rulebookId, { version, provenance? })` | owning provider; rulebook not `historical`; unique SemVer label | snapshots current content as a `draft` version; reopens a `published` rulebook to `draft` |
 | `refreshDraftRulebookVersion(rulebookId, version)` | owning provider; version is `draft` | re-snapshots current content and updates the digest; no-op for identical content |
 | `publishRulebookVersion(rulebookId, version)` | owning provider; version is `draft`; stored digest matches current content | freezes the version as `published`, demotes previously published versions to `historical`, sets the rulebook to `published` |
+| `replaceDraftContent(rulebookId, document)` | owning provider; rulebook's working copy is `draft` | replaces metadata, attestation types and schema references in one transaction; frozen/published version rows and artifacts are untouched, and a later publish of a stale draft version still answers `conflict` until it is refreshed |
 | `deleteRulebook(rulebookId)` | owning provider; rulebook is `draft` and has no published/historical versions | deletes draft versions; published/historical rows can never be deleted |
 
 `historical` is only produced by supersession: a version that was never published cannot jump
@@ -286,6 +294,12 @@ with content that changed after the provider froze it.
 Supersession follows **publication order**, not a SemVer comparison: this slice does not
 require a new label to be numerically greater, so publishing `0.9` after `2.0` still makes
 `2.0` historical. Authoring/ordering policy is left to the editor slice.
+
+`replaceDraftContent` validates and builds the whole document before its transaction, so a
+failed validation leaves the previous working copy byte-for-byte intact. It deletes and
+re-inserts the mutable working-copy rows (with audit entries), never version or artifact
+rows; `requireOwnedDraft` refuses published and historical rulebooks with `immutable`. This
+is the service guarantee behind UI-003's "no published artifact mutation".
 
 While the next draft is in progress, the rulebook's catalogue `publicationStatus` is `draft`
 even though a published version remains retrievable. The versioned API exposes the full

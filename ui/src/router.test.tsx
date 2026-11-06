@@ -2,7 +2,14 @@ import { act, render, renderHook, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
-import { AppLink, parseRoute, rulebookPath, useRoute } from './router'
+import {
+  AppLink,
+  NEW_RULEBOOK_PATH,
+  parseRoute,
+  rulebookEditorPath,
+  rulebookPath,
+  useRoute,
+} from './router'
 
 function resetPath(path = '/'): void {
   window.history.replaceState({}, '', path)
@@ -42,6 +49,32 @@ describe('parseRoute', () => {
   test('builds encoded detail paths', () => {
     expect(rulebookPath('rulebook-pid')).toBe('/rulebooks/rulebook-pid')
     expect(rulebookPath('rulebook/with space')).toBe('/rulebooks/rulebook%2Fwith%20space')
+  })
+
+  test('maps the new-rulebook and edit-draft paths', () => {
+    expect(parseRoute('/rulebooks/new')).toEqual({ name: 'editor-new' })
+    expect(parseRoute('/rulebooks/new/')).toEqual({ name: 'editor-new' })
+    expect(parseRoute('/rulebooks/rulebook-pid/edit')).toEqual({
+      name: 'editor',
+      rulebookId: 'rulebook-pid',
+    })
+    expect(parseRoute('/rulebooks/rulebook%2Fwith%20space/edit')).toEqual({
+      name: 'editor',
+      rulebookId: 'rulebook/with space',
+    })
+    expect(parseRoute('/rulebooks/%E0%A4%A/edit')).toEqual({ name: 'catalog' })
+    expect(parseRoute('/rulebooks/new/edit')).toEqual({
+      name: 'editor',
+      rulebookId: 'new',
+    })
+  })
+
+  test('builds encoded editor paths', () => {
+    expect(NEW_RULEBOOK_PATH).toBe('/rulebooks/new')
+    expect(rulebookEditorPath('rulebook-pid')).toBe('/rulebooks/rulebook-pid/edit')
+    expect(rulebookEditorPath('rulebook/with space')).toBe(
+      '/rulebooks/rulebook%2Fwith%20space/edit',
+    )
   })
 })
 

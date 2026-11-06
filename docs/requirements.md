@@ -34,7 +34,7 @@ split from the closed duplicates #15–#19.
 | FR-004 | External rulebook import: URL/JSON, preview, structural validation, compatibility, provenance, safe re-import | Phase 1: #30, #31, #36 | Adapter-based; no assumed full TS11 conformance (R4.4) |
 | FR-005 | Catalog synchronization: conditional fetch, idempotency, change detection, conflict reporting, availability | Phase 1 partial: #31; full sync later | Scheduled sync and source diagnostics are not an MVP dependency |
 | FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #43 | Not authoritative for rulebooks |
-| FR-007 | Rulebook editor and authoring workflow | Phase 2: #40, #41 | UI-003; not Phase 1 |
+| FR-007 | Rulebook editor and authoring workflow | Phase 2: #40 (working-copy editor and live validation), #41 (lifecycle/diff) | UI-003; not Phase 1; publication remains #42 |
 | FR-008 | Publication of validated, versioned, reproducible artifacts with provenance/integrity | Phase 1 subset: #29; full workflow Phase 2: #42 | Where signing applies, use OWF behind the JOSE policy |
 | FR-009 | Reusable validation API with structured results and evidence | Phase 1: #32, #33 | SD-JWT VC structural scope; per-dimension evidence and limitations added in #33 |
 | FR-010 | Eight independent validation dimensions | Phase 1: #33 | No dimension PASS without execution; applicability table in `docs/validation.md` §2 |
@@ -57,7 +57,7 @@ split from the closed duplicates #15–#19.
 | --- | --- | --- |
 | UI-001 | Rulebook catalog with search/filter, provider, version, status, source, compatibility | Phase 1: #36 |
 | UI-002 | Rulebook details, attestation types, schema references, compatibility, version history, provenance | Phase 1: #37 |
-| UI-003 | Rulebook editor, live validation, diff, draft management, publication | Phase 2: #40, #41, #42 |
+| UI-003 | Rulebook editor, live validation, diff, draft management, publication | Phase 2: #40 (editor and live validation), #41 (diff/lifecycle), #42 (publication) |
 | UI-004 | Import interface: URL/file, preview, diagnostics, conflict resolution, sync settings | Phase 2+ follow-up (not in #40–#42); API import lands in #30/#31 |
 | UI-005 | Credential playground: input/upload, rulebook/type selection, validation, violations, export | Phase 1: #38 |
 | UI-006 | Capture explorer (mock-backed until real contracts exist) | Phase 4: #48 |

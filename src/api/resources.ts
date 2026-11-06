@@ -17,6 +17,7 @@ import type {
 } from '../import'
 import type {
   AttestationType,
+  DraftContent,
   Provider,
   Rulebook,
   RulebookVersion,
@@ -27,6 +28,7 @@ import type { CredentialValidationResult } from '../validation'
 import {
   attestationDetailSchema,
   credentialValidationResultSchema,
+  draftRulebookSchema,
   importPreviewSchema,
   importResultSchema,
   providerSchema,
@@ -85,6 +87,54 @@ export function toAttestationResource(
     createdAt: attestation.createdAt,
     schemaReferences: schemaReferences.map(toSchemaReferenceResource),
   })
+}
+
+/** Public editable projection of one draft working copy (#40). */
+export function toDraftRulebookResource(content: DraftContent) {
+  const { rulebook, attestations, schemaReferences } = content
+  const referencesByAttestation = new Map<string, SchemaReference[]>()
+  const rulebookLevel: SchemaReference[] = []
+  for (const reference of schemaReferences) {
+    if (reference.attestationId === null) {
+      rulebookLevel.push(reference)
+      continue
+    }
+    const existing = referencesByAttestation.get(reference.attestationId)
+    if (existing === undefined) {
+      referencesByAttestation.set(reference.attestationId, [reference])
+    } else {
+      existing.push(reference)
+    }
+  }
+  return draftRulebookSchema.parse({
+    id: rulebook.id,
+    providerId: rulebook.providerId,
+    name: rulebook.name,
+    description: rulebook.description,
+    sourceUrl: rulebook.sourceUrl,
+    applicableSpec: rulebook.applicableSpec,
+    publicationStatus: rulebook.publicationStatus,
+    attestations: attestations.map((attestation) => ({
+      name: attestation.name,
+      attestationLoS: attestation.attestationLoS,
+      bindingType: attestation.bindingType,
+      supportedFormats: [...attestation.supportedFormats],
+      schemaReferences: (referencesByAttestation.get(attestation.id) ?? []).map(
+        toDraftSchemaReferenceResource,
+      ),
+    })),
+    schemaReferences: rulebookLevel.map(toDraftSchemaReferenceResource),
+    createdAt: rulebook.createdAt,
+    updatedAt: rulebook.updatedAt,
+  })
+}
+
+function toDraftSchemaReferenceResource(reference: SchemaReference) {
+  return {
+    formatIdentifier: reference.formatIdentifier,
+    uri: reference.uri,
+    integrity: reference.integrity,
+  }
 }
 
 export function toRulebookVersionResource(version: RulebookVersion) {

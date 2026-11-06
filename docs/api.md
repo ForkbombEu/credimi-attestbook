@@ -24,7 +24,10 @@ Implemented and exposed by this slice:
 - the public provider projection used by the catalog UI (added by
   [issue #36](https://github.com/ForkbombEu/credimi-attestbook/issues/36));
 - exact snapshot bytes and the content digest of one version;
-- authenticated create of a draft rulebook, create of a draft version and publication;
+- authenticated create of a draft rulebook (including rulebook-level schema references),
+  create of a draft version and publication;
+- public read, authenticated full replacement and public live validation of a draft working
+  copy (added by [issue #40](https://github.com/ForkbombEu/credimi-attestbook/issues/40));
 - authenticated import preview and import of URL/JSON sources;
 - structural credential validation against a pinned rulebook version.
 
@@ -36,9 +39,11 @@ Deliberately **not** in this slice:
   to offer them;
 - provider-management HTTP routes, rate limiting and token expiry/rotation — future hardening;
   the implemented write-auth model is documented in [`docs/security.md`](security.md);
-- rulebook editor, version comparison/diff and import UI — later slices (#40–#42). The
-  catalog, rulebook-detail and credential-playground views are documented in
-  [`docs/ui.md`](ui.md); they are UI routes, not API routes.
+- draft lifecycle transitions, version comparison/diff, publication readiness and export —
+  later slices (#41 and #42). The editor's draft document is a working-copy projection, not
+  a version snapshot or a standards document. The catalog, rulebook-detail, credential
+  playground and draft-editor views are documented in [`docs/ui.md`](ui.md); they are UI
+  routes, not API routes.
 
 Every handler calls the real registry, import or validation service. A service that is not
 wired answers `503` with a typed code instead of a placeholder success response.
@@ -53,8 +58,9 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.1.0`, after the additive public provider read added by #36);
-  it is separate from the package version reported by `/health`.
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.2.0`,
+  additive after the draft-editor operations added by #40); it is separate from the package
+  version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -70,8 +76,11 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `GET` | `/health` | no | `200` | Liveness and build version (unversioned). |
 | `GET` | `/api/v1/providers` | no | `200` | Public provider projection (`id`, `name`, `createdAt`) used by the catalog UI. |
 | `GET` | `/api/v1/rulebooks` | no | `200` | Filtered, paginated catalogue listing. Query parameters: `providerId`, `status`, `limit` (default 50, max 100), `offset` (default 0). |
-| `POST` | `/api/v1/rulebooks` | yes | `201` + `Location` | Create a draft rulebook, its attestation types and their schema references. |
+| `POST` | `/api/v1/rulebooks` | yes | `201` + `Location` | Create a draft rulebook, its attestation types and their schema references. An optional top-level `schemaReferences` array adds rulebook-level references. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}` | no | `200` | One rulebook's public product metadata. |
+| `GET` | `/api/v1/rulebooks/{rulebookId}/draft` | no | `200` | The draft working copy as one editable document (metadata, attestation types with references, rulebook-level references). |
+| `PUT` | `/api/v1/rulebooks/{rulebookId}/draft` | yes | `200` | Full replacement of the owning provider's draft working copy. `409 immutable` for a published/historical rulebook; frozen version snapshots and artifacts are never changed. |
+| `POST` | `/api/v1/rulebooks/validate-draft` | no | `200` | Read-only live validation of an unsaved draft document: structural findings plus TS11 v1.0.1 adapter findings and explicit limitations. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/attestations` | no | `200` | Attestation types of the working copy, each with its schema references. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/schema-references` | no | `200` | Every schema reference of the working copy, including rulebook-level references. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions` | no | `200` | Draft, published and historical versions in creation order. |
@@ -112,6 +121,83 @@ tokens are never exposed.
 a `Location` header pointing at the canonical GET path. The other writes and imports return
 `200` with the resulting representation.
 
+### 3.2 Draft editor documents
+
+The editor works on the normalized working copy through one document, not on a version
+snapshot and not on a TS11/OWF wire document:
+
+```json
+{
+  "id": "...",
+  "providerId": "...",
+  "name": "PID Rulebook",
+  "description": "...",
+  "sourceUrl": "https://issuer.example.org/rulebooks/pid",
+  "applicableSpec": "ts11@1.0.1",
+  "publicationStatus": "draft",
+  "attestations": [
+    {
+      "name": "Person Identification Data",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": ["dc+sd-jwt"],
+      "schemaReferences": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://issuer.example.org/schemas/pid",
+          "integrity": null
+        }
+      ]
+    }
+  ],
+  "schemaReferences": [],
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+`PUT /api/v1/rulebooks/{rulebookId}/draft` replaces the whole document in one transaction:
+rulebook metadata, attestation types and both per-attestation and rulebook-level schema
+references. Internal provenance, metadata, the import identity and publication state are not
+accepted from the caller; a whitelist projection strips them first. The write is
+**idempotent** (the same document produces the same working copy), authorized by the owning
+provider's bearer token, and allowed only while the rulebook's working copy status is
+`draft`. Published and historical rulebooks answer `409 immutable`; an invalid document
+answers `400` and leaves the previous working copy untouched. Editing a rulebook that has
+published versions never mutates those snapshots or their content-addressed artifacts.
+
+`POST /api/v1/rulebooks/validate-draft` takes the same document shape minus the registry
+ids and writes nothing. Its report is:
+
+```json
+{
+  "data": {
+    "valid": false,
+    "saveable": true,
+    "profile": "ts11@1.0.1",
+    "diagnostics": [
+      {
+        "severity": "error",
+        "code": "invalid_member_value",
+        "message": "format \"mso_mdoc\" is not listed in supportedFormats",
+        "path": "attestations.0.schemaReferences.0.formatIdentifier"
+      }
+    ],
+    "limitations": ["Live standards validation covers the TS11 v1.0.1 baseline; ..."]
+  }
+}
+```
+
+`valid` is true only when no structural or standards-level error is present. `saveable`
+distinguishes structural failures, which block the `PUT`, from standards findings: the
+registry stores profile enumerations as extensible text (decision D-5), so an out-of-baseline
+value is reported but does not prevent persisting a work-in-progress draft. `profile` is
+`null` when the document's `applicableSpec` is outside the implemented TS11 v1.0.1 live
+checks. Standards validation projects each attestation type into a SchemaMeta document (the
+source URL stands in for the rulebook URI; a fixed placeholder is used when no source URL is
+set) and runs the real adapter, so the editor reports actual adapter findings rather than a
+second hand-written rule set. It makes no TS11 or ETSI conformance claim.
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -139,6 +225,7 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Registry / publish handler | authenticated provider does not own the resource | `403` | `forbidden` |
 | API / registry | resource does not exist | `404` | `not_found` |
 | Registry | duplicate version label, stale draft snapshot | `409` | `conflict` |
+| Registry / draft editor | published or historical rulebook cannot be edited | `409` | `immutable` |
 | Registry / publish handler | published/historical immutability, historical republication | `409` | `immutable` |
 | Body limit middleware | body larger than 4 MiB | `413` | `payload_too_large` |
 | Import | unsafe/malformed/unsupported source, limits, refused import | `422` | `import_rejected` |
@@ -190,6 +277,8 @@ Phase 1 supports idempotency where the domain provides a deterministic identity;
 | `POST /api/v1/imports` | **Idempotent for unchanged content.** Each source entry has a deterministic import identity, so re-importing the same normalized entry is a `200` with disposition `unchanged` and no write. Changed content is reported as a `conflict` and never overwrites local or published content. A URL preview's `retrievedAt` changes between calls, but that is provenance, not identity. |
 | `POST .../versions/{version}/publish` | **Idempotent replay while the version is published:** the same call returns `200` and the published representation, and does not create another version. A version superseded to `historical` answers `409 immutable` and is never resurrected. |
 | `POST /api/v1/rulebooks` | **Not idempotent.** There is no server-side deduplication of authored rulebooks; a retried request can create a second draft. Clients that need a stable identity should use the import path or reconcile by `id`. |
+| `PUT /api/v1/rulebooks/{rulebookId}/draft` | **Idempotent full replacement.** The same authorized document produces the same working copy; a retried request does not create a duplicate rulebook. A published/historical rulebook still answers `409 immutable`. |
+| `POST /api/v1/rulebooks/validate-draft` | Read-only and side-effect free; safe to retry. |
 | `POST /api/v1/rulebooks/{rulebookId}/versions` | **Not idempotent.** A duplicate label is `409 conflict`; the client chooses the next label after a conflict. |
 | `POST /api/v1/imports/preview` | Read-only and side-effect free, but authenticated because a URL preview performs a bounded outbound fetch; safe to retry. |
 | `POST /api/v1/credentials/validate` | Read-only; safe to retry. |

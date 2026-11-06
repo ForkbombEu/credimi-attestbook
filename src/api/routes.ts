@@ -9,11 +9,16 @@
 import type { Context, Hono } from 'hono'
 
 import packageJson from '../../package.json'
+import { validateDraftContent } from '../editor'
 import { RulebookImporter } from '../import'
 import type { ImportPreview, ImportResult, ImportSource } from '../import'
 import type { Registry } from '../registry/registry'
 import { invalidInput, unauthorized } from '../registry/errors'
-import type { CreateRulebookInput, CreateRulebookVersionInput } from '../registry/types'
+import type {
+  CreateRulebookInput,
+  CreateRulebookVersionInput,
+  ReplaceDraftContentInput,
+} from '../registry/types'
 import { CREDENTIAL_VALIDATION_PATH, type CredentialValidationService } from '../validation'
 
 import { apiError } from './errors'
@@ -21,6 +26,7 @@ import type { OpenApiComponentName } from './schemas'
 import {
   assertVersionDocument,
   toAttestationResource,
+  toDraftRulebookResource,
   toProviderResource,
   toCredentialValidationResource,
   toImportPreviewResource,
@@ -42,6 +48,9 @@ export type ApiOperationId =
   | 'listProviders'
   | 'listRulebooks'
   | 'getRulebook'
+  | 'getRulebookDraft'
+  | 'replaceRulebookDraft'
+  | 'validateRulebookDraft'
   | 'listRulebookAttestations'
   | 'listRulebookSchemaReferences'
   | 'listRulebookVersions'
@@ -82,7 +91,7 @@ export interface ApiRequestBodySpec {
 
 export interface ApiRouteSpec {
   readonly operationId: ApiOperationId
-  readonly method: 'get' | 'post'
+  readonly method: 'get' | 'post' | 'put'
   readonly path: string
   readonly summary: string
   readonly description: string
@@ -239,6 +248,70 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     responses: [
       { status: 200, description: 'The rulebook.', schema: 'RulebookResponse' },
       ...errors(400, 404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'getRulebookDraft',
+    method: 'get',
+    path: '/api/v1/rulebooks/:rulebookId/draft',
+    summary: 'Get one rulebook’s draft working copy',
+    description:
+      'Public read of the working copy as one editable document: metadata, attestation types with their schema references, and rulebook-level schema references. It is the same data as the per-resource reads and carries no registry-internal metadata.',
+    tag: 'rulebooks',
+    security: false,
+    parameters: pathParameters(['rulebookId']),
+    responses: [
+      { status: 200, description: 'The draft working copy.', schema: 'DraftRulebookResponse' },
+      ...errors(400, 404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'replaceRulebookDraft',
+    method: 'put',
+    path: '/api/v1/rulebooks/:rulebookId/draft',
+    summary: 'Replace one rulebook’s draft working copy',
+    description:
+      'Authenticated full replacement of the owning provider’s draft working copy. Only a draft rulebook can be changed; published and historical rulebooks answer 409 and frozen version snapshots and their artifacts are never modified. The previous working copy survives a validation failure.',
+    tag: 'rulebooks',
+    security: true,
+    parameters: pathParameters(['rulebookId']),
+    request: {
+      schema: 'SaveDraftRequest',
+      mediaType: 'application/json',
+      required: true,
+      description: 'The replacement draft document.',
+    },
+    responses: [
+      {
+        status: 200,
+        description: 'The persisted draft working copy.',
+        schema: 'DraftRulebookResponse',
+      },
+      ...errors(400, 401, 403, 404, 409, 413, 500, 503),
+    ],
+  },
+  {
+    operationId: 'validateRulebookDraft',
+    method: 'post',
+    path: '/api/v1/rulebooks/validate-draft',
+    summary: 'Validate an unsaved draft document',
+    description:
+      'Read-only live validation of a draft document. Structural findings mirror the registry’s save-time bounds; attestation types are then checked against the pinned TS11 v1.0.1 baseline through the standards adapter. It writes nothing and makes no conformance claim.',
+    tag: 'rulebooks',
+    security: false,
+    request: {
+      schema: 'ValidateDraftRequest',
+      mediaType: 'application/json',
+      required: true,
+      description: 'The draft document to validate.',
+    },
+    responses: [
+      {
+        status: 200,
+        description: 'Validation findings and their explicit limitations.',
+        schema: 'DraftValidationResponse',
+      },
+      ...errors(400, 413, 500),
     ],
   },
   {
@@ -601,7 +674,7 @@ function parseCreateRulebookInput(body: unknown): CreateRulebookInput {
           )
           const result: Record<string, unknown> = {}
           for (const field of ['formatIdentifier', 'uri', 'integrity'] as const) {
-            if (recordReference[field] !== undefined) {
+            if (recordReference[field] !== undefined && recordReference[field] !== null) {
               result[field] = recordReference[field]
             }
           }
@@ -612,7 +685,93 @@ function parseCreateRulebookInput(body: unknown): CreateRulebookInput {
     })
   }
 
+  const schemaReferences = record.schemaReferences
+  if (schemaReferences !== undefined) {
+    if (!Array.isArray(schemaReferences)) {
+      throw invalidInput('schemaReferences must be an array')
+    }
+    input.schemaReferences = schemaReferences.map((reference, index) => {
+      const recordReference = requireRecord(reference, `schemaReferences[${index}]`)
+      const result: Record<string, unknown> = {}
+      for (const field of ['formatIdentifier', 'uri', 'integrity'] as const) {
+        if (recordReference[field] !== undefined && recordReference[field] !== null) {
+          result[field] = recordReference[field]
+        }
+      }
+      return result
+    })
+  }
+
   return input as unknown as CreateRulebookInput
+}
+
+/**
+ * Copies only the public draft fields. Publication state, provenance, provider
+ * ownership and registry-internal metadata cannot be injected by a caller.
+ */
+function parseDraftContentInput(body: unknown): ReplaceDraftContentInput {
+  const record = requireRecord(body, 'request body')
+  const input: Record<string, unknown> = {}
+  for (const field of ['name', 'description', 'sourceUrl', 'applicableSpec'] as const) {
+    if (record[field] !== undefined) {
+      input[field] = record[field]
+    }
+  }
+
+  const attestations = record.attestations
+  if (attestations !== undefined) {
+    if (!Array.isArray(attestations)) {
+      throw invalidInput('attestations must be an array')
+    }
+    input.attestations = attestations.map((value, index) => {
+      const attestation = requireRecord(value, `attestations[${index}]`)
+      const projected: Record<string, unknown> = {}
+      for (const field of ['name', 'attestationLoS', 'bindingType', 'supportedFormats'] as const) {
+        if (attestation[field] !== undefined) {
+          projected[field] = attestation[field]
+        }
+      }
+      const references = attestation.schemaReferences
+      if (references !== undefined) {
+        if (!Array.isArray(references)) {
+          throw invalidInput(`attestations[${index}].schemaReferences must be an array`)
+        }
+        projected.schemaReferences = references.map((reference, referenceIndex) => {
+          const recordReference = requireRecord(
+            reference,
+            `attestations[${index}].schemaReferences[${referenceIndex}]`,
+          )
+          const result: Record<string, unknown> = {}
+          for (const field of ['formatIdentifier', 'uri', 'integrity'] as const) {
+            if (recordReference[field] !== undefined && recordReference[field] !== null) {
+              result[field] = recordReference[field]
+            }
+          }
+          return result
+        })
+      }
+      return projected
+    })
+  }
+
+  const schemaReferences = record.schemaReferences
+  if (schemaReferences !== undefined) {
+    if (!Array.isArray(schemaReferences)) {
+      throw invalidInput('schemaReferences must be an array')
+    }
+    input.schemaReferences = schemaReferences.map((reference, index) => {
+      const recordReference = requireRecord(reference, `schemaReferences[${index}]`)
+      const result: Record<string, unknown> = {}
+      for (const field of ['formatIdentifier', 'uri', 'integrity'] as const) {
+        if (recordReference[field] !== undefined && recordReference[field] !== null) {
+          result[field] = recordReference[field]
+        }
+      }
+      return result
+    })
+  }
+
+  return input as unknown as ReplaceDraftContentInput
 }
 
 function parseCreateRulebookVersionInput(body: unknown): CreateRulebookVersionInput {
@@ -742,6 +901,34 @@ function getRulebookHandler(dependencies: ApiDependencies): ApiHandler {
       throw apiError(404, 'not_found', 'The requested rulebook does not exist.')
     }
     return context.json({ data: toRulebookResource(rulebook) }, 200)
+  }
+}
+
+function getRulebookDraftHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    const content = registry.getDraftContent(context.req.param('rulebookId') ?? '')
+    return context.json({ data: toDraftRulebookResource(content) }, 200)
+  }
+}
+
+function replaceRulebookDraftHandler(dependencies: ApiDependencies): ApiHandler {
+  return async (context) => {
+    const registry = requireRegistry(dependencies)
+    const token = bearerToken(context)
+    const content = registry.replaceDraftContent(
+      token,
+      context.req.param('rulebookId') ?? '',
+      parseDraftContentInput(await readJsonBody(context)),
+    )
+    return context.json({ data: toDraftRulebookResource(content) }, 200)
+  }
+}
+
+function validateRulebookDraftHandler(): ApiHandler {
+  return async (context) => {
+    const report = validateDraftContent(await readJsonBody(context))
+    return context.json({ data: report }, 200)
   }
 }
 
@@ -941,6 +1128,9 @@ export function createApiHandlers(
     listProviders: listProvidersHandler(dependencies),
     listRulebooks: listRulebooksHandler(dependencies),
     getRulebook: getRulebookHandler(dependencies),
+    getRulebookDraft: getRulebookDraftHandler(dependencies),
+    replaceRulebookDraft: replaceRulebookDraftHandler(dependencies),
+    validateRulebookDraft: validateRulebookDraftHandler(),
     listRulebookAttestations: listRulebookAttestationsHandler(dependencies),
     listRulebookSchemaReferences: listRulebookSchemaReferencesHandler(dependencies),
     listRulebookVersions: listRulebookVersionsHandler(dependencies),
