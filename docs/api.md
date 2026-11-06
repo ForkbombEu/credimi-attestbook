@@ -23,7 +23,7 @@ Implemented and exposed by this slice:
 - public catalogue reads of rulebooks, attestation types, schema references and versions;
 - exact snapshot bytes and the content digest of one version;
 - authenticated create of a draft rulebook, create of a draft version and publication;
-- unauthenticated import preview and authenticated import of URL/JSON sources;
+- authenticated import preview and import of URL/JSON sources;
 - structural credential validation against a pinned rulebook version.
 
 Deliberately **not** in this slice:
@@ -74,7 +74,7 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}` | no | `200` | One version record and its content digest. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/content` | no | `200` | The exact snapshot bytes; `Content-Digest` and `ETag` carry the SHA-256. |
 | `POST` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publish` | yes | `200` | Publish the owning provider's draft version. |
-| `POST` | `/api/v1/imports/preview` | no | `200` | Bounded, read-only URL/JSON import preview. |
+| `POST` | `/api/v1/imports/preview` | yes | `200` | Bounded, read-only URL/JSON import preview. |
 | `POST` | `/api/v1/imports` | yes | `200` | Import compatible entries as drafts, reporting per-entry dispositions. |
 | `POST` | `/api/v1/credentials/validate` | no | `200` | Structural credential validation with per-dimension evidence. |
 
@@ -145,10 +145,14 @@ mapping is implemented once in `src/api/errors.ts`; the OpenAPI document referen
 ## 5. Authentication and authorization
 
 - Reads are public, mirroring TS11's public-read requirement and the registry service's
-  public read surface.
-- Writes require a provider bearer token. Tokens use the `att_` prefix and are stored only
-  as SHA-256 hashes; the raw secret is returned once by operator provisioning, which is not
-  an HTTP route. The API never echoes a token.
+  public read surface. The single exception is the import preview: a URL preview makes the
+  server perform a bounded outbound fetch under the untrusted-import controls, so the HTTP
+  route requires the same provider bearer token as import even though it writes nothing.
+- Writes and the import preview require a provider bearer token. Tokens use the `att_`
+  prefix and are stored only as SHA-256 hashes; the raw secret is returned once by operator
+  provisioning, which is not an HTTP route. The API never echoes a token. The route table's
+  `security` flag gates authentication centrally, before any request body is read, so a
+  protected operation cannot forget the check.
 - Ownership is enforced by the registry service on the stored resource, not by the route.
   The publish route additionally authenticates before its idempotent replay check so a
   foreign or missing token cannot get a write-shaped success.
@@ -171,7 +175,7 @@ Phase 1 supports idempotency where the domain provides a deterministic identity;
 | `POST .../versions/{version}/publish` | **Idempotent replay while the version is published:** the same call returns `200` and the published representation, and does not create another version. A version superseded to `historical` answers `409 immutable` and is never resurrected. |
 | `POST /api/v1/rulebooks` | **Not idempotent.** There is no server-side deduplication of authored rulebooks; a retried request can create a second draft. Clients that need a stable identity should use the import path or reconcile by `id`. |
 | `POST /api/v1/rulebooks/{rulebookId}/versions` | **Not idempotent.** A duplicate label is `409 conflict`; the client chooses the next label after a conflict. |
-| `POST /api/v1/imports/preview` | Read-only and side-effect free; safe to retry. |
+| `POST /api/v1/imports/preview` | Read-only and side-effect free, but authenticated because a URL preview performs a bounded outbound fetch; safe to retry. |
 | `POST /api/v1/credentials/validate` | Read-only; safe to retry. |
 
 The import policy is the substantive idempotency mechanism implemented in Phase 1
@@ -228,8 +232,12 @@ claim coverage of HTTP rate limits, provider-management routes or the UI.
 
 - Catalogue pagination is applied in memory after filtering; versions and attestations are
   returned in full. A paginated store query is a later registry slice.
-- No `Idempotency-Key` store, no rate limits and no request-body content-type enforcement
-  beyond JSON parsing; those are #35 or later hardening.
+- No generic `Idempotency-Key` store, no request-body content-type enforcement beyond JSON
+  parsing, and no HTTP rate limits for reads, preview or import. Rate limiting is still
+  missing for preview and import, so an authenticated provider can repeat a bounded outbound
+  fetch; the import service's own size, time, redirect and fan-out limits still apply to
+  every call. HTTP rate limiting is part of the broader security hardening tracked with
+  #35, which this slice does not claim.
 - Import previews expose a projection (no internal canonical document) and do not persist a
   preview; an import re-runs the preview under the same controls.
 - Validation results are returned synchronously and are not persisted

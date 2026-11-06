@@ -111,9 +111,9 @@ standards-metadata boundary, authorization model and version lifecycle are docum
 The product API lives under `/api/v1` and is generated from a single route/schema source of
 truth. It exposes public rulebook, attestation, schema-reference and version reads; the exact
 version snapshot bytes with a verifiable digest; authenticated rulebook/version creation and
-publication; import preview and import; and credential validation. Successful responses use
+publication; authenticated import preview and import; and credential validation. Successful responses use
 a `{ "data": ... }` envelope and failures use a stable `{ "error": { "code", "message" } }`
-envelope. Writes require a provider bearer token.
+envelope. Writes and the import preview require a provider bearer token.
 
 `bun run openapi:check` validates the generated OpenAPI 3.1 document against the official
 OpenAPI 3.1 schema, and the contract tests compare the documented operations with the routes
@@ -168,8 +168,9 @@ Remote retrieval is untrusted-input code: https-only, DNS/SSRF address checks wi
 pinning, redirect re-validation, request and total timeouts, response-size and JSON shape
 limits, bounded catalog entries and schema-reference fan-out. Schema references are
 retained but not fetched or SRI-verified in this slice, and re-import/conflict handling is
-issue #31. See [`docs/import.md`](docs/import.md) for the full contract, limits and
-limitations.
+implemented. The HTTP preview route requires a provider token because a URL preview performs
+a bounded outbound fetch; rate limiting remains issue #35. See [`docs/import.md`](docs/import.md)
+for the full contract, limits and limitations.
 
 ## Build and run
 

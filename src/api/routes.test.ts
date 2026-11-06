@@ -15,6 +15,7 @@ import {
   type SeededRulebook,
 } from '../validation/test-support'
 
+import { API_ROUTES, type ImportService } from './routes'
 import { componentJsonSchema, type OpenApiComponentName } from './schemas'
 import type {
   AttestationDetailResource,
@@ -377,10 +378,10 @@ describe('import API', () => {
   })
 
   test('previews a JSON source without writing', async () => {
-    const { app, registry } = setup()
+    const { app, registry, seeded } = setup()
     const before = registry.listRulebooks().length
 
-    const response = await postJson(app, '/api/v1/imports/preview', source())
+    const response = await postJson(app, '/api/v1/imports/preview', source(), seeded.token)
     expect(response.status).toBe(200)
     const body = await json<DataBody<ImportPreviewResource>>(response)
     assertSchema('ImportPreviewResponse', body)
@@ -389,24 +390,96 @@ describe('import API', () => {
     expect(body.data.entries[0]).not.toHaveProperty('canonical')
     expect(registry.listRulebooks()).toHaveLength(before)
 
-    const invalid = await postJson(app, '/api/v1/imports/preview', {
-      source: { kind: 'json', content: '{not-json' },
-    })
+    const invalid = await postJson(
+      app,
+      '/api/v1/imports/preview',
+      { source: { kind: 'json', content: '{not-json' } },
+      seeded.token,
+    )
     expect(invalid.status).toBe(422)
     const invalidBody = await errorJson(invalid)
     assertSchema('ErrorEnvelope', invalidBody)
     expect(invalidBody.error.code).toBe('import_rejected')
     expect(invalidBody.error.details?.['reason']).toBe('invalid_json')
 
-    const malformed = await postJson(app, '/api/v1/imports/preview', {})
+    const malformed = await postJson(app, '/api/v1/imports/preview', {}, seeded.token)
     expect(malformed.status).toBe(400)
     expect((await errorJson(malformed)).error.code).toBe('invalid_request')
 
-    const insecureUrl = await postJson(app, '/api/v1/imports/preview', {
-      source: { kind: 'url', url: 'http://catalog.example.test/x.json' },
-    })
+    const insecureUrl = await postJson(
+      app,
+      '/api/v1/imports/preview',
+      { source: { kind: 'url', url: 'http://catalog.example.test/x.json' } },
+      seeded.token,
+    )
     expect(insecureUrl.status).toBe(400)
     expect((await errorJson(insecureUrl)).error.details?.['reason']).toBe('invalid_url')
+  })
+
+  test('requires a token for the preview and rejects unknown credentials', async () => {
+    const { app, seeded } = setup()
+
+    const missing = await postJson(app, '/api/v1/imports/preview', source())
+    expect(missing.status).toBe(401)
+    expect((await errorJson(missing)).error.code).toBe('unauthorized')
+
+    const bogus = await app.request('/api/v1/imports/preview', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Bearer not-a-real-token' },
+      body: JSON.stringify(source()),
+    })
+    expect(bogus.status).toBe(401)
+    expect((await errorJson(bogus)).error.code).toBe('unauthorized')
+
+    const basic = await app.request('/api/v1/imports/preview', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: 'Basic abc' },
+      body: JSON.stringify(source()),
+    })
+    expect(basic.status).toBe(401)
+    expect((await errorJson(basic)).error.code).toBe('unauthorized')
+
+    const authorized = await postJson(app, '/api/v1/imports/preview', source(), seeded.token)
+    expect(authorized.status).toBe(200)
+  })
+
+  test('rejects missing and invalid tokens before the importer runs', async () => {
+    const { registry } = setup()
+    const calls: string[] = []
+    const importer: ImportService = {
+      preview: () => {
+        calls.push('preview')
+        throw new Error('preview must not run without authentication')
+      },
+      import: () => {
+        calls.push('import')
+        throw new Error('import must not run without authentication')
+      },
+    }
+    const app = createApp({ registry, importer })
+    const urlSource = { source: { kind: 'url', url: 'https://catalog.example.test/x.json' } }
+
+    for (const path of ['/api/v1/imports/preview', '/api/v1/imports']) {
+      for (const authorization of [undefined, 'Bearer not-a-real-token']) {
+        const response = await app.request(path, {
+          method: 'POST',
+          headers: {
+            'content-type': 'application/json',
+            ...(authorization === undefined ? {} : { authorization }),
+          },
+          body: JSON.stringify(urlSource),
+        })
+        expect(response.status).toBe(401)
+        expect((await errorJson(response)).error.code).toBe('unauthorized')
+      }
+    }
+
+    expect(calls).toEqual([])
+  })
+
+  test('the import preview is declared as an authenticated operation', () => {
+    const preview = API_ROUTES.find((route) => route.operationId === 'previewImport')
+    expect(preview?.security).toBe(true)
   })
 
   test('imports drafts, then re-imports the same source idempotently', async () => {
@@ -433,6 +506,32 @@ describe('import API', () => {
     const unauthenticated = await postJson(app, '/api/v1/imports', source())
     expect(unauthenticated.status).toBe(401)
     expect((await errorJson(unauthenticated)).error.code).toBe('unauthorized')
+  })
+})
+
+describe('protected route table', () => {
+  test('every security:true route rejects missing and unknown tokens before reading the body', async () => {
+    const { app, seeded } = setup()
+    const protectedRoutes = API_ROUTES.filter((route) => route.security)
+    expect(protectedRoutes.length).toBeGreaterThan(0)
+
+    for (const route of protectedRoutes) {
+      const path = route.path.replace(':rulebookId', seeded.rulebookId).replace(':version', '1.0')
+      for (const authorization of [undefined, 'Bearer bogus']) {
+        const response = await app.request(path, {
+          method: route.method.toUpperCase(),
+          headers: {
+            'content-type': 'application/json',
+            ...(authorization === undefined ? {} : { authorization }),
+          },
+          body: '{not-json',
+        })
+        expect(response.status, `${route.operationId} must reject ${String(authorization)}`).toBe(
+          401,
+        )
+        expect((await errorJson(response)).error.code).toBe('unauthorized')
+      }
+    }
   })
 })
 

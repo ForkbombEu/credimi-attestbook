@@ -100,6 +100,11 @@ describe('generated OpenAPI document', () => {
     }
   })
 
+  test('the import preview operation requires the bearer scheme', () => {
+    const preview = document.paths['/api/v1/imports/preview']?.['post']
+    expect(preview?.['security']).toEqual([{ bearerAuth: [] }])
+  })
+
   test('write operations declare the bearer security scheme', () => {
     const securitySchemes = document.components['securitySchemes'] as Record<string, unknown>
     expect(securitySchemes['bearerAuth']).toMatchObject({ type: 'http', scheme: 'bearer' })

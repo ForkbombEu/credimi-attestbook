@@ -460,11 +460,23 @@ export const OPENAPI_COMPONENTS = {
 
 export type OpenApiComponentName = keyof typeof OPENAPI_COMPONENTS
 
+/**
+ * Request bodies are documented with Zod's input mode so unknown members stay
+ * allowed (the handlers ignore them), matching the behaviour the API documents.
+ * Response components use output mode, where an unexpected member is a bug.
+ */
+const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
+  'CreateRulebookRequest',
+  'CreateRulebookVersionRequest',
+  'ImportRequest',
+  'ValidateCredentialRequest',
+])
+
 /** Generated JSON Schema for one component (OpenAPI 3.1 dialect). */
 export function componentJsonSchema(name: OpenApiComponentName): Record<string, unknown> {
   const schema = z.toJSONSchema(OPENAPI_COMPONENTS[name], {
     target: 'draft-2020-12',
-    io: 'output',
+    io: REQUEST_COMPONENT_NAMES.has(name) ? 'input' : 'output',
   })
   delete schema.$schema
   return schema

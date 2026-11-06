@@ -198,7 +198,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     ],
     responses: [
       { status: 200, description: 'A page of rulebooks.', schema: 'RulebookPageResponse' },
-      ...errors(400, 500),
+      ...errors(400, 500, 503),
     ],
   },
   {
@@ -212,7 +212,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     parameters: pathParameters(['rulebookId']),
     responses: [
       { status: 200, description: 'The rulebook.', schema: 'RulebookResponse' },
-      ...errors(400, 404, 500),
+      ...errors(400, 404, 500, 503),
     ],
   },
   {
@@ -231,7 +231,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'The rulebook’s attestation types with their schema references.',
         schema: 'AttestationListResponse',
       },
-      ...errors(400, 404, 500),
+      ...errors(400, 404, 500, 503),
     ],
   },
   {
@@ -250,7 +250,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'The rulebook’s schema references.',
         schema: 'SchemaReferenceListResponse',
       },
-      ...errors(400, 404, 500),
+      ...errors(400, 404, 500, 503),
     ],
   },
   {
@@ -269,7 +269,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'The rulebook’s versions.',
         schema: 'RulebookVersionListResponse',
       },
-      ...errors(400, 404, 500),
+      ...errors(400, 404, 500, 503),
     ],
   },
   {
@@ -283,7 +283,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     parameters: pathParameters(['rulebookId', 'version']),
     responses: [
       { status: 200, description: 'The version.', schema: 'RulebookVersionResponse' },
-      ...errors(400, 404, 500),
+      ...errors(400, 404, 500, 503),
     ],
   },
   {
@@ -310,7 +310,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
           { name: 'ETag', description: 'Quoted lowercase hex SHA-256 of the returned bytes.' },
         ],
       },
-      ...errors(400, 404, 500),
+      ...errors(400, 404, 500, 503),
     ],
   },
   {
@@ -335,7 +335,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         schema: 'RulebookResponse',
         headers: [{ name: 'Location', description: 'Canonical path of the created rulebook.' }],
       },
-      ...errors(400, 401, 413, 500),
+      ...errors(400, 401, 413, 500, 503),
     ],
   },
   {
@@ -356,7 +356,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     },
     responses: [
       { status: 201, description: 'The created draft version.', schema: 'RulebookVersionResponse' },
-      ...errors(400, 401, 403, 404, 409, 413, 500),
+      ...errors(400, 401, 403, 404, 409, 413, 500, 503),
     ],
   },
   {
@@ -371,7 +371,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     parameters: pathParameters(['rulebookId', 'version']),
     responses: [
       { status: 200, description: 'The published version.', schema: 'RulebookVersionResponse' },
-      ...errors(400, 401, 403, 404, 409, 500),
+      ...errors(400, 401, 403, 404, 409, 500, 503),
     ],
   },
   {
@@ -380,9 +380,9 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: '/api/v1/imports/preview',
     summary: 'Preview a URL or JSON rulebook import',
     description:
-      'Read-only, unauthenticated preview of a supported TS11/OWF document or catalog envelope under the bounded SSRF, size, depth and fan-out controls. A preview performs no registry write.',
+      'Authenticated, read-only preview of a supported TS11/OWF document or catalog envelope under the bounded SSRF, size, depth and fan-out controls. A preview performs no registry write, but a URL source still causes a bounded outbound fetch, so it requires a provider bearer token.',
     tag: 'imports',
-    security: false,
+    security: true,
     request: {
       schema: 'ImportRequest',
       mediaType: 'application/json',
@@ -395,7 +395,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'The compatibility and provenance preview.',
         schema: 'ImportPreviewResponse',
       },
-      ...errors(400, 413, 422, 500, 502),
+      ...errors(400, 401, 413, 422, 500, 502, 503),
     ],
   },
   {
@@ -419,7 +419,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'Per-entry import dispositions, reported conflicts and created rulebooks.',
         schema: 'ImportResultResponse',
       },
-      ...errors(400, 401, 413, 422, 500, 502),
+      ...errors(400, 401, 413, 422, 500, 502, 503),
     ],
   },
   {
@@ -921,10 +921,29 @@ export function createApiHandlers(
   }
 }
 
+/**
+ * Runs the route-declared bearer check before the handler, and therefore before
+ * any request body is read. The contract's `security` flag is the only place
+ * that decides which operations are protected, so a protected route cannot
+ * forget the check.
+ */
+function authenticated(dependencies: ApiDependencies, handler: ApiHandler): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    registry.authenticate(bearerToken(context))
+    return handler(context)
+  }
+}
+
 /** Registers every contract-defined route on the Hono application. */
 export function registerApiRoutes(app: Hono, dependencies: ApiDependencies): void {
   const handlers = createApiHandlers(dependencies)
   for (const route of API_ROUTES) {
-    app.on(route.method, route.path, handlers[route.operationId])
+    const handler = handlers[route.operationId]
+    app.on(
+      route.method,
+      route.path,
+      route.security ? authenticated(dependencies, handler) : handler,
+    )
   }
 }
