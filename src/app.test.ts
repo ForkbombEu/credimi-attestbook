@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, spyOn, test } from 'bun:test'
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -10,8 +10,10 @@ import { createApp } from './app'
 const app = createApp()
 
 const uiDirectory = mkdtempSync(join(tmpdir(), 'attestbook-ui-'))
+mkdirSync(join(uiDirectory, 'assets'))
 writeFileSync(join(uiDirectory, 'index.html'), '<!doctype html><title>AttestBook</title>')
 writeFileSync(join(uiDirectory, 'favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+writeFileSync(join(uiDirectory, 'assets', 'app.js'), 'export const ready = true')
 
 afterAll(() => {
   rmSync(uiDirectory, { recursive: true, force: true })
@@ -79,11 +81,37 @@ describe('built web UI', () => {
     expect(await response.text()).toContain('<title>AttestBook</title>')
   })
 
-  test('serves content-addressed assets from the UI build directory', async () => {
-    const response = await uiApp.request('/favicon.svg')
+  test('serves the icon and content-addressed assets with a nosniff header', async () => {
+    const icon = await uiApp.request('/favicon.svg')
+    expect(icon.status).toBe(200)
+    expect(icon.headers.get('content-type')).toContain('image/svg+xml')
+    expect(icon.headers.get('x-content-type-options')).toBe('nosniff')
 
-    expect(response.status).toBe(200)
-    expect(response.headers.get('content-type')).toContain('image/svg+xml')
+    const asset = await uiApp.request('/assets/app.js')
+    expect(asset.status).toBe(200)
+    expect(asset.headers.get('content-type')).toContain('javascript')
+    expect(asset.headers.get('cache-control')).toContain('immutable')
+    expect(asset.headers.get('x-content-type-options')).toBe('nosniff')
+  })
+
+  test('rejects asset path traversal and missing assets with the JSON 404', async () => {
+    for (const path of [
+      '/assets/%2e%2e/index.html',
+      '/assets/%2e%2e%2findex.html',
+      '/assets/..%5cindex.html',
+      '/assets/missing.js',
+      '/assets/',
+    ]) {
+      const response = await uiApp.request(path)
+      expect(response.status, path).toBe(404)
+      expect(response.headers.get('content-type')).toContain('application/json')
+      expect((await response.json()) as ErrorEnvelope).toEqual({
+        error: {
+          code: 'not_found',
+          message: 'No route matches the request path.',
+        },
+      })
+    }
   })
 
   test('keeps the JSON not-found envelope for unknown routes', async () => {

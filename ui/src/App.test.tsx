@@ -163,6 +163,51 @@ describe('catalog search and filters', () => {
     expect(screen.queryByText('PID Rulebook')).not.toBeInTheDocument()
     expect(screen.getByText('Age Verification Rulebook')).toBeInTheDocument()
   })
+
+  test('keeps the truncation notice visible when a search matches nothing', async () => {
+    const user = userEvent.setup()
+    const api = createFakeApi()
+    const truncated: CatalogApi = {
+      ...api,
+      listRulebooks: () =>
+        Promise.resolve({
+          data: SAMPLE_DATASET.rulebooks,
+          pagination: { limit: 100, offset: 0, total: 52 },
+        }),
+    }
+
+    renderCatalog(truncated)
+
+    await screen.findByText('PID Rulebook')
+    expect(screen.getByText(/Showing the first 2 of 52 rulebooks/)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Showing 2 of 2 loaded rulebooks (52 in the catalog)',
+    )
+
+    await user.type(screen.getByLabelText('Search'), 'no-such-rulebook')
+
+    expect(screen.getByText('No rulebooks match your filters')).toBeInTheDocument()
+    expect(screen.getByText(/Showing the first 2 of 52 rulebooks/)).toBeInTheDocument()
+    expect(screen.getByText(/Only the loaded page was searched/)).toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent(
+      'Showing 0 of 2 loaded rulebooks (52 in the catalog)',
+    )
+  })
+
+  test('lists API providers that own no loaded rulebook', async () => {
+    renderCatalog(
+      createFakeApi({
+        ...SAMPLE_DATASET,
+        providers: [
+          ...SAMPLE_DATASET.providers,
+          { id: 'provider-extra', name: 'Zeta Provider', createdAt: '2026-01-04T10:00:00.000Z' },
+        ],
+      }),
+    )
+
+    await screen.findByText('PID Rulebook')
+    expect(screen.getByRole('option', { name: 'Zeta Provider' })).toBeInTheDocument()
+  })
 })
 
 describe('catalog accessibility', () => {

@@ -44,10 +44,11 @@ export function ErrorState({ message, onRetry }: ErrorStateProps) {
 
 interface EmptyStateProps {
   readonly filtering: boolean
+  readonly partial?: boolean
   readonly onClear: () => void
 }
 
-export function EmptyState({ filtering, onClear }: EmptyStateProps) {
+export function EmptyState({ filtering, partial = false, onClear }: EmptyStateProps) {
   if (!filtering) {
     return (
       <div className="state-panel state-panel--empty">
@@ -63,6 +64,11 @@ export function EmptyState({ filtering, onClear }: EmptyStateProps) {
     <div className="state-panel state-panel--empty">
       <h2 className="state-title">No rulebooks match your filters</h2>
       <p className="state-detail">Try a different search term, provider or publication status.</p>
+      {partial ? (
+        <p className="state-detail">
+          Only the loaded page was searched; the catalog has more entries than the API page limit.
+        </p>
+      ) : null}
       <button type="button" className="button button--primary" onClick={onClear}>
         Reset search and filters
       </button>

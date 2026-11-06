@@ -6,6 +6,7 @@ interface CatalogFiltersProps {
   readonly providers: readonly { readonly id: string; readonly name: string }[]
   readonly resultCount: number
   readonly totalCount: number
+  readonly catalogTotal: number
   readonly onChange: (filters: CatalogFilters) => void
   readonly onClear: () => void
 }
@@ -17,6 +18,7 @@ export function CatalogFilterBar({
   providers,
   resultCount,
   totalCount,
+  catalogTotal,
   onChange,
   onClear,
 }: CatalogFiltersProps) {
@@ -86,7 +88,16 @@ export function CatalogFilterBar({
       </button>
 
       <p className="result-count" role="status" aria-live="polite">
-        Showing <strong>{resultCount}</strong> of <strong>{totalCount}</strong> rulebooks
+        {catalogTotal > totalCount ? (
+          <>
+            Showing <strong>{resultCount}</strong> of <strong>{totalCount}</strong> loaded rulebooks
+            (<strong>{catalogTotal}</strong> in the catalog)
+          </>
+        ) : (
+          <>
+            Showing <strong>{resultCount}</strong> of <strong>{totalCount}</strong> rulebooks
+          </>
+        )}
       </p>
     </form>
   )

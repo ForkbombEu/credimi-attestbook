@@ -97,8 +97,13 @@ offers **Retry**.
   rulebook's working-copy publication status (`draft`, `published`, `historical`).
 - Filtering happens in the browser over the fetched page, so it also covers fields that
   the API query parameters do not expose. The API page cap is 100; when `total` exceeds the
-  returned page, the UI states that it shows the first 100 rulebooks instead of implying a
-  complete catalogue.
+  returned page, a truncation notice stays visible in every ready state, including the
+  no-match state, and the no-match panel says that only the loaded page was searched. The
+  result counter distinguishes loaded rulebooks from the catalog total.
+- The provider filter lists every provider returned by `GET /api/v1/providers`, including
+  providers whose rulebooks are not on the loaded page; a rulebook whose provider is absent
+  from that list is still filterable under its provider identifier. Search and the provider
+  and status filters apply only to the loaded page, as the truncation notice states.
 
 ## 4. Build, serve and develop
 
@@ -126,6 +131,9 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
 - rendering of provider, version, publication status, attestation types, source, update
   date and the **Not tested** compatibility label;
 - search, provider filter and status filter behavior and result counts;
+- truncation handling: the notice stays visible when a search matches nothing, the
+  no-match panel explains that only the loaded page was searched, the counter separates
+  loaded from total, and providers with no loaded rulebook remain filterable;
 - graceful handling of a failed per-rulebook detail read and of a truncated API page;
 - axe-core accessibility checks for the results and error states (colour contrast is
   disabled in jsdom because it cannot compute painted colours; the browser test runs the
@@ -160,6 +168,8 @@ viewport width (1280 px) and the same light theme:
 
 - The catalogue listing is the Phase 1 API page (maximum 100 entries); there is no
   pagination control, so larger catalogues are shown truncated with an explicit notice.
+  Search and filters cover only that loaded page, and the notice and counter say so in every
+  ready state, including no matches.
 - Per-rulebook attestations and versions are fetched with one request pair per listed
   rulebook (N+1 reads). This is acceptable for the bounded MVP page and should be replaced
   by a catalog projection endpoint if catalogue size grows.
@@ -167,5 +177,8 @@ viewport width (1280 px) and the same light theme:
   synchronisation timestamps separately, so the UI does not claim a last-sync time.
 - Compatibility and validation are always **Not tested** at catalogue level. A later slice
   may link to persisted per-version results, but this slice does not infer them.
+- UI responses set `X-Content-Type-Options: nosniff` and Vite assets are immutable-cached;
+  a content security policy and the rest of the HTTP hardening remain
+  [issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35).
 - No dark theme, offline cache or client-side routing yet; the rulebook detail page is
   issue #37.

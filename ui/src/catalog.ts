@@ -37,11 +37,18 @@ export interface CatalogEntry {
   readonly detailsUnavailable: boolean
 }
 
+export interface CatalogProvider {
+  readonly id: string
+  readonly name: string
+}
+
 export interface CatalogSnapshot {
   readonly entries: readonly CatalogEntry[]
   /** Filtered total reported by the API; larger than `entries` if truncated. */
   readonly total: number
   readonly truncated: boolean
+  /** Every provider the API knows, including those with no loaded rulebook. */
+  readonly providers: readonly CatalogProvider[]
 }
 
 export type StatusFilter = 'all' | PublicationStatus
@@ -196,12 +203,23 @@ export function formatDate(isoTimestamp: string): string {
   return dateFormatter.format(new Date(milliseconds))
 }
 
+/**
+ * Options for the provider filter. Every provider the API returned is listed,
+ * even when none of its rulebooks are on the loaded page, and an entry whose
+ * provider is missing from the list still appears under its identifier.
+ */
 export function providerOptions(
   entries: readonly CatalogEntry[],
-): readonly { readonly id: string; readonly name: string }[] {
+  providers: readonly CatalogProvider[] = [],
+): readonly CatalogProvider[] {
   const byId = new Map<string, string>()
+  for (const provider of providers) {
+    byId.set(provider.id, provider.name)
+  }
   for (const entry of entries) {
-    byId.set(entry.providerId, entry.providerName)
+    if (!byId.has(entry.providerId)) {
+      byId.set(entry.providerId, entry.providerName)
+    }
   }
   return [...byId.entries()]
     .map(([id, name]) => ({ id, name }))
@@ -252,5 +270,6 @@ export async function loadCatalog(api: CatalogApi, signal?: AbortSignal): Promis
     entries,
     total: page.pagination.total,
     truncated: page.pagination.total > entries.length,
+    providers: providers.map((provider) => ({ id: provider.id, name: provider.name })),
   }
 }

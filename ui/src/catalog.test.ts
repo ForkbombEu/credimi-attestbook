@@ -138,6 +138,32 @@ describe('search and filters', () => {
       'Wallet Lab',
     ])
   })
+
+  test('lists every API provider, including providers with no loaded rulebook', () => {
+    expect(
+      providerOptions(entries, [
+        { id: 'provider-issuer', name: 'Example Issuer' },
+        { id: 'provider-lab', name: 'Wallet Lab' },
+        { id: 'provider-extra', name: 'Zeta Provider' },
+      ]).map((provider) => provider.name),
+    ).toEqual(['Example Issuer', 'Wallet Lab', 'Zeta Provider'])
+  })
+
+  test('keeps an entry provider that is missing from the API provider list', () => {
+    const unknown = buildCatalogEntry(
+      makeRulebook({ id: 'rulebook-unknown', providerId: 'provider-missing' }),
+      undefined,
+      [],
+      [],
+    )
+
+    expect(providerOptions([unknown], [{ id: 'provider-issuer', name: 'Example Issuer' }])).toEqual(
+      [
+        { id: 'provider-issuer', name: 'Example Issuer' },
+        { id: 'provider-missing', name: 'provider-missing' },
+      ],
+    )
+  })
 })
 
 describe('display helpers', () => {
@@ -168,6 +194,10 @@ describe('loadCatalog', () => {
     ])
     expect(snapshot.entries[0]?.version).toBe('1.0')
     expect(snapshot.entries[1]?.version).toBeNull()
+    expect(snapshot.providers).toEqual([
+      { id: 'provider-issuer', name: 'Example Issuer' },
+      { id: 'provider-lab', name: 'Wallet Lab' },
+    ])
   })
 
   test('keeps a row when its detail requests fail and marks it incomplete', async () => {

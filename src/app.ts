@@ -5,10 +5,10 @@
 // them. Tests build the same application without a listener, so the routes they
 // exercise are the routes the server exposes.
 
-import { resolve } from 'node:path'
+import { resolve, sep } from 'node:path'
 
 import { Hono } from 'hono'
-import { serveStatic } from 'hono/bun'
+import type { Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 
 import { BEARER_CHALLENGE, errorEnvelope, toApiError } from './api/errors'
@@ -33,6 +33,70 @@ export interface AppOptions extends ApiDependencies {
 
 /** Body limit for the validation and write endpoints. */
 export const MAX_VALIDATION_BODY_BYTES = MAX_API_BODY_BYTES
+
+/**
+ * Serves one built UI file. The handler is explicit rather than a static
+ * middleware because the production server is bundled: depending only on
+ * `Bun.file` keeps the bundled request path identical to the tested one.
+ */
+function staticFileHandler(filePath: string, cacheControl: string) {
+  return async (context: Context): Promise<Response> => {
+    const file = Bun.file(filePath)
+    if (!(await file.exists())) {
+      return context.notFound()
+    }
+    return new Response(file, {
+      status: 200,
+      headers: {
+        'content-type': file.type === '' ? 'application/octet-stream' : file.type,
+        'cache-control': cacheControl,
+        'x-content-type-options': 'nosniff',
+      },
+    })
+  }
+}
+
+/**
+ * Serves Vite's content-addressed files under `/assets/*`. The resolved path
+ * must stay inside the asset directory; dot segments and backslashes are
+ * rejected before the filesystem is touched.
+ */
+function uiAssetHandler(uiRoot: string) {
+  const assetRoot = resolve(uiRoot, 'assets')
+  return async (context: Context): Promise<Response> => {
+    let relative: string
+    try {
+      relative = decodeURIComponent(context.req.path.slice('/assets/'.length))
+    } catch {
+      return context.notFound()
+    }
+    if (
+      relative === '' ||
+      relative.includes('\0') ||
+      relative.includes('\\') ||
+      relative.split('/').includes('..')
+    ) {
+      return context.notFound()
+    }
+    const filePath = resolve(assetRoot, relative)
+    if (filePath !== assetRoot && !filePath.startsWith(`${assetRoot}${sep}`)) {
+      return context.notFound()
+    }
+
+    const file = Bun.file(filePath)
+    if (!(await file.exists())) {
+      return context.notFound()
+    }
+    return new Response(file, {
+      status: 200,
+      headers: {
+        'content-type': file.type === '' ? 'application/octet-stream' : file.type,
+        'cache-control': 'public, max-age=31536000, immutable',
+        'x-content-type-options': 'nosniff',
+      },
+    })
+  }
+}
 
 /**
  * Builds the HTTP application without starting a listener. Services that are
@@ -61,11 +125,14 @@ export function createApp(options: AppOptions = {}): Hono {
   if (options.uiRoot !== undefined) {
     const uiRoot = resolve(options.uiRoot)
     // The entry document and the icon are served from explicit paths; only
-    // Vite's content-addressed assets are served through the directory root,
-    // so a request cannot walk outside the build output.
-    app.get('/', serveStatic({ root: uiRoot, path: 'index.html' }))
-    app.get('/favicon.svg', serveStatic({ root: uiRoot, path: 'favicon.svg' }))
-    app.use('/assets/*', serveStatic({ root: uiRoot }))
+    // Vite's content-addressed assets go through the asset handler, which
+    // refuses to walk outside the build output.
+    app.get('/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
+    app.get(
+      '/favicon.svg',
+      staticFileHandler(resolve(uiRoot, 'favicon.svg'), 'public, max-age=3600'),
+    )
+    app.use('/assets/*', uiAssetHandler(uiRoot))
   }
 
   app.notFound((c) =>

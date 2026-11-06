@@ -51,7 +51,10 @@ export function CatalogPage({ api }: CatalogPageProps) {
   const clearFilters = useCallback(() => setFilters(EMPTY_FILTERS), [])
 
   const providers = useMemo(
-    () => (state.status === 'ready' ? providerOptions(state.snapshot.entries) : []),
+    () =>
+      state.status === 'ready'
+        ? providerOptions(state.snapshot.entries, state.snapshot.providers)
+        : [],
     [state],
   )
   const filtering = isFiltering(filters)
@@ -94,6 +97,7 @@ export function CatalogPage({ api }: CatalogPageProps) {
             providers={providers}
             resultCount={filteredEntries.length}
             totalCount={state.snapshot.entries.length}
+            catalogTotal={state.snapshot.total}
             onChange={setFilters}
             onClear={clearFilters}
           />
@@ -105,6 +109,13 @@ export function CatalogPage({ api }: CatalogPageProps) {
           aria-label="Catalog results"
           aria-busy={state.status === 'loading'}
         >
+          {state.status === 'ready' && state.snapshot.truncated ? (
+            <p className="notice">
+              Showing the first {state.snapshot.entries.length} of {state.snapshot.total} rulebooks;
+              search and filters apply only to these {state.snapshot.entries.length}.
+            </p>
+          ) : null}
+
           {state.status === 'loading' ? <LoadingState /> : null}
 
           {state.status === 'error' ? (
@@ -115,17 +126,13 @@ export function CatalogPage({ api }: CatalogPageProps) {
             state.snapshot.entries.length === 0 ? (
               <EmptyState filtering={false} onClear={clearFilters} />
             ) : filteredEntries.length === 0 ? (
-              <EmptyState filtering={filtering} onClear={clearFilters} />
+              <EmptyState
+                filtering={filtering}
+                partial={state.snapshot.truncated}
+                onClear={clearFilters}
+              />
             ) : (
-              <>
-                {state.snapshot.truncated ? (
-                  <p className="notice">
-                    Showing the first {state.snapshot.entries.length} of {state.snapshot.total}{' '}
-                    rulebooks (the catalogue page limit is 100).
-                  </p>
-                ) : null}
-                <CatalogTable entries={filteredEntries} />
-              </>
+              <CatalogTable entries={filteredEntries} />
             )
           ) : null}
         </section>
