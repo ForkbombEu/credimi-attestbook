@@ -34,6 +34,7 @@ export const API_ERROR_CODES = [
   'import_rejected',
   'registry_unavailable',
   'validation_unavailable',
+  'fixture_unavailable',
   'internal_error',
 ] as const
 

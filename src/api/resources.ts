@@ -16,6 +16,8 @@ import type {
   ImportedSchemaReference,
 } from '../import'
 import type { IssuerDiscoveryResult } from '../discovery'
+import type { IssuerFixtureResult } from '../fixtures'
+import { isJsonObject, isJsonValue } from '../fixtures/sandbox'
 import type { PublicationReadiness, VersionContentDiff } from '../lifecycle'
 import type { PublicationExportManifest } from '../publication'
 import type {
@@ -35,6 +37,7 @@ import {
   importPreviewSchema,
   importResultSchema,
   issuerDiscoveryResultSchema,
+  issuerFixtureSchema,
   providerSchema,
   publicationExportManifestSchema,
   publicationReadinessSchema,
@@ -43,6 +46,7 @@ import {
   rulebookVersionSchema,
   schemaReferenceSchema,
   versionDiffSchema,
+  type IssuerFixtureResource,
 } from './schemas'
 
 /** Public catalogue projection of a provider; authority and metadata stay internal. */
@@ -419,4 +423,42 @@ export function toIssuerDiscoveryResource(result: IssuerDiscoveryResult) {
     })),
     limitations: [...result.limitations],
   })
+}
+
+/**
+ * Projects a fixture result. The generator already returns only public fields
+ * (no schema-document body, provider metadata or token); parsing with the
+ * shared schema turns contract drift into a server error.
+ */
+export function toIssuerFixtureResource(result: IssuerFixtureResult): IssuerFixtureResource {
+  // `z.record` rebuilds objects with ordinary assignment, which silently drops a
+  // claim named `__proto__`. Parse the contract for every other field, then put
+  // the verified JSON objects back unchanged so a claim is never lost.
+  if (!isJsonObject(result.payload)) {
+    throw new Error('the generated fixture payload is not a JSON object')
+  }
+  for (const negativeCase of result.negativeCases) {
+    if (!isJsonObject(negativeCase.payload)) {
+      throw new Error('a generated negative fixture payload is not a JSON object')
+    }
+  }
+  for (const override of result.overrides) {
+    if (!isJsonValue(override.value)) {
+      throw new Error('an applied override value is not a JSON value')
+    }
+  }
+  const parsed = issuerFixtureSchema.parse(result)
+  return {
+    ...parsed,
+    payload: result.payload,
+    overrides: result.overrides.map((override) => ({
+      path: override.path,
+      value: override.value,
+      applied: true,
+    })),
+    negativeCases: result.negativeCases.map((negativeCase) => ({
+      ...negativeCase,
+      payload: negativeCase.payload,
+    })),
+  } as unknown as IssuerFixtureResource
 }

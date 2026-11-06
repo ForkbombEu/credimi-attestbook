@@ -13,7 +13,7 @@ import { OPENAPI_COMPONENTS, componentJsonSchema } from './schemas'
 export const OPENAPI_VERSION = '3.1.0'
 
 /** Version of the API contract document itself. */
-export const API_CONTRACT_VERSION = '1.4.0'
+export const API_CONTRACT_VERSION = '1.5.0'
 
 /** URL prefix that carries the product API's major version. */
 export const API_VERSION_PREFIX = '/api/v1'
@@ -47,7 +47,7 @@ const TAG_DESCRIPTIONS: readonly { readonly name: string; readonly description: 
   {
     name: 'issuers',
     description:
-      'Bounded OpenID4VCI credential issuer metadata discovery and candidate rulebook association.',
+      'Bounded OpenID4VCI credential issuer metadata discovery, candidate rulebook association and rulebook-driven unsigned issuer fixtures.',
   },
   {
     name: 'credentials',

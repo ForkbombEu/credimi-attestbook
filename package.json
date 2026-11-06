@@ -12,7 +12,7 @@
     "dev": "bun --watch src/server.ts",
     "dev:ui": "vite --config ui/vite.config.ts",
     "start": "bun dist/server.js",
-    "build": "rm -rf dist && bun build src/server.ts src/validation/schema-sandbox-entry.ts --outdir dist --target bun && bun run build:ui",
+    "build": "rm -rf dist && bun build src/server.ts src/validation/schema-sandbox-entry.ts src/fixtures/fixture-sandbox-entry.ts --outdir dist --target bun && bun run build:ui",
     "build:ui": "vite build --config ui/vite.config.ts",
     "test": "bun test ./src/",
     "test:ui": "vitest run --config ui/vite.config.ts",
