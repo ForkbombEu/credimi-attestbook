@@ -54,21 +54,26 @@ function body(
 }
 
 async function post(app: ReturnType<typeof createApp>, bodyText: string) {
-  return app.request('/api/credentials/validate', {
+  return app.request('/api/v1/credentials/validate', {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: bodyText,
   })
 }
 
-describe('POST /api/credentials/validate', () => {
+async function resultBody(response: Response): Promise<CredentialValidationResult> {
+  const payload = (await response.json()) as { readonly data: CredentialValidationResult }
+  return payload.data
+}
+
+describe('POST /api/v1/credentials/validate', () => {
   test('returns typed evidence for a valid credential', async () => {
     const { app, seeded } = setup()
     const credential = await issueTestCredential()
     const response = await post(app, body(seeded, credential))
 
     expect(response.status).toBe(200)
-    const result = (await response.json()) as CredentialValidationResult
+    const result = await resultBody(response)
     expect(result.rulebook.id).toBe(seeded.rulebookId)
     expect(result.rulebook.version).toBe('1.0')
     expect(result.rulebook.digest).toBe(seeded.digest)
@@ -106,7 +111,7 @@ describe('POST /api/credentials/validate', () => {
 
     const response = await post(app, body(seeded, tampered))
     expect(response.status).toBe(200)
-    const result = (await response.json()) as CredentialValidationResult
+    const result = await resultBody(response)
     expect(result.overallStatus).not.toBe('PASS')
     const crypto = result.dimensions.find((entry) => entry.id === 'cryptographic_verification')
     expect(crypto?.status).toBe('NOT_TESTED')
@@ -141,7 +146,7 @@ describe('POST /api/credentials/validate', () => {
     const response = await validation
     expect(response.status).toBe(200)
     expect(Date.now() - started).toBeGreaterThanOrEqual(900)
-    const result = (await response.json()) as CredentialValidationResult
+    const result = await resultBody(response)
     expect(result.violations.map((entry) => entry.code)).toContain('schema_evaluation_timeout')
     const schemaDimension = result.dimensions.find((entry) => entry.id === 'schema_validation')
     expect(schemaDimension?.status).toBe('NOT_TESTED')
@@ -161,7 +166,7 @@ describe('POST /api/credentials/validate', () => {
 
   test('rejects a body that is not JSON', async () => {
     const { app } = setup()
-    const response = await app.request('/api/credentials/validate', {
+    const response = await app.request('/api/v1/credentials/validate', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{not-json',
@@ -224,7 +229,7 @@ describe('POST /api/credentials/validate', () => {
       const text = await response.text()
 
       expect(response.status).toBe(200)
-      expect(JSON.parse(text) as CredentialValidationResult).toBeDefined()
+      expect((JSON.parse(text) as { readonly data: CredentialValidationResult }).data).toBeDefined()
       expect(text).not.toContain(credential)
       expect(text).not.toContain('Ada')
       for (const call of consoleError.mock.calls) {
@@ -244,7 +249,7 @@ describe('POST /api/credentials/validate', () => {
     const response = await post(app, body(seeded, 'not-a-credential', []))
 
     expect(response.status).toBe(200)
-    const result = (await response.json()) as CredentialValidationResult
+    const result = await resultBody(response)
     expect(result.overallStatus).toBe('FAIL')
     expect(result.violations.map((entry) => entry.code)).toContain('unrecognized_credential_format')
   })

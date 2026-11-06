@@ -4,7 +4,8 @@ AttestBook is a standalone, API-first platform for managing, validating and test
 Attestation Rulebooks in the European Digital Identity Wallet ecosystem. This repository
 currently contains the Phase 0 research and architecture documents, the Phase 1 application
 scaffold, the persistent provider/rulebook registry slice, the bounded URL/JSON rulebook
-import slice and SD-JWT VC structural validation with dimension-aware evidence.
+import slice, SD-JWT VC structural validation with dimension-aware evidence and the
+versioned REST/OpenAPI contract over those services.
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -46,6 +47,7 @@ bun run format:check # Prettier only
 bun run lint         # ESLint only
 bun run typecheck    # tsc --noEmit only
 bun run test         # Bun test runner only
+bun run openapi:check # generated OpenAPI 3.1 document validation
 bun run docs:check   # Phase 0 documentation consistency, plain Node
 ```
 
@@ -73,7 +75,11 @@ bun run docs:check   # Phase 0 documentation consistency, plain Node
   Schema 2020-12 attribute checks, pinned-version/digest evidence, dimension statuses and a
   timeout/memory-bounded schema-evaluation sandbox; see
   [`docs/validation.md`](docs/validation.md);
-- `src/app.validation.test.ts` — the typed `POST /api/credentials/validate` contract,
+- `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
+  the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
+  routes Hono registered, and success/error contract tests for every exposed resource; see
+  [`docs/api.md`](docs/api.md);
+- `src/app.validation.test.ts` — the typed `POST /api/v1/credentials/validate` contract,
   400/404/413/503 cases and non-disclosure of credential material;
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
   the Phase 0 verification gate for the persistence decision (D-7).
@@ -90,18 +96,34 @@ checksum.
 A rulebook's content can be frozen as a draft version, then published. Each version stores the
 SHA-256 digest of its exact snapshot bytes in a content-addressed artifact, and published and
 historical versions are immutable in the service and in SQLite triggers. Versions can be
-retrieved by `(rulebookId, version)` or by content digest. Re-import conflict handling, the
-HTTP API and the version-history UI come in later issues.
+retrieved by `(rulebookId, version)` or by content digest. Re-import conflict handling is
+implemented by the import pipeline; the version-history UI comes in a later issue.
 
 The server opens the registry database and applies migrations at startup, so credential
-validation can read rulebooks from the same process. The wider versioned API, OpenAPI
-contracts and write routes remain issues #34/#35. The service contract, stable identifier
-rules, standards-metadata boundary, authorization model and version lifecycle are documented
-in [`docs/registry.md`](docs/registry.md).
+validation can read rulebooks from the same process. The versioned REST API exposes the
+implemented registry, import and validation resources; write hardening and provider
+management remain issue #35. The service contract, stable identifier rules,
+standards-metadata boundary, authorization model and version lifecycle are documented in
+[`docs/registry.md`](docs/registry.md).
+
+## Versioned REST API and OpenAPI
+
+The product API lives under `/api/v1` and is generated from a single route/schema source of
+truth. It exposes public rulebook, attestation, schema-reference and version reads; the exact
+version snapshot bytes with a verifiable digest; authenticated rulebook/version creation and
+publication; authenticated import preview and import; and credential validation. Successful responses use
+a `{ "data": ... }` envelope and failures use a stable `{ "error": { "code", "message" } }`
+envelope. Writes and the import preview require a provider bearer token.
+
+`bun run openapi:check` validates the generated OpenAPI 3.1 document against the official
+OpenAPI 3.1 schema, and the contract tests compare the documented operations with the routes
+Hono actually registered. The `openapi` CI job runs that check on every pull request.
+Versioning, idempotency, error mapping, resource paths and limitations are documented in
+[`docs/api.md`](docs/api.md).
 
 ## Credential validation
 
-`POST /api/credentials/validate` validates a real SD-JWT VC artifact against one immutable
+`POST /api/v1/credentials/validate` validates a real SD-JWT VC artifact against one immutable
 rulebook version and returns the pinned version/digest, per-dimension statuses, structured
 violations with JSON Pointer paths and the reference `#integrity` result. The request selects
 `rulebookId`, `rulebookVersion`, `attestationType` and the `credential`, and may carry the
@@ -128,8 +150,9 @@ need unbounded regex/format evaluation (`format`, `pattern`, `patternProperties`
 `uniqueItems`, the legacy `dependencies` applicator, `$ref` and its variants) are reported
 `NOT_TESTED` instead of executed; ambiguous `vct`/JSON Schema documents, unpinned references
 and unresolved Type Metadata `extends` are not treated as validated.
-Credential contents and claim values are never logged or returned. See [`docs/validation.md`](docs/validation.md) for
-the contract, statuses, limits and non-claims.
+Credential contents and claim values are never logged or returned. The response is wrapped
+in `{ "data": ... }` like the other product-API successes. See
+[`docs/validation.md`](docs/validation.md) for the contract, statuses, limits and non-claims.
 
 ## Safe URL and JSON import
 
@@ -145,8 +168,9 @@ Remote retrieval is untrusted-input code: https-only, DNS/SSRF address checks wi
 pinning, redirect re-validation, request and total timeouts, response-size and JSON shape
 limits, bounded catalog entries and schema-reference fan-out. Schema references are
 retained but not fetched or SRI-verified in this slice, and re-import/conflict handling is
-issue #31. See [`docs/import.md`](docs/import.md) for the full contract, limits and
-limitations.
+implemented. The HTTP preview route requires a provider token because a URL preview performs
+a bounded outbound fetch; rate limiting remains issue #35. See [`docs/import.md`](docs/import.md)
+for the full contract, limits and limitations.
 
 ## Build and run
 
@@ -175,8 +199,8 @@ docker compose up --build --wait
 The image is multi-stage, runs as the non-root `bun` user and defines a `HEALTHCHECK` against
 `/health`. It bakes in no secrets. The server opens the SQLite database and applies migrations
 at startup; the image stores it at `/data/attestbook.sqlite` and Compose mounts a named volume
-there. CI builds the image, starts a container and verifies the `/health` and unknown-route API
-round-trip, so the image is exercised on every pull request.
+there. CI builds the image, starts a container and verifies the `/health`, empty rulebook-catalogue
+and unknown-route API round-trip, so the image is exercised on every pull request.
 
 ## Configuration
 
@@ -219,21 +243,22 @@ Application code still uses `strict`, `exactOptionalPropertyTypes` and
 
 `.github/workflows/ci.yml` runs on every pull request and on pushes to `main`:
 
-| Job                 | Checks                                                     |
-| ------------------- | ---------------------------------------------------------- |
-| `quality`           | Prettier, ESLint, strict TypeScript typecheck              |
-| `test`              | Bun tests, including the real OWF package and SQLite smoke |
-| `build`             | Production bundle and bundle presence                      |
-| `docker smoke`      | Image build, container startup, health and 404 round-trip  |
-| `docs`              | Phase 0 document consistency and the checker's own tests   |
-| `owf compatibility` | Phase 0 OWF probe on Node.js 22 and Bun 1.3.1              |
+| Job                 | Checks                                                               |
+| ------------------- | -------------------------------------------------------------------- |
+| `quality`           | Prettier, ESLint, strict TypeScript typecheck                        |
+| `test`              | Bun tests, including the real OWF package and SQLite smoke           |
+| `openapi`           | Generated OpenAPI 3.1 document validation                            |
+| `build`             | Production bundle and bundle presence                                |
+| `docker smoke`      | Image build, container startup, health, catalogue and 404 round-trip |
+| `docs`              | Phase 0 document consistency and the checker's own tests             |
+| `owf compatibility` | Phase 0 OWF probe on Node.js 22 and Bun 1.3.1                        |
 
 No job deploys, publishes an image or needs a secret or a live external service.
 
 ## Repository layout
 
 ```text
-src/                application code and Bun tests (registry and validation modules)
+src/                application code and Bun tests (api, registry, import, validation)
 migrations/         ordered SQL schema migrations
 docs/               specification, architecture, registry, validation and Phase 0 documents
 research/owf-audit/ reproducible audit probe for the pinned OWF package

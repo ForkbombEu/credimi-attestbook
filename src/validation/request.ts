@@ -90,7 +90,7 @@ function parseSchemaDocuments(value: unknown): readonly SchemaDocumentInput[] | 
 }
 
 /**
- * Validates and normalises an untyped `POST /api/credentials/validate` body.
+ * Validates and normalises an untyped `POST /api/v1/credentials/validate` body.
  * Throws a `RegistryError` with code `invalid_input` on a malformed request.
  */
 export function parseValidateCredentialInput(value: unknown): ValidateCredentialInput {

@@ -17,7 +17,7 @@ enforcement), D-14 (SD-JWT VC + Ajv) and D-17 (structural scope only).
 
 ## 1. What the engine executes
 
-`POST /api/credentials/validate` validates one credential artifact against one **immutable,
+`POST /api/v1/credentials/validate` validates one credential artifact against one **immutable,
 published or draft rulebook version**. The engine:
 
 1. reads the rulebook and version from the registry and recomputes the SHA-256 of the stored
@@ -115,7 +115,7 @@ silently.
 ## 4. Typed contract
 
 ```http
-POST /api/credentials/validate
+POST /api/v1/credentials/validate
 Content-Type: application/json
 ```
 
@@ -138,7 +138,8 @@ Content-Type: application/json
 is optional and limited to four documents of at most 128 KiB each; the body is limited to
 4 MiB. The credential itself is limited to 512 KiB.
 
-The response includes:
+The response is wrapped in the product-API success envelope (`{ "data": ... }`; see
+[`docs/api.md`](api.md)). The `data` object includes:
 
 | Field | Meaning |
 | --- | --- |

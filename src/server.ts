@@ -18,7 +18,7 @@ const validation = new CredentialValidator({
     maxConcurrent: config.schemaSandboxConcurrency,
   },
 })
-const app = createApp({ validation })
+const app = createApp({ registry, validation })
 
 const server = Bun.serve({
   hostname: config.hostname,
