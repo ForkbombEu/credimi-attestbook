@@ -11,7 +11,7 @@
   "scripts": {
     "dev": "bun --watch src/server.ts",
     "start": "bun dist/server.js",
-    "build": "rm -rf dist && bun build src/server.ts --outdir dist --target bun",
+    "build": "rm -rf dist && bun build src/server.ts src/validation/schema-sandbox-entry.ts --outdir dist --target bun",
     "test": "bun test src",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",

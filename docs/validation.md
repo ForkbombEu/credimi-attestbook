@@ -60,8 +60,9 @@ therefore carries `schemaDocuments` with the **exact UTF-8 document text**. The 
   `unsupported_schema_keyword`; unknown keywords and other dialects are also `NOT_TESTED`
   instead of being ignored and reported as validated. A document that mixes a root `vct`
   with JSON Schema keywords is `NOT_TESTED` as `ambiguous_schema_document` because either
-  classification would skip constraints. JSON Schema evaluation is bounded to 2,000 schema
-  nodes and 1,000,000 schema-node × claim-node units, and Ajv stops at the first violation.
+  classification would skip constraints. JSON Schema and Type Metadata evaluation runs in a
+  separate Bun worker process with a 2-second hard timeout and a 256 MiB RSS watchdog; hitting
+  either limit is reported as `NOT_TESTED`, not as a credential failure.
 
 A reference with no supplied document makes schema validation `NOT_TESTED`. Supplying an
 unrelated schema cannot widen validation silently.
@@ -141,10 +142,15 @@ presented as mdoc or W3C VC support (FR-011).
 The engine never logs or persists the credential, disclosures or claim values. The HTTP
 error handler logs only the method, path and error class. Results expose claim paths and
 constraints, not values. Hard bounds are: 512 KiB credential, four schema documents of 128 KiB,
-4 MiB body, 64-level schema/claim nesting, 1,000 disclosures, 4,096 credential claim nodes,
-512 Type Metadata claims with 32-segment paths, 20,000,000 units of Type Metadata work, 2,000
-JSON Schema nodes, 1,000,000 schema × claim units and one rendered JSON Schema violation per
-document. Claim depth is checked before and after disclosures are unpacked. Each JSON Schema document is compiled with a fresh Ajv instance so caller-supplied
+4 MiB body, 64-level schema/claim nesting, 1,000 disclosures, 4,096 credential claim nodes.
+Schema documents are evaluated in a separate Bun worker process with a configurable hard
+timeout (default 2 s), RSS limit (default 256 MiB), output cap (1 MiB) and concurrency cap
+(two children). The RSS watchdog needs Linux `/proc`; on any other platform the sandbox fails
+closed. The HTTP process never compiles or runs an untrusted schema itself. A limit hit
+produces `NOT_TESTED` evidence with `schema_evaluation_timeout`,
+`schema_evaluation_memory_exceeded`, `schema_evaluation_output_exceeded`,
+`schema_evaluation_failed`, `schema_sandbox_busy` or `schema_sandbox_unavailable`. Claim depth
+is checked before and after disclosures are unpacked. Each JSON Schema document is compiled with a fresh Ajv instance so caller-supplied
 `$id` state cannot leak between requests.
 
 ## 7. Verification
@@ -158,12 +164,15 @@ Tests execute the real pinned libraries and a real migrated SQLite registry:
   Schema positive/negative checks, SRI mismatch/unsupported algorithm/missing pin, rejection
   of catastrophic-regex, format, uniqueItems, legacy `dependencies` and `$ref` routes,
   unsupported dialects, unknown keywords and ambiguous `vct`/JSON Schema documents,
-  unresolved Type Metadata `extends`, oversized Type Metadata and credential claim sets,
-  missing documents;
+  unresolved Type Metadata `extends`, oversized credential claim sets, the sandbox timeout
+  path and missing documents;
 - `src/validation/engine.test.ts` — pinned version/digest evidence, dimension statuses,
   unsupported formats, key binding, digest-tamper abort, version pinning;
-- `src/app.validation.test.ts` — typed HTTP contract, 400/404/413/503 cases, no credential or
-  claim values in responses or logs;
+- `src/validation/schema-sandbox.test.ts` — real-child timeout, memory, output, busy,
+  unavailable, malformed-output and mixed integrity/timeout behaviour;
+- `src/app.validation.test.ts` — typed HTTP contract, 400/404/413/503 cases, /health
+  responsiveness during a hostile sandbox run, no credential or claim values in responses or
+  logs;
 - `src/config.test.ts` — `DATABASE_PATH` configuration.
 
 ## 8. Non-claims and next slices

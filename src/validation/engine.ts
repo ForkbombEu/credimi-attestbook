@@ -21,7 +21,7 @@ import { TS11_ATTESTATION_LOS_VALUES, TS11_BINDING_TYPE_VALUES } from '../standa
 
 import { recognizeCredentialFormat } from './format'
 import { parseValidateCredentialInput } from './request'
-import { validateSchemaDocuments } from './schema'
+import { validateSchemaDocuments, type SchemaSandboxLimits } from './schema-sandbox'
 import { parseSdJwtVc, type ParsedSdJwtVc } from './sd-jwt'
 import { aggregateStatus } from './status'
 import type {
@@ -43,6 +43,8 @@ export interface CredentialValidatorOptions {
   readonly now?: () => string
   /** Identifier generator; injectable for deterministic tests. */
   readonly generateId?: () => string
+  /** Optional sandbox limits; production passes the configured values. */
+  readonly sandbox?: SchemaSandboxLimits
 }
 
 interface SnapshotAttestation {
@@ -199,11 +201,13 @@ export class CredentialValidator {
   private readonly source: RulebookValidationSource
   private readonly now: () => string
   private readonly generateId: () => string
+  private readonly sandbox: SchemaSandboxLimits
 
   constructor(options: CredentialValidatorOptions) {
     this.source = options.source
     this.now = options.now ?? (() => new Date().toISOString())
     this.generateId = options.generateId ?? (() => randomUUID())
+    this.sandbox = options.sandbox ?? {}
   }
 
   /**
@@ -368,11 +372,14 @@ export class CredentialValidator {
       ])
       schemaReferences = []
     } else {
-      const outcome = validateSchemaDocuments({
-        references: matchingReferences,
-        documents: request.schemaDocuments ?? [],
-        parsed,
-      })
+      const outcome = await validateSchemaDocuments(
+        {
+          references: matchingReferences,
+          documents: request.schemaDocuments ?? [],
+          parsed,
+        },
+        this.sandbox,
+      )
       schemaDimension = dimension('schema_validation', outcome.status, outcome.findings)
       schemaReferences = outcome.schemaReferences
     }

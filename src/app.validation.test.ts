@@ -3,9 +3,12 @@ import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { MAX_VALIDATION_BODY_BYTES, createApp, type ErrorEnvelope } from './app'
 import { createRegistryFixture, type RegistryFixture } from './registry/test-support'
 import { CredentialValidator, type CredentialValidationResult } from './validation'
+import type { SchemaSandboxLimits } from './validation/schema-sandbox'
 import {
+  defaultCredentialClaims,
   issueTestCredential,
   seedPublishedRulebook,
+  type SeedRulebookOptions,
   type SeededRulebook,
 } from './validation/test-support'
 
@@ -16,16 +19,20 @@ afterEach(() => {
   fixture = undefined
 })
 
-function setup(): {
+function setup(
+  options: SeedRulebookOptions = {},
+  sandbox?: SchemaSandboxLimits,
+): {
   app: ReturnType<typeof createApp>
   seeded: SeededRulebook
 } {
   fixture = createRegistryFixture()
-  const seeded = seedPublishedRulebook(fixture.database, fixture.registry)
+  const seeded = seedPublishedRulebook(fixture.database, fixture.registry, options)
   const validator = new CredentialValidator({
     source: fixture.registry,
     now: () => '2026-01-01T00:00:00.000Z',
     generateId: () => 'http-validation-id',
+    ...(sandbox === undefined ? {} : { sandbox }),
   })
   return { app: createApp({ validation: validator }), seeded }
 }
@@ -68,6 +75,42 @@ describe('POST /api/credentials/validate', () => {
     expect(result.overallStatus).toBe('NOT_TESTED')
     expect(result.dimensions).toHaveLength(8)
     expect(result.violations.map((entry) => entry.code)).toContain('signature_not_verified')
+  })
+
+  test('keeps /health responsive while a hostile schema runs in the sandbox', async () => {
+    const hostile = JSON.stringify({
+      type: 'object',
+      properties: {
+        given_name: {
+          anyOf: Array.from({ length: 950 }, () => ({ minLength: 600_000 })),
+        },
+      },
+    })
+    const { app, seeded } = setup(
+      {
+        schemaUri: 'https://example.org/schemas/hostile.json',
+        schemaContent: hostile,
+      },
+      { timeoutMs: 1_000 },
+    )
+    const credential = await issueTestCredential({
+      claims: defaultCredentialClaims({ given_name: 'a'.repeat(370_000) }),
+      selectiveClaims: [],
+    })
+
+    const validation = post(app, body(seeded, credential))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+
+    const started = Date.now()
+    const health = await app.request('/health')
+    const elapsed = Date.now() - started
+    expect(health.status).toBe(200)
+    expect(elapsed).toBeLessThan(200)
+
+    const response = await validation
+    expect(response.status).toBe(200)
+    const result = (await response.json()) as CredentialValidationResult
+    expect(result.violations.map((entry) => entry.code)).toContain('schema_evaluation_timeout')
   })
 
   test('does not echo the credential or claim values', async () => {

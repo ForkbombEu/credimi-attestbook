@@ -10,7 +10,14 @@ const database = openDatabase(config.databasePath)
 applyMigrations(database)
 
 const registry = new Registry({ database })
-const validation = new CredentialValidator({ source: registry })
+const validation = new CredentialValidator({
+  source: registry,
+  sandbox: {
+    timeoutMs: config.schemaSandboxTimeoutMs,
+    maxRssBytes: config.schemaSandboxMaxRssMb * 1024 * 1024,
+    maxConcurrent: config.schemaSandboxConcurrency,
+  },
+})
 const app = createApp({ validation })
 
 const server = Bun.serve({

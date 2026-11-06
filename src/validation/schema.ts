@@ -21,8 +21,8 @@ import {
   type TypeMetadataFormat,
 } from '@sd-jwt/sd-jwt-vc'
 import Ajv2020 from 'ajv/dist/2020.js'
+import type { Disclosure } from '@sd-jwt/core'
 
-import type { ParsedSdJwtVc } from './sd-jwt'
 import type {
   SchemaDocumentInput,
   SchemaReferenceEvidence,
@@ -38,20 +38,6 @@ const MAX_SCHEMA_DEPTH = 64
 
 /** Bound on credential claim nodes handed to any schema evaluator. */
 const MAX_CREDENTIAL_CLAIM_NODES = 4_096
-
-/** Bound on a single JSON Schema's node count and schema x claim work. */
-const MAX_JSON_SCHEMA_NODES = 2_000
-const MAX_JSON_SCHEMA_WORK = 1_000_000
-
-/** Bound on Type Metadata declaration count and path length. */
-const MAX_TYPE_METADATA_CLAIMS = 512
-const MAX_TYPE_METADATA_PATH_LENGTH = 32
-
-/**
- * Bound on the O(present claims x metadata claims^2) Type Metadata check. A
- * pinned 128 KiB metadata document can otherwise describe thousands of paths.
- */
-const MAX_TYPE_METADATA_WORK = 20_000_000
 
 /**
  * Keywords whose evaluation AttestBook cannot bound yet. `pattern`/`format`
@@ -191,10 +177,18 @@ export interface SchemaValidationOutcome {
   readonly schemaReferences: readonly SchemaReferenceEvidence[]
 }
 
-export interface ValidateSchemaDocumentsOptions {
-  readonly references: readonly SnapshotSchemaReference[]
-  readonly documents: readonly SchemaDocumentInput[]
-  readonly parsed: ParsedSdJwtVc
+/**
+ * Serializable input for the schema sandbox worker. It deliberately contains
+ * no class instances: disclosures are reduced to the member name and value the
+ * Type Metadata verifier reads.
+ */
+export interface SchemaEvaluationInput {
+  readonly claims: Record<string, unknown>
+  readonly packedPayload: Record<string, unknown>
+  readonly disclosureMap: Readonly<
+    Record<string, { readonly key?: string; readonly value: unknown }>
+  >
+  readonly vct: string
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -415,7 +409,7 @@ function validateTypeMetadata(
   reference: SnapshotSchemaReference,
   index: number,
   document: unknown,
-  parsed: ParsedSdJwtVc,
+  input: SchemaEvaluationInput,
 ): SchemaApplication {
   const schema = TypeMetadataFormatSchema.safeParse(document)
   if (!schema.success) {
@@ -437,50 +431,8 @@ function validateTypeMetadata(
   }
 
   const typeMetadata: TypeMetadataFormat = schema.data
-  const metadataClaims = typeMetadata.claims ?? []
-  const metadataPathTooLong = metadataClaims.some(
-    (claim) => claim.path.length > MAX_TYPE_METADATA_PATH_LENGTH,
-  )
-  if (metadataClaims.length > MAX_TYPE_METADATA_CLAIMS || metadataPathTooLong) {
-    return {
-      reference,
-      kind: 'type_metadata',
-      applied: false,
-      status: 'NOT_TESTED',
-      findings: [
-        finding(
-          'type_metadata_too_complex',
-          `The type metadata declares more than ${MAX_TYPE_METADATA_CLAIMS} claims or a claim path longer than ${MAX_TYPE_METADATA_PATH_LENGTH}; it was not evaluated.`,
-          'warning',
-          `/schemaReferences/${index}`,
-        ),
-      ],
-    }
-  }
-
-  const claimNodes = countNodes(parsed.claims, MAX_CREDENTIAL_CLAIM_NODES)
-  if (
-    claimNodes > MAX_CREDENTIAL_CLAIM_NODES ||
-    claimNodes * metadataClaims.length * metadataClaims.length > MAX_TYPE_METADATA_WORK
-  ) {
-    return {
-      reference,
-      kind: 'type_metadata',
-      applied: false,
-      status: 'NOT_TESTED',
-      findings: [
-        finding(
-          'type_metadata_too_complex',
-          'The credential and type metadata exceed the bounded Type Metadata evaluation budget; schema validation was not executed.',
-          'warning',
-          `/schemaReferences/${index}`,
-        ),
-      ],
-    }
-  }
-
   const findings: ValidationFinding[] = []
-  if (typeMetadata.vct !== parsed.vct) {
+  if (typeMetadata.vct !== input.vct) {
     findings.push(
       finding(
         'vct_mismatch',
@@ -512,8 +464,8 @@ function validateTypeMetadata(
 
   const verification = verifyClaimsAgainstTypeMetadata(
     typeMetadata,
-    parsed.packedPayload,
-    parsed.disclosureMap,
+    input.packedPayload,
+    input.disclosureMap as unknown as Record<string, Disclosure>,
   )
   for (const path of verification.missingMandatoryClaims) {
     findings.push(
@@ -595,8 +547,7 @@ function validateJsonSchema(
   reference: SnapshotSchemaReference,
   index: number,
   document: unknown,
-  parsed: ParsedSdJwtVc,
-  claimNodes: number,
+  claims: Record<string, unknown>,
 ): SchemaApplication {
   if (typeof document !== 'boolean' && !isRecord(document)) {
     return {
@@ -632,24 +583,6 @@ function validateJsonSchema(
           ),
         ],
       }
-    }
-  }
-
-  const schemaNodes = countNodes(document, MAX_JSON_SCHEMA_NODES)
-  if (schemaNodes > MAX_JSON_SCHEMA_NODES || schemaNodes * claimNodes > MAX_JSON_SCHEMA_WORK) {
-    return {
-      reference,
-      kind: 'json_schema',
-      applied: false,
-      status: 'NOT_TESTED',
-      findings: [
-        finding(
-          'json_schema_too_complex',
-          'The supplied JSON Schema and credential exceed the bounded evaluation budget; schema validation was not executed.',
-          'warning',
-          `/schemaReferences/${index}`,
-        ),
-      ],
     }
   }
 
@@ -690,7 +623,7 @@ function validateJsonSchema(
     }
   }
 
-  if (validate(parsed.claims)) {
+  if (validate(claims)) {
     return { reference, kind: 'json_schema', applied: true, status: 'PASS', findings: [] }
   }
 
@@ -719,94 +652,146 @@ function validateJsonSchema(
  * Applies every supplied document to the selected rulebook references.
  * `references` must already be filtered to the credential format.
  */
-export function validateSchemaDocuments(
-  options: ValidateSchemaDocumentsOptions,
-): SchemaValidationOutcome {
-  const applications: SchemaApplication[] = []
-  const schemaReferences: SchemaReferenceEvidence[] = []
+export function aggregateSchemaStatus(statuses: readonly ValidationStatus[]): ValidationStatus {
+  if (statuses.length === 0) {
+    return 'NOT_APPLICABLE'
+  }
+  if (statuses.includes('FAIL')) {
+    return 'FAIL'
+  }
+  if (statuses.includes('INCONCLUSIVE')) {
+    return 'INCONCLUSIVE'
+  }
+  if (statuses.every((entry) => entry === 'NOT_TESTED')) {
+    return 'NOT_TESTED'
+  }
+  if (statuses.includes('NOT_TESTED')) {
+    return 'INCONCLUSIVE'
+  }
+  if (statuses.includes('PASS')) {
+    return 'PASS'
+  }
+  return 'NOT_APPLICABLE'
+}
 
-  const claimNodes = countNodes(options.parsed.claims, MAX_CREDENTIAL_CLAIM_NODES)
+/** A reference whose document resolved to enough facts to finish in-process. */
+export interface SettledSchemaDocument {
+  readonly index: number
+  readonly application: SchemaApplication
+  readonly evidence: SchemaReferenceEvidence
+}
+
+/** A verified document whose compute-heavy evaluation belongs in the sandbox. */
+export interface PendingSchemaDocument {
+  readonly index: number
+  readonly reference: SnapshotSchemaReference
+  readonly kind: 'type_metadata' | 'json_schema'
+  readonly document: unknown
+  readonly integrityFindings: readonly ValidationFinding[]
+}
+
+export interface PreparedSchemaDocuments {
+  readonly settled: readonly SettledSchemaDocument[]
+  readonly pending: readonly PendingSchemaDocument[]
+}
+
+export interface PrepareSchemaDocumentsOptions {
+  readonly references: readonly SnapshotSchemaReference[]
+  readonly documents: readonly SchemaDocumentInput[]
+  readonly claims: Record<string, unknown>
+}
+
+function settle(
+  index: number,
+  reference: SnapshotSchemaReference,
+  application: SchemaApplication,
+): SettledSchemaDocument {
+  return {
+    index,
+    application,
+    evidence: {
+      formatIdentifier: reference.formatIdentifier,
+      uri: reference.uri,
+      integrity: reference.integrity,
+      kind: application.kind,
+      applied: application.applied,
+    },
+  }
+}
+
+/**
+ * Performs every cheap, non-compute-heavy check in the HTTP process: input
+ * bounds, reference matching, integrity, JSON parsing, depth, ambiguity and
+ * the unsupported-keyword scan. Only verified documents reach `pending`.
+ */
+export function prepareSchemaDocuments(
+  options: PrepareSchemaDocumentsOptions,
+): PreparedSchemaDocuments {
+  const settled: SettledSchemaDocument[] = []
+  const pending: PendingSchemaDocument[] = []
+
+  const claimNodes = countNodes(options.claims, MAX_CREDENTIAL_CLAIM_NODES)
   if (claimNodes > MAX_CREDENTIAL_CLAIM_NODES) {
     for (const [index, reference] of options.references.entries()) {
-      applications.push({
-        reference,
-        kind: null,
-        applied: false,
-        status: 'NOT_TESTED',
-        findings: [
-          finding(
-            'credential_claims_too_many',
-            `The credential carries more than ${MAX_CREDENTIAL_CLAIM_NODES} claim nodes; schema validation was not executed.`,
-            'warning',
-            `/schemaReferences/${index}`,
-          ),
-        ],
-      })
-      schemaReferences.push({
-        formatIdentifier: reference.formatIdentifier,
-        uri: reference.uri,
-        integrity: reference.integrity,
-        kind: null,
-        applied: false,
-      })
+      settled.push(
+        settle(index, reference, {
+          reference,
+          kind: null,
+          applied: false,
+          status: 'NOT_TESTED',
+          findings: [
+            finding(
+              'credential_claims_too_many',
+              `The credential carries more than ${MAX_CREDENTIAL_CLAIM_NODES} claim nodes; schema validation was not executed.`,
+              'warning',
+              `/schemaReferences/${index}`,
+            ),
+          ],
+        }),
+      )
     }
-    return {
-      status: 'NOT_TESTED',
-      findings: applications.flatMap((application) => application.findings),
-      applications,
-      schemaReferences,
-    }
+    return { settled, pending }
   }
 
   options.references.forEach((reference, index) => {
     const documentIndex = options.documents.findIndex((entry) => entry.uri === reference.uri)
     const supplied = documentIndex === -1 ? undefined : options.documents[documentIndex]
     if (supplied === undefined) {
-      applications.push({
-        reference,
-        kind: null,
-        applied: false,
-        status: 'NOT_TESTED',
-        findings: [
-          finding(
-            'schema_document_not_supplied',
-            `No document was supplied for the rulebook schema reference "${reference.uri}"; schema validation was not executed.`,
-            'warning',
-            `/schemaReferences/${index}`,
-          ),
-        ],
-      })
-      schemaReferences.push({
-        formatIdentifier: reference.formatIdentifier,
-        uri: reference.uri,
-        integrity: reference.integrity,
-        kind: null,
-        applied: false,
-      })
+      settled.push(
+        settle(index, reference, {
+          reference,
+          kind: null,
+          applied: false,
+          status: 'NOT_TESTED',
+          findings: [
+            finding(
+              'schema_document_not_supplied',
+              `No document was supplied for the rulebook schema reference "${reference.uri}"; schema validation was not executed.`,
+              'warning',
+              `/schemaReferences/${index}`,
+            ),
+          ],
+        }),
+      )
       return
     }
 
     const integrity = verifyIntegrity(reference, supplied.content, index)
     if (integrity.status !== 'verified') {
-      applications.push({
-        reference,
-        kind: null,
-        applied: false,
-        status:
-          integrity.status === 'mismatch'
-            ? 'FAIL'
-            : integrity.status === 'unverified'
-              ? 'INCONCLUSIVE'
-              : 'NOT_TESTED',
-        findings: integrity.findings,
-      })
-      schemaReferences.push({
-        formatIdentifier: reference.formatIdentifier,
-        uri: reference.uri,
-        integrity: reference.integrity,
-        kind: null,
-        applied: false,
-      })
+      settled.push(
+        settle(index, reference, {
+          reference,
+          kind: null,
+          applied: false,
+          status:
+            integrity.status === 'mismatch'
+              ? 'FAIL'
+              : integrity.status === 'unverified'
+                ? 'INCONCLUSIVE'
+                : 'NOT_TESTED',
+          findings: integrity.findings,
+        }),
+      )
       return
     }
 
@@ -814,27 +799,22 @@ export function validateSchemaDocuments(
     try {
       document = JSON.parse(supplied.content)
     } catch {
-      applications.push({
-        reference,
-        kind: null,
-        applied: false,
-        status: 'FAIL',
-        findings: [
-          finding(
-            'invalid_schema_document',
-            'The supplied schema document is not valid JSON.',
-            'error',
-            `/schemaDocuments/${documentIndex}`,
-          ),
-        ],
-      })
-      schemaReferences.push({
-        formatIdentifier: reference.formatIdentifier,
-        uri: reference.uri,
-        integrity: reference.integrity,
-        kind: null,
-        applied: false,
-      })
+      settled.push(
+        settle(index, reference, {
+          reference,
+          kind: null,
+          applied: false,
+          status: 'FAIL',
+          findings: [
+            finding(
+              'invalid_schema_document',
+              'The supplied schema document is not valid JSON.',
+              'error',
+              `/schemaDocuments/${documentIndex}`,
+            ),
+          ],
+        }),
+      )
       return
     }
 
@@ -842,118 +822,98 @@ export function validateSchemaDocuments(
     const kind: 'type_metadata' | 'json_schema' = typeMetadataLike ? 'type_metadata' : 'json_schema'
 
     if (exceedsDepth(document, MAX_SCHEMA_DEPTH)) {
-      applications.push({
-        reference,
-        kind,
-        applied: false,
-        status: 'FAIL',
-        findings: [
-          finding(
-            'schema_document_too_deep',
-            `The supplied schema document exceeds the ${MAX_SCHEMA_DEPTH}-level nesting bound.`,
-            'error',
-            `/schemaDocuments/${documentIndex}`,
-          ),
-        ],
-      })
-      schemaReferences.push({
-        formatIdentifier: reference.formatIdentifier,
-        uri: reference.uri,
-        integrity: reference.integrity,
-        kind,
-        applied: false,
-      })
+      settled.push(
+        settle(index, reference, {
+          reference,
+          kind,
+          applied: false,
+          status: 'FAIL',
+          findings: [
+            finding(
+              'schema_document_too_deep',
+              `The supplied schema document exceeds the ${MAX_SCHEMA_DEPTH}-level nesting bound.`,
+              'error',
+              `/schemaDocuments/${documentIndex}`,
+            ),
+          ],
+        }),
+      )
       return
     }
 
     if (typeMetadataLike && looksLikeJsonSchema(document as Record<string, unknown>)) {
-      applications.push({
-        reference,
-        kind: null,
-        applied: false,
-        status: 'NOT_TESTED',
-        findings: [
-          finding(
-            'ambiguous_schema_document',
-            'The supplied document has a `vct` member and JSON Schema keywords; its kind is ambiguous, so it was not evaluated.',
-            'warning',
-            `/schemaReferences/${index}`,
-          ),
-        ],
-      })
-      schemaReferences.push({
-        formatIdentifier: reference.formatIdentifier,
-        uri: reference.uri,
-        integrity: reference.integrity,
-        kind: null,
-        applied: false,
-      })
+      settled.push(
+        settle(index, reference, {
+          reference,
+          kind: null,
+          applied: false,
+          status: 'NOT_TESTED',
+          findings: [
+            finding(
+              'ambiguous_schema_document',
+              'The supplied document has a `vct` member and JSON Schema keywords; its kind is ambiguous, so it was not evaluated.',
+              'warning',
+              `/schemaReferences/${index}`,
+            ),
+          ],
+        }),
+      )
       return
     }
 
     if (kind === 'json_schema') {
       const unsupported = findUnsupportedSchemaKeyword(document)
       if (unsupported !== null) {
-        applications.push({
-          reference,
-          kind,
-          applied: false,
-          status: 'NOT_TESTED',
-          findings: [
-            finding(
-              'unsupported_schema_keyword',
-              `The supplied JSON Schema uses "${unsupported.keyword}", which AttestBook cannot evaluate safely over untrusted input; schema validation was not executed.`,
-              'warning',
-              `/schemaReferences/${index}`,
-            ),
-          ],
-        })
-        schemaReferences.push({
-          formatIdentifier: reference.formatIdentifier,
-          uri: reference.uri,
-          integrity: reference.integrity,
-          kind,
-          applied: false,
-        })
+        settled.push(
+          settle(index, reference, {
+            reference,
+            kind,
+            applied: false,
+            status: 'NOT_TESTED',
+            findings: [
+              finding(
+                'unsupported_schema_keyword',
+                `The supplied JSON Schema uses "${unsupported.keyword}", which AttestBook cannot evaluate safely over untrusted input; schema validation was not executed.`,
+                'warning',
+                `/schemaReferences/${index}`,
+              ),
+            ],
+          }),
+        )
         return
       }
     }
 
-    const application =
-      kind === 'type_metadata'
-        ? validateTypeMetadata(reference, index, document, options.parsed)
-        : validateJsonSchema(reference, index, document, options.parsed, claimNodes)
-
-    const findings = [...integrity.findings, ...application.findings]
-    applications.push({
-      ...application,
-      findings,
-    })
-    schemaReferences.push({
-      formatIdentifier: reference.formatIdentifier,
-      uri: reference.uri,
-      integrity: reference.integrity,
+    pending.push({
+      index,
+      reference,
       kind,
-      applied: application.applied,
+      document,
+      integrityFindings: integrity.findings,
     })
   })
 
-  const findings = applications.flatMap((application) => application.findings)
-  const statuses = applications.map((application) => application.status)
-  let status: ValidationStatus
-  if (statuses.includes('FAIL')) {
-    status = 'FAIL'
-  } else if (statuses.includes('INCONCLUSIVE')) {
-    status = 'INCONCLUSIVE'
-  } else if (statuses.every((entry) => entry === 'NOT_TESTED')) {
-    status = 'NOT_TESTED'
-  } else if (statuses.includes('NOT_TESTED')) {
-    status = 'INCONCLUSIVE'
-  } else if (statuses.includes('PASS')) {
-    status = 'PASS'
-  } else {
-    status = 'NOT_APPLICABLE'
-  }
+  return { settled, pending }
+}
 
-  return { status, findings, applications, schemaReferences }
+/**
+ * Runs in the sandbox child only. Evaluates one verified document against the
+ * credential facts and returns its application.
+ */
+export function evaluateSchemaDocument(
+  pending: PendingSchemaDocument,
+  input: SchemaEvaluationInput,
+): SchemaApplication {
+  const application =
+    pending.kind === 'type_metadata'
+      ? validateTypeMetadata(pending.reference, pending.index, pending.document, input)
+      : validateJsonSchema(pending.reference, pending.index, pending.document, input.claims)
+
+  if (pending.integrityFindings.length === 0) {
+    return application
+  }
+  return {
+    ...application,
+    findings: [...pending.integrityFindings, ...application.findings],
+  }
 }

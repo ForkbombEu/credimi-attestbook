@@ -70,7 +70,8 @@ bun run docs:check   # Phase 0 documentation consistency, plain Node
   pinning, redirect, time, size and JSON limits, catalog preview, conformance and compatibility
   reporting, provenance, and authenticated draft import; see [`docs/import.md`](docs/import.md);
 - `src/validation/` — real SD-JWT VC parsing with `@sd-jwt/core`, Type Metadata and JSON
-  Schema 2020-12 attribute checks, pinned-version/digest evidence and dimension statuses; see
+  Schema 2020-12 attribute checks, pinned-version/digest evidence, dimension statuses and a
+  timeout/memory-bounded schema-evaluation sandbox; see
   [`docs/validation.md`](docs/validation.md);
 - `src/app.validation.test.ts` — the typed `POST /api/credentials/validate` contract,
   400/404/413/503 cases and non-disclosure of credential material;
@@ -150,12 +151,13 @@ limitations.
 ## Build and run
 
 ```bash
-bun run build   # bundles src/server.ts into dist/server.js
+bun run build   # bundles src/server.ts and the schema worker into dist/
 bun run start   # serves the built bundle from dist/server.js
 ```
 
-The bundle is self-contained for the current dependency set; the runtime image therefore
-needs only Bun and `dist/`. Use `bun run dev` for source watching during development.
+The bundle is self-contained for the current dependency set; `bun run build` emits
+`dist/server.js` and the sandbox child at `dist/validation/schema-sandbox-entry.js`, so the runtime
+image needs only Bun and `dist/`. Use `bun run dev` for source watching during development.
 
 ## Docker
 
@@ -178,11 +180,14 @@ round-trip, so the image is exercised on every pull request.
 
 ## Configuration
 
-| Variable        | Default             | Meaning                                                             |
-| --------------- | ------------------- | ------------------------------------------------------------------- |
-| `PORT`          | `3000`              | Listener port; an integer between 1 and 65535                       |
-| `HOST`          | `127.0.0.1`         | Listener hostname or address                                        |
-| `DATABASE_PATH` | `attestbook.sqlite` | SQLite file opened at startup; `:memory:` is accepted for local use |
+| Variable                     | Default             | Meaning                                                             |
+| ---------------------------- | ------------------- | ------------------------------------------------------------------- |
+| `PORT`                       | `3000`              | Listener port; an integer between 1 and 65535                       |
+| `HOST`                       | `127.0.0.1`         | Listener hostname or address                                        |
+| `DATABASE_PATH`              | `attestbook.sqlite` | SQLite file opened at startup; `:memory:` is accepted for local use |
+| `SCHEMA_SANDBOX_TIMEOUT_MS`  | `2000`              | Hard wall-clock limit for one schema-evaluation child               |
+| `SCHEMA_SANDBOX_MAX_RSS_MB`  | `256`               | RSS limit for one schema-evaluation child                           |
+| `SCHEMA_SANDBOX_CONCURRENCY` | `2`                 | Maximum concurrent schema-evaluation children                       |
 
 Local development binds loopback only. The Docker image and `compose.yaml` set
 `HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup

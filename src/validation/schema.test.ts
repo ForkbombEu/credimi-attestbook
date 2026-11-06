@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { validateSchemaDocuments } from './schema'
+import { validateSchemaDocuments } from './schema-sandbox'
 import { parseSdJwtVc, type ParsedSdJwtVc } from './sd-jwt'
 import {
   defaultCredentialClaims,
@@ -42,7 +42,7 @@ function jsonSchemaReference(content: string) {
 describe('validateSchemaDocuments with SD-JWT VC Type Metadata', () => {
   test('passes a credential that satisfies every declared claim', async () => {
     const parsed = await parseOrThrow(await issueTestCredential())
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [typeMetadataReference(PID_TYPE_METADATA_TEXT)],
       documents: [{ uri: TYPE_METADATA_URI, content: PID_TYPE_METADATA_TEXT }],
       parsed,
@@ -65,7 +65,7 @@ describe('validateSchemaDocuments with SD-JWT VC Type Metadata', () => {
     const claims = defaultCredentialClaims()
     delete claims.birthdate
     const parsed = await parseOrThrow(await issueTestCredential({ claims }))
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [typeMetadataReference(PID_TYPE_METADATA_TEXT)],
       documents: [{ uri: TYPE_METADATA_URI, content: PID_TYPE_METADATA_TEXT }],
       parsed,
@@ -83,7 +83,7 @@ describe('validateSchemaDocuments with SD-JWT VC Type Metadata', () => {
         selectiveClaims: ['given_name', 'family_name', 'birthdate', 'age'],
       }),
     )
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [typeMetadataReference(PID_TYPE_METADATA_TEXT)],
       documents: [{ uri: TYPE_METADATA_URI, content: PID_TYPE_METADATA_TEXT }],
       parsed,
@@ -102,7 +102,7 @@ describe('validateSchemaDocuments with SD-JWT VC Type Metadata', () => {
       claims: PID_TYPE_METADATA.claims.filter((claim) => claim.path[0] !== 'age'),
     })
     const parsed = await parseOrThrow(await issueTestCredential())
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [typeMetadataReference(metadata)],
       documents: [{ uri: TYPE_METADATA_URI, content: metadata }],
       parsed,
@@ -117,7 +117,7 @@ describe('validateSchemaDocuments with SD-JWT VC Type Metadata', () => {
   test('fails when the type metadata vct does not match the credential vct', async () => {
     const metadata = JSON.stringify({ ...PID_TYPE_METADATA, vct: 'https://example.org/vct/other' })
     const parsed = await parseOrThrow(await issueTestCredential())
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [typeMetadataReference(metadata)],
       documents: [{ uri: TYPE_METADATA_URI, content: metadata }],
       parsed,
@@ -130,7 +130,7 @@ describe('validateSchemaDocuments with SD-JWT VC Type Metadata', () => {
   test('fails an invalid Type Metadata document', async () => {
     const metadata = JSON.stringify({ vct: TEST_VCT, claims: 'not-an-array' })
     const parsed = await parseOrThrow(await issueTestCredential())
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [typeMetadataReference(metadata)],
       documents: [{ uri: TYPE_METADATA_URI, content: metadata }],
       parsed,
@@ -144,7 +144,7 @@ describe('validateSchemaDocuments with SD-JWT VC Type Metadata', () => {
 describe('validateSchemaDocuments with JSON Schema 2020-12', () => {
   test('passes a credential that satisfies the schema', async () => {
     const parsed = await parseOrThrow(await issueTestCredential())
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [jsonSchemaReference(PID_JSON_SCHEMA_TEXT)],
       documents: [{ uri: JSON_SCHEMA_URI, content: PID_JSON_SCHEMA_TEXT }],
       parsed,
@@ -159,7 +159,7 @@ describe('validateSchemaDocuments with JSON Schema 2020-12', () => {
     const claims = defaultCredentialClaims()
     delete claims.birthdate
     const parsed = await parseOrThrow(await issueTestCredential({ claims }))
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [jsonSchemaReference(PID_JSON_SCHEMA_TEXT)],
       documents: [{ uri: JSON_SCHEMA_URI, content: PID_JSON_SCHEMA_TEXT }],
       parsed,
@@ -175,7 +175,7 @@ describe('validateSchemaDocuments with JSON Schema 2020-12', () => {
     const parsed = await parseOrThrow(
       await issueTestCredential({ claims: defaultCredentialClaims({ age: 'thirty' }) }),
     )
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [jsonSchemaReference(PID_JSON_SCHEMA_TEXT)],
       documents: [{ uri: JSON_SCHEMA_URI, content: PID_JSON_SCHEMA_TEXT }],
       parsed,
@@ -198,7 +198,7 @@ describe('validateSchemaDocuments with JSON Schema 2020-12', () => {
       type: 'object',
       required: ['attribute_that_is_absent'],
     })
-    const compile = (content: string) => {
+    const compile = async (content: string) => {
       const reference = {
         formatIdentifier: 'dc+sd-jwt',
         uri: JSON_SCHEMA_URI,
@@ -211,14 +211,14 @@ describe('validateSchemaDocuments with JSON Schema 2020-12', () => {
       })
     }
 
-    expect(compile(first).status).toBe('PASS')
-    const secondOutcome = compile(second)
+    expect((await compile(first)).status).toBe('PASS')
+    const secondOutcome = await compile(second)
     expect(secondOutcome.findings.map((entry) => entry.code)).not.toContain('invalid_json_schema')
     expect(secondOutcome.status).toBe('FAIL')
   })
 
-  test('does not evaluate a JSON Schema that exceeds the node or work budget', async () => {
-    const anyOf = Array.from({ length: 3_000 }, (_, index) => ({ const: index }))
+  test('reports a schema that exceeds the sandbox time limit as not tested', async () => {
+    const anyOf = Array.from({ length: 7_000 }, (_, index) => ({ const: index }))
     const schema = JSON.stringify({
       type: 'object',
       properties: { values: { type: 'array', items: { anyOf } } },
@@ -232,21 +232,57 @@ describe('validateSchemaDocuments with JSON Schema 2020-12', () => {
       uri: JSON_SCHEMA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = validateSchemaDocuments({
-      references: [reference],
-      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
-      parsed,
-    })
+    const outcome = await validateSchemaDocuments(
+      {
+        references: [reference],
+        documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+        parsed,
+      },
+      { timeoutMs: 100 },
+    )
 
     expect(outcome.status).toBe('NOT_TESTED')
-    expect(outcome.findings.map((entry) => entry.code)).toContain('json_schema_too_complex')
+    expect(outcome.findings.map((entry) => entry.code)).toContain('schema_evaluation_timeout')
     expect(outcome.schemaReferences[0]?.applied).toBe(false)
+  })
+
+  test('kills a worker that exceeds its memory limit', async () => {
+    if (process.platform !== 'linux') {
+      return
+    }
+    const anyOf = Array.from({ length: 7_000 }, (_, index) => ({ const: index }))
+    const schema = JSON.stringify({
+      type: 'object',
+      properties: { values: { type: 'array', items: { anyOf } } },
+    })
+    const claims = defaultCredentialClaims({
+      values: Array.from({ length: 1_000 }, (_, index) => index),
+    })
+    const parsed = await parseOrThrow(await issueTestCredential({ claims, selectiveClaims: [] }))
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const outcome = await validateSchemaDocuments(
+      {
+        references: [reference],
+        documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+        parsed,
+      },
+      { timeoutMs: 5_000, maxRssBytes: 1 * 2 ** 20 },
+    )
+
+    expect(outcome.status).toBe('NOT_TESTED')
+    expect(outcome.findings.map((entry) => entry.code)).toContain(
+      'schema_evaluation_memory_exceeded',
+    )
   })
 
   test('fails an invalid JSON Schema document', async () => {
     const schema = JSON.stringify({ type: 'nonsense' })
     const parsed = await parseOrThrow(await issueTestCredential())
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [jsonSchemaReference(schema)],
       documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
       parsed,
@@ -261,7 +297,7 @@ describe('validateSchemaDocuments with JSON Schema 2020-12', () => {
 describe('validateSchemaDocuments integrity and coverage', () => {
   test('does not pass a reference whose document was not supplied', async () => {
     const parsed = await parseOrThrow(await issueTestCredential())
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [typeMetadataReference(PID_TYPE_METADATA_TEXT)],
       documents: [],
       parsed,
@@ -279,7 +315,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: TYPE_METADATA_URI,
       integrity: sha256Sri(`${PID_TYPE_METADATA_TEXT} `),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: TYPE_METADATA_URI, content: PID_TYPE_METADATA_TEXT }],
       parsed,
@@ -301,7 +337,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: JSON_SCHEMA_URI,
       integrity: sha256Sri(`${schema} `),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
       parsed,
@@ -324,7 +360,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: JSON_SCHEMA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -346,7 +382,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: JSON_SCHEMA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -366,7 +402,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: JSON_SCHEMA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -382,7 +418,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: TYPE_METADATA_URI,
       integrity: null,
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: TYPE_METADATA_URI, content: PID_TYPE_METADATA_TEXT }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -417,7 +453,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
         uri: JSON_SCHEMA_URI,
         integrity: sha256Sri(content),
       }
-      const outcome = validateSchemaDocuments({
+      const outcome = await validateSchemaDocuments({
         references: [reference],
         documents: [{ uri: JSON_SCHEMA_URI, content }],
         parsed,
@@ -443,7 +479,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: JSON_SCHEMA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -465,7 +501,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: TYPE_METADATA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: TYPE_METADATA_URI, content: schema }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -487,7 +523,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: TYPE_METADATA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: TYPE_METADATA_URI, content: schema }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -507,7 +543,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: JSON_SCHEMA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -528,7 +564,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: JSON_SCHEMA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -536,27 +572,6 @@ describe('validateSchemaDocuments integrity and coverage', () => {
 
     expect(outcome.status).toBe('NOT_TESTED')
     expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
-    expect(outcome.schemaReferences[0]?.applied).toBe(false)
-  })
-
-  test('does not execute type metadata with too many declared claims', async () => {
-    const claims = Array.from({ length: 600 }, (_, index) => ({
-      path: [`claim_${index}`],
-    }))
-    const metadata = JSON.stringify({ vct: TEST_VCT, claims })
-    const reference = {
-      formatIdentifier: 'dc+sd-jwt',
-      uri: TYPE_METADATA_URI,
-      integrity: sha256Sri(metadata),
-    }
-    const outcome = validateSchemaDocuments({
-      references: [reference],
-      documents: [{ uri: TYPE_METADATA_URI, content: metadata }],
-      parsed: await parseOrThrow(await issueTestCredential()),
-    })
-
-    expect(outcome.status).toBe('NOT_TESTED')
-    expect(outcome.findings.map((entry) => entry.code)).toContain('type_metadata_too_complex')
     expect(outcome.schemaReferences[0]?.applied).toBe(false)
   })
 
@@ -569,7 +584,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
         selectiveClaims: [],
       }),
     )
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [typeMetadataReference(PID_TYPE_METADATA_TEXT)],
       documents: [{ uri: TYPE_METADATA_URI, content: PID_TYPE_METADATA_TEXT }],
       parsed,
@@ -590,7 +605,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: TYPE_METADATA_URI,
       integrity: sha256Sri(metadata),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: TYPE_METADATA_URI, content: metadata }],
       parsed: await parseOrThrow(await issueTestCredential()),
@@ -609,7 +624,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: TYPE_METADATA_URI,
       integrity: 'sha384-abc123',
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: TYPE_METADATA_URI, content: PID_TYPE_METADATA_TEXT }],
       parsed,
@@ -631,7 +646,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: TYPE_METADATA_URI,
       integrity: sha256Sri(content),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: TYPE_METADATA_URI, content }],
       parsed,
@@ -649,7 +664,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: TYPE_METADATA_URI,
       integrity: sha256Sri(content),
     }
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [reference],
       documents: [{ uri: TYPE_METADATA_URI, content }],
       parsed,
@@ -661,7 +676,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
 
   test('reports an integrity mismatch before parsing invalid JSON', async () => {
     const parsed = await parseOrThrow(await issueTestCredential())
-    const outcome = validateSchemaDocuments({
+    const outcome = await validateSchemaDocuments({
       references: [typeMetadataReference(PID_TYPE_METADATA_TEXT)],
       documents: [{ uri: TYPE_METADATA_URI, content: '{not json' }],
       parsed,
