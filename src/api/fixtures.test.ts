@@ -226,7 +226,7 @@ describe('POST /api/v1/issuers/fixtures', () => {
     expect(parsed.error.message).toContain('unavailable')
   })
 
-  test('preserves a __proto__ claim in the HTTP response', async () => {
+  test('rejects a schema document that declares a __proto__ property', async () => {
     const schema = JSON.stringify({
       type: 'object',
       required: ['__proto__', 'b'],
@@ -242,13 +242,49 @@ describe('POST /api/v1/issuers/fixtures', () => {
     const setupFixture = setup({ schemaContent: schema })
     const response = await post(setupFixture.app, body(setupFixture))
 
+    expect(response.status).toBe(400)
+    const parsed = (await response.json()) as { error: { code: string } }
+    assertSchema('ErrorEnvelope', parsed)
+    expect(parsed.error.code).toBe('invalid_request')
+  })
+
+  test('rejects an undeclared __proto__ key in an HTTP override value', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['address'],
+      properties: {
+        address: {
+          type: 'object',
+          required: ['city'],
+          properties: { city: { type: 'string' } },
+          additionalProperties: false,
+        },
+      },
+    })
+    const setupFixture = setup({ schemaContent: schema })
+    // The raw JSON keeps __proto__ as an own override key; an object literal
+    // would set the prototype instead.
+    const raw = `{"rulebookId":${JSON.stringify(setupFixture.rulebookId)},"rulebookVersion":${JSON.stringify(setupFixture.version)},"attestationType":${JSON.stringify(setupFixture.attestationName)},"schemaDocuments":[{"uri":${JSON.stringify(SCHEMA_URI)},"content":${JSON.stringify(setupFixture.schemaContent)}}],"overrides":[{"path":"/address","value":{"city":"x","__proto__":5}}]}`
+    const response = await setupFixture.app.request('/api/v1/issuers/fixtures', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: raw,
+    })
+
     expect(response.status).toBe(200)
     const parsed = (await response.json()) as {
-      data: { payload: Record<string, unknown>; payloadValidation: { status: string } }
+      data: {
+        payloadValidation: {
+          status: string
+          findings: { keyword?: string; path?: string }[]
+        }
+      }
     }
-    expect(Object.hasOwn(parsed.data.payload, '__proto__')).toBe(true)
-    expect(parsed.data.payload['__proto__']).toEqual({ x: 'fixture' })
-    expect(parsed.data.payloadValidation.status).toBe('PASS')
+    expect(parsed.data.payloadValidation.status).toBe('FAIL')
+    expect(parsed.data.payloadValidation.findings[0]).toMatchObject({
+      keyword: 'additionalProperties',
+      path: '/address',
+    })
   })
 
   test('keeps /health responsive while fixture generation runs in the sandbox', async () => {

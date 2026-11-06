@@ -150,10 +150,14 @@ expensive pinned schema therefore cannot block the HTTP event loop, and `/health
 responsive during generation. Sandbox timeout, memory and output failures are reported as
 `invalid_input` with the limit that was exceeded; a busy or unavailable sandbox is a `503`.
 
-The fixture evaluator checks only own object properties. A claim literally named `__proto__`
-is stored as an own JSON property throughout the child protocol and the HTTP projection, so a
-required `__proto__` claim is either really present or the payload is reported invalid, never
-silently supplied by `Object.prototype`.
+The fixture evaluator checks only own object properties, so an undeclared `__proto__` key in
+an override value is evaluated as an ordinary own property (for example by
+`additionalProperties`). The pinned Ajv 8.20.0 evaluator, however, does not evaluate a
+`properties.__proto__` subschema. A schema document that declares any key named `__proto__`
+is therefore refused rather than applied: the request fails with `400 invalid_request` when
+no other document can ground the fixture, or reports that document as `applied: false` with a
+`schema_not_usable` diagnostic when another one can. A payload is never reported `PASS`
+against a constraint the evaluator cannot see.
 
 ## 3. Supported synthesis subset
 
@@ -179,8 +183,10 @@ Everything else that can affect a value is reported, not ignored. The reported s
 
 Refs, patterns, formats, pattern properties and unique items are already refused by the
 shared schema preparation used for validation; the remaining synthesis-only restrictions are
-this slice's own boundary. A document that uses them may still be a valid rulebook reference,
-but this slice will not guess a value for it.
+this slice's own boundary. A document that declares any `__proto__` key is also refused,
+because the pinned Ajv 8.20.0 evaluator does not evaluate that property subschema. A document
+that uses any of these may still be a valid rulebook reference, but this slice will not guess a
+value for it.
 
 ## 4. Negative cases
 
@@ -259,11 +265,12 @@ its own issuer/verifier pipeline.
   real schema preparation and the real sandbox child: grounding, determinism, attribute
   definitions, overrides (including deliberate violations), unsupported optional/required
   constraints, format selection, Type Metadata rejection, SRI mismatch, unknown resources,
-  the sandbox time limit on a hostile schema, unavailable-platform handling, `__proto__`
-  own-property handling and large-enum intersection;
+  the sandbox time limit, unavailable-platform handling, refusal of schemas that declare
+  `__proto__`, undeclared-`__proto__` override evaluation and large-enum intersection;
 - `src/api/fixtures.test.ts` — the Hono route, OpenAPI component validation, overrides,
-  400/404/503 cases, the `fixture_unavailable` mapping, an HTTP `__proto__` claim and a
-  `/health` responsiveness race against a running fixture sandbox;
+  400/404/503 cases, the `fixture_unavailable` mapping, an HTTP `__proto__` schema refusal, an
+  undeclared-`__proto__` override failure and a `/health` responsiveness race against a
+  running fixture sandbox;
 - `bun run openapi:check` — the generated document including the new operation and
   components;
 - `bun run check` — formatting, lint, strict typecheck and the whole test suite.
@@ -288,6 +295,9 @@ bun run check
 - Attribute pointers use the schema wildcard `*` for array elements; override paths use
   concrete instance indices. Neither establishes a full JSON Schema resolver.
 - Negative cases cover the supported constraints only and are not a conformance test suite.
+- A schema document that declares a key named `__proto__` cannot be applied, because the
+  pinned Ajv 8.20.0 evaluator does not evaluate that property subschema. Undeclared
+  `__proto__` keys in override values remain ordinary own properties and are evaluated.
 - Compilation, synthesis, payload evaluation and negative-case verification run in the
   shared resource-bounded sandbox. The sandbox limits are configurable through the same
   `SCHEMA_SANDBOX_*` settings as credential validation and the concurrency cap is shared, so

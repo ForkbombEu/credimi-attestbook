@@ -510,7 +510,7 @@ describe('IssuerFixtureGenerator', () => {
     expect((error as Error).message).toContain('unavailable')
   })
 
-  test('keeps a __proto__ claim as an own property instead of changing the payload prototype', async () => {
+  test('refuses a schema document that declares a __proto__ property', async () => {
     const schema = JSON.stringify({
       type: 'object',
       required: ['__proto__', 'b'],
@@ -526,15 +526,76 @@ describe('IssuerFixtureGenerator', () => {
     const setupFixture = setup({
       documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
     })
+    await expectInvalidInput(() => setupFixture.generator.generate(setupFixture.request()))
+  })
+
+  test('uses a clean schema while reporting a __proto__ schema as not applied', async () => {
+    const cleanSchema = JSON.stringify({
+      type: 'object',
+      required: ['b'],
+      properties: { b: { type: 'string' } },
+    })
+    const protoSchema = JSON.stringify({
+      type: 'object',
+      required: ['address'],
+      properties: {
+        address: {
+          type: 'object',
+          required: ['city'],
+          properties: {
+            city: { type: 'string' },
+            ['__proto__']: { type: 'string' },
+          },
+        },
+      },
+    })
+    const setupFixture = setup({
+      supportedFormats: ['dc+sd-jwt', 'mso_mdoc'],
+      documents: [
+        { format: 'dc+sd-jwt', uri: SCHEMA_URI, content: cleanSchema },
+        { format: 'mso_mdoc', uri: OTHER_SCHEMA_URI, content: protoSchema },
+      ],
+    })
     const result = await setupFixture.generator.generate(setupFixture.request())
 
-    expect(Object.hasOwn(result.payload, '__proto__')).toBe(true)
-    const serialized = JSON.parse(JSON.stringify(result.payload)) as Record<string, unknown>
-    expect(serialized['__proto__']).toEqual({ x: 'fixture' })
+    expect(result.payload).toEqual({ b: 'fixture' })
     expect(result.payloadValidation.status).toBe('PASS')
-    expect(result.negativeCases.some((entry) => entry.id === 'missing_required:/__proto__')).toBe(
-      true,
+    const protoReference = result.schemaReferences.find(
+      (reference) => reference.uri === OTHER_SCHEMA_URI,
     )
+    expect(protoReference).toMatchObject({ kind: 'json_schema', applied: false })
+    expect(protoReference?.diagnostic).toContain('__proto__')
+    expect(result.attributes.some((attribute) => attribute.pointer.includes('__proto__'))).toBe(
+      false,
+    )
+  })
+
+  test('rejects an undeclared __proto__ key in an override value', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['address'],
+      properties: {
+        address: {
+          type: 'object',
+          required: ['city'],
+          properties: { city: { type: 'string' } },
+          additionalProperties: false,
+        },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    const override = JSON.parse('{"city":"x","__proto__":5}') as Record<string, unknown>
+    const result = await setupFixture.generator.generate(
+      setupFixture.request({ overrides: [{ path: '/address', value: override }] }),
+    )
+
+    expect(result.payloadValidation.status).toBe('FAIL')
+    expect(result.payloadValidation.findings[0]).toMatchObject({
+      keyword: 'additionalProperties',
+      path: '/address',
+    })
   })
 
   test('intersects enums with object values independently of member order', async () => {

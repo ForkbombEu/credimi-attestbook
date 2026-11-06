@@ -1018,6 +1018,22 @@ function dedupeAttributes(attributes: readonly IssuerFixtureAttribute[]): Issuer
   )
 }
 
+function declaresProtoKey(value: unknown, depth = 0): boolean {
+  if (depth > 128) {
+    return true
+  }
+  if (Array.isArray(value)) {
+    return value.some((entry) => declaresProtoKey(entry, depth + 1))
+  }
+  if (typeof value !== 'object' || value === null) {
+    return false
+  }
+  if (Object.prototype.hasOwnProperty.call(value, '__proto__')) {
+    return true
+  }
+  return Object.values(value).some((entry) => declaresProtoKey(entry, depth + 1))
+}
+
 function schemaNodeCount(value: unknown, limit: number): number {
   let count = 0
   const stack: unknown[] = [value]
@@ -1062,6 +1078,13 @@ function compileJsonSchema(pending: PendingSchemaDocument):
     return {
       ok: false,
       diagnostic: `The supplied JSON Schema exceeds the ${MAX_SCHEMA_NODES}-node fixture evaluation bound and was not applied.`,
+    }
+  }
+  if (declaresProtoKey(document)) {
+    return {
+      ok: false,
+      diagnostic:
+        'The supplied JSON Schema declares a key named "__proto__", which the pinned Ajv 8.20.0 evaluator does not check; the document was not applied.',
     }
   }
   try {
