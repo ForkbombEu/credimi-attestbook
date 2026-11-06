@@ -165,10 +165,21 @@ function readRssBytes(pid: number): number {
   return match === null ? 0 : Number(match[1]) * 1_024
 }
 
-export async function runSchemaSandbox(
-  request: SandboxRequest,
+/** Result of one sandbox child run before the caller parses its protocol. */
+export type SandboxChildOutcome =
+  { readonly kind: 'ok'; readonly raw: string } | { readonly kind: SandboxFailure }
+
+/**
+ * Spawns one sandbox child and returns its raw stdout under the shared
+ * timeout, RSS, output and concurrency bounds. Callers own the request and
+ * response protocol and must parse `raw` strictly; this helper only transports
+ * bytes. The concurrency counter is shared by every sandbox consumer.
+ */
+export async function runSandboxChild(
+  entry: string,
+  payload: unknown,
   limits: SchemaSandboxLimits = {},
-): Promise<SandboxOutcome> {
+): Promise<SandboxChildOutcome> {
   const platform = limits.platform ?? process.platform
   if (platform !== 'linux') {
     return { kind: 'unavailable' }
@@ -185,7 +196,7 @@ export async function runSchemaSandbox(
   let child: Bun.Subprocess<'pipe', 'pipe', 'ignore'>
   active += 1
   try {
-    child = Bun.spawn([process.execPath, limits.entry ?? defaultEntry()], {
+    child = Bun.spawn([process.execPath, entry], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'ignore',
@@ -215,7 +226,7 @@ export async function runSchemaSandbox(
     }, 10)
 
     try {
-      await child.stdin.write(JSON.stringify(request))
+      await child.stdin.write(JSON.stringify(payload))
       await child.stdin.end()
     } catch {
       // The child may already have been killed.
@@ -248,8 +259,7 @@ export async function runSchemaSandbox(
       return { kind: 'failed' }
     }
 
-    const raw = Buffer.concat(chunks).toString('utf8')
-    return parseSandboxResults(raw, request)
+    return { kind: 'ok', raw: Buffer.concat(chunks).toString('utf8') }
   } catch {
     return { kind: 'failed' }
   } finally {
@@ -258,6 +268,17 @@ export async function runSchemaSandbox(
     }
     active -= 1
   }
+}
+
+export async function runSchemaSandbox(
+  request: SandboxRequest,
+  limits: SchemaSandboxLimits = {},
+): Promise<SandboxOutcome> {
+  const outcome = await runSandboxChild(limits.entry ?? defaultEntry(), request, limits)
+  if (outcome.kind !== 'ok') {
+    return outcome
+  }
+  return parseSandboxResults(outcome.raw, request)
 }
 
 function failureCode(kind: SandboxFailure): string {

@@ -408,8 +408,12 @@ are derived from the supported constraints in deterministic order, each verified
 supplied documents before it is returned. Their `id` is stable (`<category>:<path>`) and
 `expected` is always `FAIL`.
 
-The route writes nothing and performs no network request. The contract, supported synthesis
-subset and non-claims are documented in [`docs/fixtures.md`](fixtures.md).
+Compilation, synthesis, payload evaluation and negative-case verification run in the same
+resource-bounded sandbox as credential validation, with a shared concurrency limit. The route
+writes nothing and performs no network request. A timeout, memory or output limit answers
+`400 invalid_request`; a busy or unavailable sandbox answers `503 fixture_unavailable`. The
+contract, supported synthesis subset and non-claims are documented in
+[`docs/fixtures.md`](fixtures.md).
 
 ## 4. Errors
 
@@ -446,6 +450,7 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Import or issuer discovery | `invalid_source`/`invalid_url` client input | `400` | `invalid_request` |
 | Issuer fixtures | malformed request, unmatched/unpinnable schema document, unsupported synthesis constraint, unknown override path | `400` | `invalid_request` |
 | Issuer fixtures | rulebook, version, attestation type or stored snapshot does not exist | `404` | `not_found` |
+| Issuer fixtures | fixture sandbox at its concurrency limit or unavailable on this platform | `503` | `fixture_unavailable` |
 | API wiring | registry, validation, issuer discovery or issuer fixtures not configured | `503` | `registry_unavailable` / `validation_unavailable` |
 | API | unexpected failure | `500` | `internal_error` |
 
@@ -573,8 +578,9 @@ own component and browser tests described in [`docs/ui.md`](ui.md).
   ([`docs/discovery.md`](discovery.md) §1 and §9).
 - Issuer fixtures are unsigned claim payloads, not issued credentials. They are synthesized
   from caller-supplied, integrity-verified schema documents and only within the supported
-  JSON Schema subset; the route fetches no schema, signs nothing and persists nothing
-  ([`docs/fixtures.md`](fixtures.md) §3 and §6).
+  JSON Schema subset; compilation and evaluation run in the shared resource-bounded sandbox,
+  and the route fetches no schema, signs nothing and persists nothing
+  ([`docs/fixtures.md`](fixtures.md) §2.4, §3 and §6).
 - Validation results are returned synchronously and are not persisted
   (`GET /api/v1/validations/{id}` does not exist in this slice; the specification lists it as
   a suggested resource, not an implemented one).

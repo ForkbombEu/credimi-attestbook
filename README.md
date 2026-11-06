@@ -197,9 +197,12 @@ reference of the selected attestation type in that version and its sha256 SRI va
 match before it grounds a payload. References without a verifiable pin, references without a
 supplied document and Type Metadata references are reported, never silently used.
 
-The response contains the effective attribute definitions (JSON Pointer, required flag,
-types and supported constraints), the generated payload, its validation against the supplied
-documents, the applied JSON-Pointer overrides and deterministic, labelled negative cases.
+Schema compilation, payload synthesis and negative-case verification run in the same
+resource-bounded sandbox as credential validation, so a hostile pinned schema cannot block the
+HTTP event loop. The response contains the effective attribute definitions (JSON Pointer,
+required flag, types and supported constraints), the generated payload, its validation against
+the supplied documents, the applied JSON-Pointer overrides and deterministic, labelled
+negative cases.
 Each negative case is verified to fail before it is returned and carries a stable
 `<category>:<path>` id. The supported synthesis subset, the unsigned boundary and the
 non-claims (no signing, issuance, schema fetching, cryptography or interoperability) are

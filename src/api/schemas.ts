@@ -292,6 +292,7 @@ export const errorEnvelopeSchema = z.object({
       'import_rejected',
       'registry_unavailable',
       'validation_unavailable',
+      'fixture_unavailable',
       'internal_error',
     ]),
     message: z.string(),

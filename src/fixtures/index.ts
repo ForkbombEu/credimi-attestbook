@@ -3,7 +3,11 @@
 // See docs/fixtures.md for the supported synthesis subset, the unsigned-payload
 // boundary and the negative-case derivation rules.
 
-export { IssuerFixtureGenerator } from './generate'
+export {
+  IssuerFixtureGenerator,
+  IssuerFixtureUnavailableError,
+  type IssuerFixtureGeneratorOptions,
+} from './generate'
 
 export {
   MAX_FIXTURE_OVERRIDE_PATH_LENGTH,

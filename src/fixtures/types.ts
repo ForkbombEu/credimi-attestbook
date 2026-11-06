@@ -182,5 +182,5 @@ export interface IssuerFixtureSource {
 
 /** Transport seam for the HTTP application. */
 export interface IssuerFixtureService {
-  generate(input: unknown): IssuerFixtureResult
+  generate(input: unknown): Promise<IssuerFixtureResult>
 }

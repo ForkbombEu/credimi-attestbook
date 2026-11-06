@@ -11,7 +11,12 @@ import type { Context, Hono } from 'hono'
 import packageJson from '../../package.json'
 import { IssuerDiscovery, type IssuerDiscoveryService } from '../discovery'
 import { validateDraftContent } from '../editor'
-import { ISSUER_FIXTURE_PATH, IssuerFixtureGenerator, type IssuerFixtureService } from '../fixtures'
+import {
+  ISSUER_FIXTURE_PATH,
+  IssuerFixtureGenerator,
+  IssuerFixtureUnavailableError,
+  type IssuerFixtureService,
+} from '../fixtures'
 import { RulebookImporter } from '../import'
 import type { ImportPreview, ImportResult, ImportSource } from '../import'
 import { assessPublicationReadiness, compareVersionDocuments } from '../lifecycle'
@@ -1458,7 +1463,15 @@ function generateIssuerFixtureHandler(service: IssuerFixtureService | undefined)
   return async (context) => {
     const fixtures = requireIssuerFixtures(service)
     const body = await readJsonBody(context)
-    return context.json({ data: toIssuerFixtureResource(fixtures.generate(body)) }, 200)
+    try {
+      const result = await fixtures.generate(body)
+      return context.json({ data: toIssuerFixtureResource(result) }, 200)
+    } catch (error) {
+      if (error instanceof IssuerFixtureUnavailableError) {
+        throw apiError(503, 'fixture_unavailable', error.message)
+      }
+      throw error
+    }
   }
 }
 

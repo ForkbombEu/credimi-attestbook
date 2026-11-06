@@ -5,12 +5,15 @@
 // the tests need no network or service double.
 
 import { afterEach, describe, expect, test } from 'bun:test'
+import { fileURLToPath } from 'node:url'
 import Ajv2020 from 'ajv/dist/2020.js'
 import type { ValidateFunction } from 'ajv'
 
 import { createApp } from '../app'
+import { IssuerFixtureGenerator } from '../fixtures'
 import { provisionProvider } from '../registry/bootstrap'
 import { createRegistryFixture, type RegistryFixture } from '../registry/test-support'
+import type { SchemaSandboxLimits } from '../validation/schema-sandbox'
 import { sha256Sri } from '../validation/test-support'
 
 import { componentJsonSchema, type OpenApiComponentName } from './schemas'
@@ -34,6 +37,7 @@ interface Setup {
   readonly rulebookId: string
   readonly attestationName: string
   readonly version: string
+  readonly schemaContent: string
 }
 
 let fixture: RegistryFixture | undefined
@@ -43,8 +47,14 @@ afterEach(() => {
   fixture = undefined
 })
 
-function setup(): Setup {
+function setup(
+  options: {
+    readonly sandbox?: SchemaSandboxLimits
+    readonly schemaContent?: string
+  } = {},
+): Setup {
   fixture = createRegistryFixture()
+  const schemaContent = options.schemaContent ?? SCHEMA_TEXT
   const provider = provisionProvider(fixture.database, {
     name: 'Fixture Provider',
     publicationAuthority: 'fixture-authority',
@@ -72,7 +82,7 @@ function setup(): Setup {
   fixture.registry.addSchemaReference(token, rulebook.id, {
     formatIdentifier: 'dc+sd-jwt',
     uri: SCHEMA_URI,
-    integrity: sha256Sri(SCHEMA_TEXT),
+    integrity: sha256Sri(schemaContent),
     attestationId: attestation.id,
   })
   const version = fixture.registry.createRulebookVersion(token, rulebook.id, { version: '1.0' })
@@ -80,10 +90,21 @@ function setup(): Setup {
 
   return {
     fixture,
-    app: createApp({ registry: fixture.registry }),
+    app: createApp({
+      registry: fixture.registry,
+      ...(options.sandbox === undefined
+        ? {}
+        : {
+            issuerFixtures: new IssuerFixtureGenerator({
+              source: fixture.registry,
+              sandbox: options.sandbox,
+            }),
+          }),
+    }),
     rulebookId: rulebook.id,
     attestationName: 'PID',
     version: version.version,
+    schemaContent,
   }
 }
 
@@ -104,7 +125,7 @@ function body(setupFixture: Setup, extra: Readonly<Record<string, unknown>> = {}
     rulebookId: setupFixture.rulebookId,
     rulebookVersion: setupFixture.version,
     attestationType: setupFixture.attestationName,
-    schemaDocuments: [{ uri: SCHEMA_URI, content: SCHEMA_TEXT }],
+    schemaDocuments: [{ uri: SCHEMA_URI, content: setupFixture.schemaContent }],
     ...extra,
   }
 }
@@ -192,5 +213,69 @@ describe('POST /api/v1/issuers/fixtures', () => {
     expect(response.status).toBe(503)
     const parsed = (await response.json()) as { error: { code: string } }
     expect(parsed.error.code).toBe('registry_unavailable')
+  })
+
+  test('answers fixture_unavailable when the sandbox cannot run', async () => {
+    const setupFixture = setup({ sandbox: { platform: 'darwin' } })
+    const response = await post(setupFixture.app, body(setupFixture))
+
+    expect(response.status).toBe(503)
+    const parsed = (await response.json()) as { error: { code: string; message: string } }
+    assertSchema('ErrorEnvelope', parsed)
+    expect(parsed.error.code).toBe('fixture_unavailable')
+    expect(parsed.error.message).toContain('unavailable')
+  })
+
+  test('preserves a __proto__ claim in the HTTP response', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['__proto__', 'b'],
+      properties: {
+        ['__proto__']: {
+          type: 'object',
+          required: ['x'],
+          properties: { x: { type: 'string' } },
+        },
+        b: { type: 'string' },
+      },
+    })
+    const setupFixture = setup({ schemaContent: schema })
+    const response = await post(setupFixture.app, body(setupFixture))
+
+    expect(response.status).toBe(200)
+    const parsed = (await response.json()) as {
+      data: { payload: Record<string, unknown>; payloadValidation: { status: string } }
+    }
+    expect(Object.hasOwn(parsed.data.payload, '__proto__')).toBe(true)
+    expect(parsed.data.payload['__proto__']).toEqual({ x: 'fixture' })
+    expect(parsed.data.payloadValidation.status).toBe('PASS')
+  })
+
+  test('keeps /health responsive while fixture generation runs in the sandbox', async () => {
+    const slowEntry = fileURLToPath(
+      new URL('../validation/test-fixtures/slow-entry.ts', import.meta.url),
+    )
+    const setupFixture = setup({
+      sandbox: { entry: slowEntry, timeoutMs: 1_000 },
+    })
+
+    const generation = post(setupFixture.app, body(setupFixture))
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const healthStarted = Date.now()
+    const healthPromise = Promise.resolve(setupFixture.app.request('/health'))
+    const winner = await Promise.race([
+      healthPromise.then(() => 'health' as const),
+      generation.then(() => 'fixture' as const),
+    ])
+    expect(winner).toBe('health')
+    const health = await healthPromise
+    expect(health.status).toBe(200)
+    expect(Date.now() - healthStarted).toBeLessThan(200)
+
+    const response = await generation
+    expect(response.status).toBe(400)
+    const parsed = (await response.json()) as { error: { code: string; message: string } }
+    expect(parsed.error.code).toBe('invalid_request')
+    expect(parsed.error.message).toContain('1000 ms')
   })
 })

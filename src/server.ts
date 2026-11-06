@@ -4,6 +4,7 @@ import { createApp } from './app'
 import { loadConfig } from './config'
 import { openDatabase } from './db/database'
 import { applyMigrations } from './db/migrations'
+import { IssuerFixtureGenerator } from './fixtures'
 import { Registry } from './registry'
 import { CredentialValidator } from './validation'
 
@@ -15,17 +16,17 @@ const database = openDatabase(config.databasePath)
 applyMigrations(database)
 
 const registry = new Registry({ database })
-const validation = new CredentialValidator({
-  source: registry,
-  sandbox: {
-    timeoutMs: config.schemaSandboxTimeoutMs,
-    maxRssBytes: config.schemaSandboxMaxRssMb * 1024 * 1024,
-    maxConcurrent: config.schemaSandboxConcurrency,
-  },
-})
+const schemaSandbox = {
+  timeoutMs: config.schemaSandboxTimeoutMs,
+  maxRssBytes: config.schemaSandboxMaxRssMb * 1024 * 1024,
+  maxConcurrent: config.schemaSandboxConcurrency,
+}
+const validation = new CredentialValidator({ source: registry, sandbox: schemaSandbox })
+const issuerFixtures = new IssuerFixtureGenerator({ source: registry, sandbox: schemaSandbox })
 const app = createApp({
   registry,
   validation,
+  issuerFixtures,
   ...(existsSync(UI_DIST_PATH) ? { uiRoot: UI_DIST_PATH } : {}),
 })
 

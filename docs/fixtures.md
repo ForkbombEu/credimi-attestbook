@@ -52,7 +52,7 @@ Deliberately **not** in #44:
 
 ```ts
 const generator = new IssuerFixtureGenerator({ source: registry })
-const fixture = generator.generate({
+const fixture = await generator.generate({
   rulebookId: rulebook.id,
   rulebookVersion: '1.0',
   attestationType: 'PID',
@@ -61,13 +61,16 @@ const fixture = generator.generate({
 })
 ```
 
-`generate` is synchronous and writes nothing. It throws a typed `RegistryError`:
+`generate` is asynchronous: the expensive schema work runs in a resource-bounded sandbox
+child (see §2.4). It writes nothing. It throws a typed `RegistryError`:
 
 - `not_found` when the rulebook, version or attestation type does not exist;
 - `invalid_input` for a malformed request, a supplied document that does not belong to the
   selected attestation type or format, a document that does not match its sha256 SRI value,
-  an override path that does not exist in the generated payload, or constraints outside the
-  supported synthesis subset.
+  an override path that does not exist in the generated payload, constraints outside the
+  supported synthesis subset, or a sandbox timeout/memory/output limit;
+- `IssuerFixtureUnavailableError` (API code `fixture_unavailable`, HTTP `503`) when the shared
+  sandbox is at its concurrency limit or unavailable on the platform.
 
 The result is an `IssuerFixtureResult`:
 
@@ -135,6 +138,22 @@ characters each and must address an existing attribute; unknown paths are `inval
 The final payload is re-evaluated against every applied schema document. An override that
 deliberately violates a constraint is allowed and reflected honestly as
 `payloadValidation.status: "FAIL"` with findings; the unsigned markers are unchanged.
+
+### 2.4 Sandboxed synthesis
+
+The parent process performs only the cheap, already-shared preparation: reference matching,
+JSON parsing, sha256 SRI verification, depth and validation-unsafe keyword checks. The
+untrusted schema documents are then compiled, evaluated and synthesized inside the same
+resource-bounded sandbox runner used by credential validation, with a hard timeout, RSS
+watchdog, output cap and a concurrency limit shared across both features. A hostile or merely
+expensive pinned schema therefore cannot block the HTTP event loop, and `/health` stays
+responsive during generation. Sandbox timeout, memory and output failures are reported as
+`invalid_input` with the limit that was exceeded; a busy or unavailable sandbox is a `503`.
+
+The fixture evaluator checks only own object properties. A claim literally named `__proto__`
+is stored as an own JSON property throughout the child protocol and the HTTP projection, so a
+required `__proto__` claim is either really present or the payload is reported invalid, never
+silently supplied by `Object.prototype`.
 
 ## 3. Supported synthesis subset
 
@@ -213,8 +232,10 @@ locally) and accepts:
 `format` and `overrides` are optional; `schemaDocuments` must contain at least one document
 that survives the grounding rules. The response is `{ "data": IssuerFixture }` and validates
 against the `IssuerFixtureResponse` OpenAPI component. The route writes nothing and does not
-perform a network request. See [`docs/api.md`](api.md) §3.6 and §4 for the shared error
-envelope.
+perform a network request. A malformed request, unmatched/unpinnable document, unsupported
+synthesis constraint or exceeded sandbox limit is `400 invalid_request`; a busy or unavailable
+sandbox is `503 fixture_unavailable`; a missing rulebook, version or attestation type is
+`404 not_found`. See [`docs/api.md`](api.md) §3.6 and §4 for the shared error envelope.
 
 ## 6. Fixture versus issued credential
 
@@ -235,11 +256,14 @@ its own issuer/verifier pipeline.
 ## 7. Verification and tests
 
 - `src/fixtures/generate.test.ts` — real migrated registry, real published version snapshot,
-  real schema preparation and Ajv evaluation: grounding, determinism, attribute definitions,
-  overrides (including deliberate violations), unsupported optional/required constraints,
-  format selection, Type Metadata rejection, SRI mismatch and unknown resources;
+  real schema preparation and the real sandbox child: grounding, determinism, attribute
+  definitions, overrides (including deliberate violations), unsupported optional/required
+  constraints, format selection, Type Metadata rejection, SRI mismatch, unknown resources,
+  the sandbox time limit on a hostile schema, unavailable-platform handling, `__proto__`
+  own-property handling and large-enum intersection;
 - `src/api/fixtures.test.ts` — the Hono route, OpenAPI component validation, overrides,
-  400/404/503 cases and the unsigned markers;
+  400/404/503 cases, the `fixture_unavailable` mapping, an HTTP `__proto__` claim and a
+  `/health` responsiveness race against a running fixture sandbox;
 - `bun run openapi:check` — the generated document including the new operation and
   components;
 - `bun run check` — formatting, lint, strict typecheck and the whole test suite.
@@ -264,9 +288,9 @@ bun run check
 - Attribute pointers use the schema wildcard `*` for array elements; override paths use
   concrete instance indices. Neither establishes a full JSON Schema resolver.
 - Negative cases cover the supported constraints only and are not a conformance test suite.
-- The payload-validation evaluator runs in-process over the bounded, synthesized payload and
-  the prepared schemas, unlike credential validation, which evaluates untrusted credentials
-  in a separate resource-bounded process. The schema documents are still bounded and their
-  validation-unsafe keywords are refused by the shared preparation step.
+- Compilation, synthesis, payload evaluation and negative-case verification run in the
+  shared resource-bounded sandbox. The sandbox limits are configurable through the same
+  `SCHEMA_SANDBOX_*` settings as credential validation and the concurrency cap is shared, so
+  a busy sandbox can answer `503 fixture_unavailable` instead of queueing indefinitely.
 - No fixture or schema document is persisted, so a response is only reproducible from the
   same pinned version, documents and overrides.

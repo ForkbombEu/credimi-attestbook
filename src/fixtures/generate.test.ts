@@ -11,9 +11,10 @@ import Ajv2020 from 'ajv/dist/2020.js'
 import { provisionProvider } from '../registry/bootstrap'
 import { invalidInput } from '../registry/errors'
 import { createRegistryFixture, type RegistryFixture } from '../registry/test-support'
+import type { SchemaSandboxLimits } from '../validation/schema-sandbox'
 import { PID_TYPE_METADATA_TEXT, sha256Sri, TEST_VCT } from '../validation/test-support'
 
-import { IssuerFixtureGenerator } from './generate'
+import { IssuerFixtureGenerator, IssuerFixtureUnavailableError } from './generate'
 import { ISSUER_FIXTURE_KIND } from './types'
 
 const SCHEMA_URI = 'https://schemas.example.test/pid-claims.json'
@@ -79,6 +80,7 @@ function setup(
   options: {
     readonly documents?: readonly SchemaDocumentFixture[]
     readonly supportedFormats?: readonly string[]
+    readonly sandbox?: SchemaSandboxLimits
   } = {},
 ): Setup {
   const fixture = createRegistryFixture()
@@ -122,7 +124,10 @@ function setup(
   const version = fixture.registry.createRulebookVersion(token, rulebook.id, { version: '1.0' })
   fixture.registry.publishRulebookVersion(token, rulebook.id, '1.0')
 
-  const generator = new IssuerFixtureGenerator({ source: fixture.registry })
+  const generator = new IssuerFixtureGenerator({
+    source: fixture.registry,
+    ...(options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
+  })
   return {
     fixture,
     generator,
@@ -145,9 +150,9 @@ function setup(
   }
 }
 
-function expectInvalidInput(run: () => unknown): void {
+async function expectInvalidInput(run: () => Promise<unknown>): Promise<void> {
   try {
-    run()
+    await run()
   } catch (error) {
     expect((error as { readonly code?: string }).code).toBe(invalidInput('x').code)
     return
@@ -155,12 +160,21 @@ function expectInvalidInput(run: () => unknown): void {
   throw new Error('expected an invalid_input failure')
 }
 
+async function expectRejects(run: () => Promise<unknown>): Promise<void> {
+  try {
+    await run()
+  } catch {
+    return
+  }
+  throw new Error('expected a rejection')
+}
+
 const ajv = new Ajv2020({ strict: false, validateFormats: false })
 
 describe('IssuerFixtureGenerator', () => {
-  test('generates an unsigned payload grounded in the rulebook schema constraints', () => {
+  test('generates an unsigned payload grounded in the rulebook schema constraints', async () => {
     const setupFixture = setup()
-    const result = setupFixture.generator.generate(setupFixture.request())
+    const result = await setupFixture.generator.generate(setupFixture.request())
 
     expect(result.kind).toBe(ISSUER_FIXTURE_KIND)
     expect(result.signed).toBe(false)
@@ -212,16 +226,16 @@ describe('IssuerFixtureGenerator', () => {
     expect(typeof address['locality']).toBe('string')
   })
 
-  test('is deterministic for the same pinned version and schema documents', () => {
+  test('is deterministic for the same pinned version and schema documents', async () => {
     const setupFixture = setup()
-    const first = setupFixture.generator.generate(setupFixture.request())
-    const second = setupFixture.generator.generate(setupFixture.request())
+    const first = await setupFixture.generator.generate(setupFixture.request())
+    const second = await setupFixture.generator.generate(setupFixture.request())
     expect(second).toEqual(first)
   })
 
-  test('applies selected attribute overrides without losing the unsigned marker', () => {
+  test('applies selected attribute overrides without losing the unsigned marker', async () => {
     const setupFixture = setup()
-    const result = setupFixture.generator.generate(
+    const result = await setupFixture.generator.generate(
       setupFixture.request({
         overrides: [
           { path: '/given_name', value: 'Ada' },
@@ -246,9 +260,9 @@ describe('IssuerFixtureGenerator', () => {
     expect(result.issued).toBe(false)
   })
 
-  test('reports overrides that violate a constraint without pretending the payload is valid', () => {
+  test('reports overrides that violate a constraint without pretending the payload is valid', async () => {
     const setupFixture = setup()
-    const result = setupFixture.generator.generate(
+    const result = await setupFixture.generator.generate(
       setupFixture.request({ overrides: [{ path: '/age', value: 'not-a-number' }] }),
     )
 
@@ -261,18 +275,18 @@ describe('IssuerFixtureGenerator', () => {
     expect(result.payload.age).toBe('not-a-number')
   })
 
-  test('rejects an override path that does not exist in the generated payload', () => {
+  test('rejects an override path that does not exist in the generated payload', async () => {
     const setupFixture = setup()
-    expectInvalidInput(() =>
+    await expectInvalidInput(() =>
       setupFixture.generator.generate(
         setupFixture.request({ overrides: [{ path: '/not_generated', value: true }] }),
       ),
     )
   })
 
-  test('derives labelled negative cases that reproducibly fail the supplied schema', () => {
+  test('derives labelled negative cases that reproducibly fail the supplied schema', async () => {
     const setupFixture = setup()
-    const result = setupFixture.generator.generate(setupFixture.request())
+    const result = await setupFixture.generator.generate(setupFixture.request())
 
     expect(result.negativeCases.length).toBeGreaterThanOrEqual(6)
     const ids = new Set<string>()
@@ -292,11 +306,11 @@ describe('IssuerFixtureGenerator', () => {
     expect(categories.has('max_length')).toBe(true)
     expect(categories.has('additional_properties')).toBe(true)
 
-    const repeated = setupFixture.generator.generate(setupFixture.request())
+    const repeated = await setupFixture.generator.generate(setupFixture.request())
     expect(repeated.negativeCases).toEqual(result.negativeCases)
   })
 
-  test('omits optional attributes whose constraints cannot be synthesized', () => {
+  test('omits optional attributes whose constraints cannot be synthesized', async () => {
     const schema = JSON.stringify({
       type: 'object',
       required: ['name'],
@@ -308,7 +322,7 @@ describe('IssuerFixtureGenerator', () => {
     const setupFixture = setup({
       documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
     })
-    const result = setupFixture.generator.generate(setupFixture.request())
+    const result = await setupFixture.generator.generate(setupFixture.request())
 
     expect(result.payload).toEqual({ name: expect.any(String) })
     const nickname = result.attributes.find((attribute) => attribute.pointer === '/nickname')
@@ -317,7 +331,7 @@ describe('IssuerFixtureGenerator', () => {
     expect(result.payloadValidation.status).toBe('PASS')
   })
 
-  test('synthesizes enum and const attributes that omit the type keyword', () => {
+  test('synthesizes enum and const attributes that omit the type keyword', async () => {
     const schema = JSON.stringify({
       type: 'object',
       required: ['country', 'version'],
@@ -330,7 +344,7 @@ describe('IssuerFixtureGenerator', () => {
     const setupFixture = setup({
       documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
     })
-    const result = setupFixture.generator.generate(setupFixture.request())
+    const result = await setupFixture.generator.generate(setupFixture.request())
 
     expect(result.payload).toEqual({
       country: 'IT',
@@ -340,7 +354,7 @@ describe('IssuerFixtureGenerator', () => {
     expect(result.payloadValidation.status).toBe('PASS')
   })
 
-  test('does not leak attribute definitions from an omitted unsupported object', () => {
+  test('does not leak attribute definitions from an omitted unsupported object', async () => {
     const schema = JSON.stringify({
       type: 'object',
       required: ['name'],
@@ -358,7 +372,7 @@ describe('IssuerFixtureGenerator', () => {
     const setupFixture = setup({
       documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
     })
-    const result = setupFixture.generator.generate(setupFixture.request())
+    const result = await setupFixture.generator.generate(setupFixture.request())
 
     expect(Object.keys(result.payload)).toEqual(['name'])
     expect(typeof result.payload.name).toBe('string')
@@ -369,7 +383,7 @@ describe('IssuerFixtureGenerator', () => {
     expect(address).toMatchObject({ generated: false, required: false })
   })
 
-  test('rejects a required attribute whose constraints cannot be synthesized', () => {
+  test('rejects a required attribute whose constraints cannot be synthesized', async () => {
     const schema = JSON.stringify({
       type: 'object',
       required: ['name'],
@@ -380,17 +394,17 @@ describe('IssuerFixtureGenerator', () => {
     const setupFixture = setup({
       documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
     })
-    expectInvalidInput(() => setupFixture.generator.generate(setupFixture.request()))
+    await expectInvalidInput(() => setupFixture.generator.generate(setupFixture.request()))
   })
 
-  test('rejects a rulebook that only references SD-JWT VC Type Metadata', () => {
+  test('rejects a rulebook that only references SD-JWT VC Type Metadata', async () => {
     const setupFixture = setup({
       documents: [{ format: 'dc+sd-jwt', uri: TEST_VCT, content: PID_TYPE_METADATA_TEXT }],
     })
-    expectInvalidInput(() => setupFixture.generator.generate(setupFixture.request()))
+    await expectInvalidInput(() => setupFixture.generator.generate(setupFixture.request()))
   })
 
-  test('selects only the schema references of the requested format', () => {
+  test('selects only the schema references of the requested format', async () => {
     const mdocSchema = JSON.stringify({
       type: 'object',
       required: ['age_over_18'],
@@ -403,7 +417,7 @@ describe('IssuerFixtureGenerator', () => {
         { format: 'mso_mdoc', uri: OTHER_SCHEMA_URI, content: mdocSchema },
       ],
     })
-    const result = setupFixture.generator.generate(
+    const result = await setupFixture.generator.generate(
       setupFixture.request({
         format: 'mso_mdoc',
         schemaDocuments: [{ uri: OTHER_SCHEMA_URI, content: mdocSchema }],
@@ -419,7 +433,7 @@ describe('IssuerFixtureGenerator', () => {
     })
   })
 
-  test('rejects a mismatched schema integrity value', () => {
+  test('rejects a mismatched schema integrity value', async () => {
     const setupFixture = setup({
       documents: [
         {
@@ -430,12 +444,12 @@ describe('IssuerFixtureGenerator', () => {
         },
       ],
     })
-    expectInvalidInput(() => setupFixture.generator.generate(setupFixture.request()))
+    await expectInvalidInput(() => setupFixture.generator.generate(setupFixture.request()))
   })
 
-  test('rejects a schema URI the selected attestation type does not reference', () => {
+  test('rejects a schema URI the selected attestation type does not reference', async () => {
     const setupFixture = setup()
-    expectInvalidInput(() =>
+    await expectInvalidInput(() =>
       setupFixture.generator.generate(
         setupFixture.request({
           schemaDocuments: [{ uri: OTHER_SCHEMA_URI, content: CLAIMS_SCHEMA_TEXT }],
@@ -444,23 +458,133 @@ describe('IssuerFixtureGenerator', () => {
     )
   })
 
-  test('rejects an unknown rulebook, version or attestation type', () => {
+  test('rejects an unknown rulebook, version or attestation type', async () => {
     const setupFixture = setup()
-    expect(() =>
+    await expectRejects(() =>
       setupFixture.generator.generate(setupFixture.request({ rulebookId: 'missing' })),
-    ).toThrow()
-    expect(() =>
+    )
+    await expectRejects(() =>
       setupFixture.generator.generate(setupFixture.request({ rulebookVersion: '9.9' })),
-    ).toThrow()
-    expect(() =>
+    )
+    await expectRejects(() =>
       setupFixture.generator.generate(setupFixture.request({ attestationType: 'missing' })),
-    ).toThrow()
+    )
   })
 
-  test('requires at least one schema document', () => {
+  test('requires at least one schema document', async () => {
     const setupFixture = setup()
-    expectInvalidInput(() =>
+    await expectInvalidInput(() =>
       setupFixture.generator.generate(setupFixture.request({ schemaDocuments: [] })),
     )
   })
+
+  test('stops a hostile nested enumeration schema at the sandbox time limit', async () => {
+    const setupFixture = setup({
+      sandbox: { timeoutMs: 500 },
+      documents: [
+        {
+          format: 'dc+sd-jwt',
+          uri: OTHER_SCHEMA_URI,
+          content: JSON.stringify(nestedEnumSchema(3)),
+        },
+      ],
+    })
+    const started = Date.now()
+    let error: unknown
+    try {
+      await setupFixture.generator.generate(setupFixture.request())
+    } catch (caught) {
+      error = caught
+    }
+    expect((error as { readonly code?: string }).code).toBe('invalid_input')
+    expect((error as Error).message).toContain('500 ms')
+    expect(Date.now() - started).toBeLessThan(5_000)
+  })
+
+  test('reports an unavailable fixture sandbox as a typed fixture_unavailable error', async () => {
+    const setupFixture = setup({ sandbox: { platform: 'darwin' } })
+    let error: unknown
+    try {
+      await setupFixture.generator.generate(setupFixture.request())
+    } catch (caught) {
+      error = caught
+    }
+    expect(error).toBeInstanceOf(IssuerFixtureUnavailableError)
+    expect((error as IssuerFixtureUnavailableError).code).toBe('fixture_unavailable')
+    expect((error as Error).message).toContain('unavailable')
+  })
+
+  test('keeps a __proto__ claim as an own property instead of changing the payload prototype', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['__proto__', 'b'],
+      properties: {
+        ['__proto__']: {
+          type: 'object',
+          required: ['x'],
+          properties: { x: { type: 'string' } },
+        },
+        b: { type: 'string' },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    const result = await setupFixture.generator.generate(setupFixture.request())
+
+    expect(Object.hasOwn(result.payload, '__proto__')).toBe(true)
+    const serialized = JSON.parse(JSON.stringify(result.payload)) as Record<string, unknown>
+    expect(serialized['__proto__']).toEqual({ x: 'fixture' })
+    expect(result.payloadValidation.status).toBe('PASS')
+    expect(result.negativeCases.some((entry) => entry.id === 'missing_required:/__proto__')).toBe(
+      true,
+    )
+  })
+
+  test('intersects enums with object values independently of member order', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['meta'],
+      properties: {
+        meta: {
+          allOf: [{ enum: [{ a: 1, b: 2 }] }, { enum: [{ b: 2, a: 1 }] }],
+        },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    const result = await setupFixture.generator.generate(setupFixture.request())
+
+    expect(result.payload.meta).toEqual({ a: 1, b: 2 })
+    expect(result.payloadValidation.status).toBe('PASS')
+  })
+
+  test('synthesizes a large enum intersection without a quadratic scan', async () => {
+    const values = Array.from({ length: 1_500 }, (_, index) => `value-${index}`)
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['value'],
+      properties: {
+        value: { allOf: [{ enum: values }, { enum: values }] },
+      },
+    })
+    const setupFixture = setup({
+      sandbox: { timeoutMs: 2_000 },
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    const result = await setupFixture.generator.generate(setupFixture.request())
+
+    expect(result.payload.value).toBe('value-0')
+    expect(result.payloadValidation.status).toBe('PASS')
+  })
 })
+
+function nestedEnumSchema(depth: number): Record<string, unknown> {
+  const values = Array.from({ length: 1_500 }, (_, index) => `v${index}`)
+  let leaf: unknown = { allOf: [{ enum: values }, { enum: values }] }
+  for (let index = 0; index < depth; index += 1) {
+    leaf = { type: 'array', minItems: 8, maxItems: 8, items: leaf }
+  }
+  return { type: 'object', required: ['a'], properties: { a: leaf } }
+}
