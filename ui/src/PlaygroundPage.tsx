@@ -175,9 +175,12 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
   }, [])
 
   const handleChange = useCallback((patch: Partial<PlaygroundFormValues>) => {
-    // Editing the request invalidates an in-flight run, a pending file read or
-    // a displayed result.
-    fileReadToken.current += 1
+    // Editing the credential invalidates a pending file read; other fields do
+    // not, so selecting a rulebook while a file loads keeps the file's text.
+    if ('credential' in patch) {
+      fileReadToken.current += 1
+    }
+    // Editing the request invalidates an in-flight run or a displayed result.
     runController.current?.abort()
     runController.current = null
     setValues((current) => {
@@ -248,11 +251,15 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
   }, [validator, values])
 
   const handleFile = useCallback((file: File) => {
-    // Reading a new file invalidates an in-flight or displayed result.
+    // Reading a new file invalidates an in-flight run or a displayed result.
+    // The run is cancelled here, so reset its state before any early return;
+    // otherwise a rejected file would leave the page stuck on "Validating…".
     const readToken = fileReadToken.current + 1
     fileReadToken.current = readToken
     runController.current?.abort()
     runController.current = null
+    setRun({ status: 'idle' })
+    setExported(false)
     setFileError(null)
     if (file.size > MAX_CREDENTIAL_LENGTH) {
       setFileError('The selected file is larger than 512 KiB.')

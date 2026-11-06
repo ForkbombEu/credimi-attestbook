@@ -210,6 +210,52 @@ describe('playground request form', () => {
     expect(screen.getByLabelText('Credential')).toHaveValue('')
   })
 
+  test('recovers from a running validation when the chosen file is rejected', async () => {
+    const user = userEvent.setup()
+    const pendingValidator: ValidationApi = {
+      validateCredential: () => new Promise(() => {}),
+    }
+    renderPlayground(createFakeApi(), pendingValidator)
+
+    await selectRulebook(user)
+    await user.type(screen.getByLabelText('Credential'), 'header.payload.signature')
+    await user.click(screen.getByRole('button', { name: 'Run validation' }))
+    expect(screen.getByRole('button', { name: 'Validating…' })).toBeDisabled()
+
+    await user.upload(
+      screen.getByLabelText('Upload a credential file'),
+      new File(['a'.repeat(512 * 1024 + 1)], 'oversized.txt'),
+    )
+
+    expect(await screen.findByRole('button', { name: 'Run validation' })).toBeEnabled()
+    expect(screen.getByText('The selected file is larger than 512 KiB.')).toBeInTheDocument()
+  })
+
+  test('applies a pending file read after changing a rulebook selection', async () => {
+    const user = userEvent.setup()
+    renderPlayground()
+    await screen.findByLabelText('Rulebook')
+
+    let resolveRead: (text: string) => void = () => undefined
+    const file = new File(['late'], 'late.txt', { type: 'text/plain' })
+    Object.defineProperty(file, 'text', {
+      value: () =>
+        new Promise<string>((resolve) => {
+          resolveRead = resolve
+        }),
+    })
+
+    await user.upload(screen.getByLabelText('Upload a credential file'), file)
+    await user.selectOptions(screen.getByLabelText('Rulebook'), 'rulebook-age')
+
+    await act(async () => {
+      resolveRead('file credential text')
+      await Promise.resolve()
+    })
+
+    expect(screen.getByLabelText('Credential')).toHaveValue('file credential text')
+  })
+
   test('clears the form and any displayed result', async () => {
     const user = userEvent.setup()
     renderPlayground()
