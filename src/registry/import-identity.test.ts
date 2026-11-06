@@ -147,6 +147,19 @@ describe('import identities on rulebooks', () => {
     )
   })
 
+  test('normalizes a create input exactly like a write, without writing', () => {
+    const { fixture, first } = setup()
+
+    const prepared = fixture.registry.normalizeRulebookInput(first.token.secret, {
+      name: '  Trimmed name  ',
+      applicableSpec: ' ts11@1.0.1 ',
+    })
+
+    expect(prepared.rulebook.name).toBe('Trimmed name')
+    expect(prepared.rulebook.applicableSpec).toBe('ts11@1.0.1')
+    expect(fixture.registry.listRulebooks()).toHaveLength(0)
+  })
+
   test('keeps the import key on update and out of the version snapshot', () => {
     const { fixture, first } = setup()
     const imported = fixture.registry.createRulebook(first.token.secret, {

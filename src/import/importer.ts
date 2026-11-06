@@ -28,9 +28,9 @@ import type { CreateRulebookInput, JsonObject, Rulebook } from '../registry/type
 import { importError } from './errors'
 import {
   importContentFingerprint,
+  importEntryIdentity,
   importEntryKey,
   storedImportContent,
-  type ImportContent,
 } from './identity'
 import { previewImport, type ImportOptions, type ImportPreview, type ImportSource } from './preview'
 import type { ImportDiagnostic, ImportEntryPreview } from './validate'
@@ -178,34 +178,6 @@ function toCreateRulebookInput(
 }
 
 /**
- * Normalizes a create input into the content compared on re-import. It must
- * mirror `storedImportContent` so the first import and a later re-import of the
- * same entry produce the same fingerprint.
- */
-function importContentFromInput(input: CreateRulebookInput): ImportContent {
-  return {
-    name: input.name,
-    description: input.description ?? '',
-    sourceUrl: input.sourceUrl ?? null,
-    applicableSpec: input.applicableSpec,
-    attestations: (input.attestations ?? []).map((attestation) => ({
-      name: attestation.name,
-      attestationLoS: attestation.attestationLoS,
-      bindingType: attestation.bindingType,
-      supportedFormats: [...(attestation.supportedFormats ?? [])],
-      metadata: attestation.metadata ?? {},
-      schemaReferences: (attestation.schemaReferences ?? []).map((reference) => ({
-        formatIdentifier: reference.formatIdentifier,
-        uri: reference.uri,
-        integrity: reference.integrity ?? null,
-        metadata: reference.metadata ?? {},
-      })),
-    })),
-    schemaReferences: [],
-  }
-}
-
-/**
  * Service-level import entry point. The HTTP API (#34/#35) will expose the
  * preview and import operations; this class keeps the security and persistence
  * seams testable without a transport.
@@ -247,8 +219,24 @@ export class RulebookImporter {
     }
 
     const importedAt = this.now()
-    const outcomes = preview.entries.map((entry) =>
-      this.classifyEntry(accessToken, entry, preview, importedAt),
+    const keyed = preview.entries.map((entry) => ({
+      entry,
+      entryKey: importEntryKey(preview.source, entry),
+    }))
+    const seen = new Map<string, ImportEntryPreview>()
+    for (const item of keyed) {
+      const first = seen.get(item.entryKey)
+      if (first !== undefined) {
+        throw importError(
+          'import_rejected',
+          `entries ${first.index} and ${item.entry.index} share the import identity "${importEntryIdentity(item.entry)}"; no rulebook was written`,
+        )
+      }
+      seen.set(item.entryKey, item.entry)
+    }
+
+    const outcomes = keyed.map(({ entry, entryKey }) =>
+      this.classifyEntry(accessToken, entry, preview, importedAt, entryKey),
     )
 
     const createdRulebooks = this.createNewRulebooks(
@@ -320,13 +308,13 @@ export class RulebookImporter {
     entry: ImportEntryPreview,
     preview: ImportPreview,
     importedAt: string,
+    entryKey: string,
   ): ClassifiedEntry {
-    const entryKey = importEntryKey(preview.source, entry)
-    // The fingerprint covers only the normalized content, so it is computed
-    // from the same input (with a placeholder provenance) and then written
-    // into the final provenance.
+    // The fingerprint covers only the content a write would store, so it is
+    // computed from the registry-normalized input (with a placeholder
+    // provenance) and then written into the final provenance.
     const provisional = toCreateRulebookInput(entry, preview, importedAt, entryKey, '')
-    const contentFingerprint = importContentFingerprint(importContentFromInput(provisional))
+    const contentFingerprint = this.normalizedContentFingerprint(accessToken, provisional)
     const input: CreateRulebookInput = {
       ...provisional,
       provenance: buildProvenance(entry, preview, importedAt, contentFingerprint),
@@ -346,6 +334,28 @@ export class RulebookImporter {
     }
 
     return this.classifyExisting(existing, entry, entryKey, contentFingerprint, input)
+  }
+
+  /**
+   * Fingerprints the content exactly as `createRulebooks` would store it, so a
+   * later re-import of the same source compares like with like. Validation
+   * failures use the same import rejection as a refused write.
+   */
+  private normalizedContentFingerprint(accessToken: string, input: CreateRulebookInput): string {
+    try {
+      const prepared = this.registry.normalizeRulebookInput(accessToken, input)
+      return importContentFingerprint(
+        storedImportContent(prepared.rulebook, prepared.attestations, prepared.schemaReferences),
+      )
+    } catch (error) {
+      if (isRegistryError(error) && (error.code === 'invalid_input' || error.code === 'conflict')) {
+        throw importError(
+          'import_rejected',
+          'the registry would refuse the imported rulebook content; no rulebook was written',
+        )
+      }
+      throw error
+    }
   }
 
   private classifyExisting(

@@ -192,9 +192,16 @@ can import the same catalogue entry without sharing ownership (FR-003). The key 
 import-internal product metadata: it never enters a version snapshot or a standards
 document.
 
+Two entries of one source must not share an entry identity: that would map two catalogue
+entries to one rulebook, which the unique index cannot represent. The import rejects such a
+source with `import_rejected` and names the colliding entry indexes before any write, instead
+of letting the database constraint reject the batch with a generic error. Catalogs should
+give every entry a distinct canonical `id` or display name.
+
 The source identity deliberately uses the **requested** URL, not the post-redirect final
-URL, so a changed CDN redirect does not look like a new source. The final URL and every
-redirect still feed the provenance and the content fingerprint below.
+URL, so a changed CDN redirect does not create a new entry identity. The final URL and every
+redirect still feed the provenance and the content fingerprint below, so a redirect change
+alone is reported as the `source_changed` conflict described in §5.5.
 
 ### 5.2 Content fingerprint
 
@@ -206,9 +213,13 @@ each attestation type with its schema references and retained internal metadata.
 are sorted recursively; array order stays significant. Provenance, timestamps and the import
 key are excluded.
 
-This is a comparison aid for change detection, not a claim of semantic identity,
-canonicalization for storage, or standards conformance. It is computed from AttestBook's
-validated input, not from the raw source document.
+The fingerprint is computed from the **registry-normalized** content, the form a real write
+stores: text is trimmed, URLs are stored in parsed form and bounded arrays are validated
+exactly as `createRulebooks` does (`Registry.normalizeRulebookInput`). The first import and a
+later re-import therefore compare like with like even when the source pads a format
+identifier or normalizes a URL differently. This is a comparison aid for change detection,
+not a claim of semantic identity, canonicalization for storage, or standards conformance. It
+is not computed from the raw source document.
 
 ### 5.3 Re-import decision
 
@@ -261,6 +272,13 @@ single-writer SQLite deployment (D-7).
 - A source version change with identical normalized content is reported as a conflict rather
   than silently updating the stored provenance, so the caller sees that the source claims a
   new version.
+- Two entries of one source must have distinct entry identities (a canonical `id` or a
+  distinct display name / derived name). A catalogue that repeats one is rejected with
+  `import_rejected` before any write instead of mapping two entries to one rulebook; the
+  message names the colliding entry indexes.
+- A changed redirect target changes the stored final source URL, so an otherwise
+  byte-identical source is reported as a `source_changed` conflict until the rulebook's
+  source URL is updated explicitly. The import never changes it silently.
 - Conditional fetching (`ETag`/`Last-Modified`), scheduled synchronization, source
   availability diagnostics and signature verification are later FR-005 slices.
 
@@ -319,12 +337,15 @@ Offline fixtures and injected transport/resolver keep the suite deterministic:
 - `src/import/importer.test.ts` — authenticated URL/OWF/catalog imports, retained source URL
   and digest, persisted attestation/schema references and OWF meta, all-or-nothing refusal
   and authentication before the network;
-- `src/import/reimport.test.ts` — idempotent re-import of unchanged bytes, a serialization-only
-  source change, JSON source-URL identity, provider-scoped identity, and the four conflict
-  codes (changed source, locally edited draft, published version, source version change),
-  including a grown/changed catalogue with mixed `unchanged`/`created`/`conflict` outcomes;
+- `src/import/reimport.test.ts` — idempotent re-import of unchanged bytes, a fingerprint
+  computed from registry-normalized values and URLs, a serialization-only source change, JSON
+  source-URL identity, provider-scoped identity, rejection of a catalogue whose entries share
+  an import identity, and the four conflict codes (changed source, locally edited draft,
+  published version, source version change), including a grown/changed catalogue with mixed
+  `unchanged`/`created`/`conflict` outcomes;
 - `src/registry/import-identity.test.ts` — import key persistence, per-provider uniqueness at
-  service and SQL level, cross-provider isolation, lookup scoping, invalid-key rejection and
+  service and SQL level, cross-provider isolation, lookup scoping, invalid-key rejection,
+  write-free input normalization and
   exclusion of the identity from a version snapshot;
 - `src/registry/create-rulebook-refs.test.ts` — transactional creation of attestation
   schema references, duplicate-format and per-attestation fan-out rejection, rollback.

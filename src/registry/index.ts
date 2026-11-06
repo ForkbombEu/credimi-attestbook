@@ -3,7 +3,7 @@
 // See docs/registry.md for the stable-identifier, standards-metadata-boundary,
 // authorization and version-immutability rules that this module implements.
 
-export { Registry, type RegistryOptions } from './registry'
+export { Registry, type PreparedRulebook, type RegistryOptions } from './registry'
 
 export { provisionProvider, type ProvisioningOptions } from './bootstrap'
 

@@ -3,6 +3,8 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { provisionProvider } from '../registry/bootstrap'
 import { createRegistryFixture, type RegistryFixture } from '../registry/test-support'
 import type { Registry } from '../registry/registry'
+import { ImportError } from './errors'
+import { importContentFingerprint, storedImportContent } from './identity'
 import { RulebookImporter } from './importer'
 import { DEFAULT_IMPORT_LIMITS } from './limits'
 import {
@@ -63,6 +65,29 @@ const secondDocument = ts11Document({
   rulebookURI: 'https://example.com/rulebooks/second/2.0.0.md',
 })
 
+/**
+ * A TS11 document the preview accepts, but whose whitespace the registry trims
+ * before storing. The fingerprint must be computed from the stored form.
+ */
+function paddedFormatDocument(): Record<string, unknown> {
+  const references = (validTs11Document as { schemaURIs: Record<string, unknown>[] }).schemaURIs
+  return {
+    ...validTs11Document,
+    supportedFormats: ['dc+sd-jwt '],
+    schemaURIs: [{ ...(references[0] ?? {}), formatIdentifier: 'dc+sd-jwt ' }],
+  }
+}
+
+/** A TS11 document whose schema URL host is upper-case in the source text. */
+function upperCaseHostDocument(): Record<string, unknown> {
+  const reference = (validTs11Document as { schemaURIs: Record<string, unknown>[] }).schemaURIs[0]
+  const uri = typeof reference?.['uri'] === 'string' ? reference['uri'] : ''
+  return {
+    ...validTs11Document,
+    schemaURIs: [{ ...(reference ?? {}), uri: uri.replace('example.com', 'EXAMPLE.com') }],
+  }
+}
+
 describe('idempotent re-import', () => {
   test('re-importing unchanged bytes creates no duplicate and writes nothing', async () => {
     const context = setup()
@@ -94,6 +119,45 @@ describe('idempotent re-import', () => {
     // No write at all: provenance and the update timestamp are unchanged.
     expect(stored?.provenance).toEqual(rulebook.provenance)
     expect(stored?.updatedAt).toBe(rulebook.updatedAt)
+  })
+
+  test('fingerprints the registry-normalized content and re-imports it idempotently', async () => {
+    const context = setup()
+    const body = jsonBytes(paddedFormatDocument())
+
+    const first = await importBody(context, body)
+    const rulebook = first.rulebooks[0]
+    if (rulebook === undefined) {
+      throw new Error('expected the first import to create a rulebook')
+    }
+    const storedFingerprint = importContentFingerprint(
+      storedImportContent(
+        rulebook,
+        context.registry.listAttestations(rulebook.id),
+        context.registry.listSchemaReferences(rulebook.id),
+      ),
+    )
+    expect(rulebook.provenance.contentFingerprint).toBe(storedFingerprint)
+
+    const second = await importBody(context, body)
+    expect(second.entries[0]).toMatchObject({
+      disposition: 'unchanged',
+      rulebookId: rulebook.id,
+    })
+    expect(second.conflicts).toEqual([])
+    expect(context.registry.listRulebooks()).toHaveLength(1)
+  })
+
+  test('treats a URL the registry normalizes as unchanged', async () => {
+    const context = setup()
+    const body = jsonBytes(upperCaseHostDocument())
+
+    await importBody(context, body)
+    const second = await importBody(context, body)
+
+    expect(second.entries[0]?.disposition).toBe('unchanged')
+    expect(second.conflicts).toEqual([])
+    expect(context.registry.listRulebooks()).toHaveLength(1)
   })
 
   test('reports a serialization-only source change without writing', async () => {
@@ -150,6 +214,27 @@ describe('idempotent re-import', () => {
     expect(reimport.entries[0]?.disposition).toBe('unchanged')
     expect(reimport.entries[0]?.rulebookId).toBe(first.rulebooks[0]?.id)
     expect(context.registry.listRulebooks()).toHaveLength(2)
+  })
+})
+
+describe('duplicate import identities', () => {
+  test('rejects a catalog whose entries share an import identity before writing', async () => {
+    const context = setup()
+    const body = jsonBytes({
+      data: [validTs11Document, ts11Document({ bindingType: 'claim' })],
+    })
+
+    let caught: unknown
+    try {
+      await importBody(context, body)
+    } catch (error) {
+      caught = error
+    }
+
+    expect(caught).toBeInstanceOf(ImportError)
+    expect((caught as ImportError).code).toBe('import_rejected')
+    expect((caught as ImportError).message).toContain('entries 0 and 1')
+    expect(context.registry.listRulebooks()).toHaveLength(0)
   })
 })
 

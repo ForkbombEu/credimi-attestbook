@@ -65,6 +65,9 @@ Implemented by #31:
 - `createRulebook`/`createRulebooks` accept an optional, validated `importKey`;
 - `Registry.findImportedRulebook` looks an entry identity up **only** for the authenticated
   provider, which is the service seam for idempotent re-import;
+- `Registry.normalizeRulebookInput` validates and normalizes a create input exactly as a
+  write would without inserting anything, so the importer fingerprints the stored form
+  (trimmed text, parsed URLs, bounded arrays) rather than the raw source;
 - the identity is product metadata: it is never included in a version snapshot or a
   standards document, and the import pipeline stores the per-entry content fingerprint in
   provenance.
@@ -400,8 +403,8 @@ The implementation is covered by real temporary SQLite files (not in-memory fake
   reference is invalid.
 - `src/registry/import-identity.test.ts` — import key persistence and lookup, per-provider
   uniqueness enforced by the service and by the database index, cross-provider isolation,
-  invalid-key rejection, update preservation and exclusion of the identity from a version
-  snapshot.
+  invalid-key rejection, write-free input normalization, update preservation and exclusion of
+  the identity from a version snapshot.
 - `src/import/` — the bounded URL/JSON import preview and authenticated draft import,
   including idempotent re-import and conflict detection; see [`docs/import.md`](import.md).
 

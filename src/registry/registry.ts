@@ -84,7 +84,8 @@ export interface RegistryOptions {
 
 const MAX_BEARER_TOKEN_LENGTH = 256
 
-interface PreparedRulebook {
+/** A validated, normalized rulebook and children that a write would insert. */
+export interface PreparedRulebook {
   readonly rulebook: Rulebook
   readonly attestations: readonly AttestationType[]
   readonly schemaReferences: readonly SchemaReference[]
@@ -296,6 +297,18 @@ export class Registry {
       actor.providerId,
       requireSha256Digest(importKey, 'importKey'),
     )
+  }
+
+  /**
+   * Validates and normalizes a create input exactly as `createRulebooks` would,
+   * without writing (#31). Import uses it so its content fingerprint describes
+   * the stored form (trimmed text, parsed URL form, bounded arrays) instead of
+   * the raw caller input. A caller-visible validation failure reuses the same
+   * `RegistryError` contract as a real write.
+   */
+  normalizeRulebookInput(accessToken: string, input: CreateRulebookInput): PreparedRulebook {
+    const actor = this.authenticate(accessToken)
+    return this.prepareRulebook(actor, input, this.now())
   }
 
   listAttestations(rulebookId: string): readonly AttestationType[] {

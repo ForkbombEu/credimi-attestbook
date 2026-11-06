@@ -17,9 +17,11 @@
 // re-serialized JSON (key order, whitespace) has a different digest but the
 // same semantic content. The fingerprint canonicalizes object key order, while
 // array order stays significant, so a serialization-only change is recognised
-// and reported instead of being silently ignored (R5.2, R-17). It is a
-// comparison aid only; it is not advertised as a semantic-identity or
-// standards-conformance claim.
+// and reported instead of being silently ignored (R5.2, R-17). It is computed
+// from the registry-normalized content (the form a write stores), never from
+// the raw caller input, so trimming and URL normalization cannot make an
+// unchanged source look changed. It is a comparison aid only; it is not
+// advertised as a semantic-identity or standards-conformance claim.
 
 import { sha256Hex } from '../registry/digest'
 import type { AttestationType, JsonObject, Rulebook, SchemaReference } from '../registry/types'
@@ -148,9 +150,10 @@ function toContentReference(reference: SchemaReference): ImportContentSchemaRefe
 }
 
 /**
- * Rebuilds the normalized content of a stored rulebook. It must match the
- * content built by the importer for the same source entry, so a local edit or
- * a source change is visible as a different fingerprint.
+ * Rebuilds the normalized content of a rulebook. It is the only content
+ * builder: the importer runs it over the registry-normalized input before a
+ * write and over the stored rulebook on re-import, so a local edit or a source
+ * change is visible as a different fingerprint.
  */
 export function storedImportContent(
   rulebook: Rulebook,
