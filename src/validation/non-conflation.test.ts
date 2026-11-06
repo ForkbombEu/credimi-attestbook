@@ -13,6 +13,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 
 import { createRegistryFixture, type RegistryFixture } from '../registry/test-support'
 
+import { DIMENSION_DEFINITIONS, dimensionDefinition } from './dimensions'
 import { CredentialValidator } from './engine'
 import type { CredentialValidationService } from './service'
 import {
@@ -212,6 +213,7 @@ describe('no unexecuted dimension or overall result is PASS', () => {
       },
     ]
 
+    expect(DIMENSION_DEFINITIONS).toHaveLength(8)
     for (const scenario of scenarios) {
       expect(scenario.result.dimensions).toHaveLength(8)
       expect(scenario.result.overallStatus).not.toBe('PASS')
@@ -222,6 +224,17 @@ describe('no unexecuted dimension or overall result is PASS', () => {
         }
         if (!entry.executed) {
           expect(entry.status).not.toBe('PASS')
+        }
+        // The result must agree with the published applicability table.
+        const definition = dimensionDefinition(entry.id)
+        if (!definition.implemented) {
+          expect(entry.executed).toBe(false)
+        }
+        if (definition.applicability === 'not_applicable') {
+          expect(entry.applicable).toBe(false)
+        }
+        if (definition.applicability === 'required') {
+          expect(entry.applicable).toBe(true)
         }
       }
       // Cryptography and trust always remain applicable and unexecuted.

@@ -22,6 +22,7 @@ import { TS11_ATTESTATION_LOS_VALUES, TS11_BINDING_TYPE_VALUES } from '../standa
 import { createDimension, dimensionDefinition, limitationsFromDimensions } from './dimensions'
 import { recognizeCredentialFormat } from './format'
 import { parseValidateCredentialInput } from './request'
+import type { SchemaValidationOutcome } from './schema'
 import { validateSchemaDocuments, type SchemaSandboxLimits } from './schema-sandbox'
 import { parseSdJwtVc, MAX_DISCLOSURES, type ParsedSdJwtVc } from './sd-jwt'
 import { aggregateStatus } from './status'
@@ -231,6 +232,47 @@ function unparsedSchemaReferences(
     kind: null,
     applied: false,
   }))
+}
+
+/**
+ * Builds the schema-validation dimension from a schema outcome. An
+ * `INCONCLUSIVE` aggregate where no document was applied (for example an
+ * unverifiable `sha384` or malformed integrity pin) means no schema check ran,
+ * so the dimension is `NOT_TESTED` with `executed: false`. A `FAIL` is always a
+ * real conclusion, even when the failing reference was not applied.
+ */
+export function schemaDimensionFromOutcome(
+  outcome: SchemaValidationOutcome,
+  referenceCount: number,
+  documentsSupplied: number,
+): ValidationDimension {
+  const appliedDocuments = outcome.schemaReferences.filter((entry) => entry.applied).length
+  const status: ValidationStatus =
+    outcome.status === 'INCONCLUSIVE' && appliedDocuments === 0 ? 'NOT_TESTED' : outcome.status
+  const applicable = status !== 'NOT_APPLICABLE'
+  const executed = status === 'PASS' || status === 'FAIL' || status === 'INCONCLUSIVE'
+  const primaryFinding = outcome.findings.find((entry) => entry.severity !== 'info')
+  return createDimension({
+    id: 'schema_validation',
+    status,
+    applicable,
+    executed,
+    findings: outcome.findings,
+    evidence: {
+      scope: dimensionDefinition('schema_validation').scope,
+      reason:
+        status === 'PASS'
+          ? 'Every supplied schema document for the pinned references was applied and satisfied.'
+          : (primaryFinding?.message ??
+            'Schema validation did not reach a conclusive result for every pinned reference.'),
+      details: {
+        executed,
+        references: referenceCount,
+        documents_supplied: documentsSupplied,
+        applied_documents: appliedDocuments,
+      },
+    },
+  })
 }
 
 /** The typed, framework-independent credential validation service. */
@@ -466,29 +508,11 @@ export class CredentialValidator {
         },
         this.sandbox,
       )
-      const applicable = outcome.status !== 'NOT_APPLICABLE'
-      const executed = outcome.status !== 'NOT_TESTED' && outcome.status !== 'NOT_APPLICABLE'
-      const primaryFinding = outcome.findings.find((entry) => entry.severity !== 'info')
-      schemaDimension = createDimension({
-        id: 'schema_validation',
-        status: outcome.status,
-        applicable,
-        executed,
-        findings: outcome.findings,
-        evidence: {
-          scope: dimensionDefinition('schema_validation').scope,
-          reason:
-            outcome.status === 'PASS'
-              ? 'Every supplied schema document for the pinned references was applied and satisfied.'
-              : (primaryFinding?.message ??
-                'Schema validation did not reach a conclusive result for every pinned reference.'),
-          details: {
-            references: matchingReferences.length,
-            documents_supplied: request.schemaDocuments?.length ?? 0,
-            applied_documents: outcome.schemaReferences.filter((entry) => entry.applied).length,
-          },
-        },
-      })
+      schemaDimension = schemaDimensionFromOutcome(
+        outcome,
+        matchingReferences.length,
+        request.schemaDocuments?.length ?? 0,
+      )
       schemaReferences = outcome.schemaReferences
     }
 

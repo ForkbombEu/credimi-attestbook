@@ -130,6 +130,8 @@ export interface SeedRulebookOptions {
   readonly schemaFormatIdentifier?: string
   readonly schemaUri?: string
   readonly schemaContent?: string
+  /** Overrides the computed sha256 SRI pin; used to test unverifiable pins. */
+  readonly schemaIntegrity?: string
 }
 
 export interface SeededRulebook {
@@ -163,6 +165,7 @@ export function seedPublishedRulebook(
   const rulebookName = options.rulebookName ?? 'PID Rulebook'
   const schemaUri = options.schemaUri ?? TEST_VCT
   const schemaContent = options.schemaContent ?? PID_TYPE_METADATA_TEXT
+  const integrity = options.schemaIntegrity ?? sha256Sri(schemaContent)
 
   const rulebook = registry.createRulebook(token, {
     name: rulebookName,
@@ -186,7 +189,7 @@ export function seedPublishedRulebook(
   registry.addSchemaReference(token, rulebook.id, {
     formatIdentifier: options.schemaFormatIdentifier ?? 'dc+sd-jwt',
     uri: schemaUri,
-    integrity: sha256Sri(schemaContent),
+    integrity,
     attestationId: attestation.id,
   })
 
@@ -201,7 +204,7 @@ export function seedPublishedRulebook(
     digest: version.contentDigest,
     schemaUri,
     schemaContent,
-    integrity: sha256Sri(schemaContent),
+    integrity,
     token,
   }
 }

@@ -105,8 +105,12 @@ therefore carries `schemaDocuments` with the **exact UTF-8 document text**. The 
   separate Bun worker process with a 2-second hard timeout and a 256 MiB RSS watchdog; hitting
   either limit is reported as `NOT_TESTED`, not as a credential failure.
 
-A reference with no supplied document makes schema validation `NOT_TESTED`. Supplying an
-unrelated schema cannot widen validation silently.
+A reference with no supplied document makes schema validation `NOT_TESTED`. A reference whose
+integrity pin cannot be verified (unsupported algorithm or malformed value) is not applied; if
+no pinned reference was applied, the schema dimension is `NOT_TESTED` with `executed: false`
+rather than an executed `INCONCLUSIVE`. A `FAIL` remains an executed conclusion even when the
+failing reference was not applied. Supplying an unrelated schema cannot widen validation
+silently.
 
 ## 4. Typed contract
 
@@ -180,9 +184,9 @@ The issuer-signed JWT must carry a `typ` header of `dc+sd-jwt` or `vc+sd-jwt`.
 baseline (`src/standards/profiles.ts`) and reported as recognised. Their parsing and schema
 dimensions are `NOT_TESTED`; the attestation-constraints dimension is `INCONCLUSIVE` because
 the rulebook-level checks ran but the credential-dependent key-binding check did not. A format
-backed only by the caller hint and not confirmed by parsing is `INCONCLUSIVE`, not `PASS`. A rulebook that does not list the
-credential format fails the attestation-constraints dimension. No generic JSON validator is
-presented as mdoc or W3C VC support (FR-011).
+backed only by the caller hint and not confirmed by parsing is `INCONCLUSIVE`, not `PASS`. A
+rulebook that does not list the credential format fails the attestation-constraints dimension.
+No generic JSON validator is presented as mdoc or W3C VC support (FR-011).
 
 ## 7. Privacy, logging and limits
 
@@ -222,6 +226,9 @@ Tests execute the real pinned libraries and a real migrated SQLite registry:
 - `src/validation/engine.test.ts` — pinned version/digest evidence, dimension statuses,
   applicability/execution flags, evidence details, limitations, unsupported formats, key
   binding, digest-tamper abort, version pinning;
+- `src/validation/schema-dimension.test.ts` — an unverifiable integrity pin with nothing
+  applied is `NOT_TESTED`/unexecuted (also end to end), partial application stays executed
+  `INCONCLUSIVE`, and a non-applied `FAIL` remains an executed conclusion;
 - `src/validation/schema-sandbox.test.ts` — real-child timeout, memory, output, busy,
   unavailable, malformed-output and mixed integrity/timeout behaviour;
 - `src/app.validation.test.ts` — typed HTTP contract with `applicable`/`executed`/`evidence`
@@ -240,9 +247,9 @@ remote schema/import fetch that will replace caller-supplied documents; issue #3
 versioned REST/OpenAPI surface and validation persistence. FR-010 allows external adapters or
 test orchestration to supply other dimensions, but this slice accepts no external dimension
 evidence: caller-supplied dimension results are ignored, so an untested dimension cannot be
-made to PASS. Validation options (FR-009) are not accepted yet, draft versions are publicly readable and authorization for them belongs to
-#35, and a supplied schema document that belongs to the attestation but not to the credential's
-format is ignored rather than reported.
+made to PASS. Validation options (FR-009) are not accepted yet, draft versions are publicly
+readable and authorization for them belongs to #35, and a supplied schema document that
+belongs to the attestation but not to the credential's format is ignored rather than reported.
 
 A `vct#integrity` claim on the credential is not compared with the supplied Type Metadata in
 this slice; only the rulebook reference `#integrity` is verified. That is part of the
