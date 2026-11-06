@@ -36,10 +36,10 @@ split from the closed duplicates #15–#19.
 | FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #43 | Not authoritative for rulebooks |
 | FR-007 | Rulebook editor and authoring workflow | Phase 2: #40, #41 | UI-003; not Phase 1 |
 | FR-008 | Publication of validated, versioned, reproducible artifacts with provenance/integrity | Phase 1 subset: #29; full workflow Phase 2: #42 | Where signing applies, use OWF behind the JOSE policy |
-| FR-009 | Reusable validation API with structured results and evidence | Phase 1: #32 | SD-JWT VC structural scope |
-| FR-010 | Eight independent validation dimensions | Phase 1: #33 | No dimension PASS without execution |
+| FR-009 | Reusable validation API with structured results and evidence | Phase 1: #32, #33 | SD-JWT VC structural scope; per-dimension evidence and limitations added in #33 |
+| FR-010 | Eight independent validation dimensions | Phase 1: #33 | No dimension PASS without execution; applicability table in `docs/validation.md` §2 |
 | FR-011 | Credential format support, SD-JWT VC first, extensible interfaces | Phase 1: #32 (SD-JWT VC); later formats | mdoc explicitly `NOT_TESTED`, not mocked |
-| FR-012 | PASS / FAIL / NOT_TESTED / NOT_APPLICABLE / INCONCLUSIVE results | Phase 1: #33 | Conservative overall aggregation (D-8) |
+| FR-012 | PASS / FAIL / NOT_TESTED / NOT_APPLICABLE / INCONCLUSIVE results | Phase 1: #33 | Conservative overall aggregation (D-8), enforced per dimension |
 | FR-013 | Issuer test fixtures | Phase 3: #44 | Not Phase 1 |
 | FR-014 | Verifier test fixtures and policies | Phase 3: #45 | Not Phase 1 |
 | FR-015 | Capture artifact model | Phase 0 contracts: [`docs/capture-integration.md`](capture-integration.md); Phase 4: #46 | Not implemented |

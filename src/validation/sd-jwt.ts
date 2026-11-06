@@ -33,7 +33,7 @@ const RESERVED_MEMBERS = new Set(['_sd', '_sd_alg', '_sd_decoy', '...'])
 const MAX_CLAIM_DEPTH = 64
 
 /** Bound on disclosures unpacked by one credential. */
-const MAX_DISCLOSURES = 1_000
+export const MAX_DISCLOSURES = 1_000
 
 const NODE_HASH_ALGORITHMS: Readonly<Record<string, string>> = {
   'sha-256': 'sha256',
