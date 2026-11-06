@@ -226,6 +226,7 @@ individually:
 | Check | Meaning |
 | --- | --- |
 | `draft_version` | Only a `draft` version can be published; published and historical artifacts are immutable. |
+| `rulebook_status` | The rulebook working copy may move to `published`. A leftover draft on an already-published rulebook is not publishable until the next draft version reopens the working copy; a historical rulebook never is. |
 | `snapshot_integrity` | The stored bytes still hash to the recorded SHA-256 digest. |
 | `snapshot_current` | The draft snapshot still matches the current working copy; a stale draft must be refreshed. |
 | `content_valid` | The snapshot content passes the same structural and TS11 v1.0.1 standards validation the editor runs. |
@@ -237,6 +238,11 @@ individually:
 verified by these checks, and the assessment makes no TS11 or ETSI conformance claim.
 Readiness is advisory for direct API callers; `POST .../publish` remains the authoritative
 transition and still rejects a stale snapshot with `409 conflict`.
+
+The rulebook-status check mirrors the publish transition exactly: a draft version cannot be
+published while its rulebook is `published` (it answers `409 immutable`) or `historical`.
+Creating the next version returns a `published` rulebook to `draft`, after which a leftover
+draft version can be published and supersedes the current published version.
 
 ## 4. Errors
 

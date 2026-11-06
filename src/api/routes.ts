@@ -20,11 +20,7 @@ import type {
   CreateRulebookVersionInput,
   ReplaceDraftContentInput,
 } from '../registry/types'
-import {
-  buildRulebookVersionDocument,
-  parseRulebookVersionDocument,
-  serializeRulebookVersion,
-} from '../registry/versioning'
+import { parseRulebookVersionDocument } from '../registry/versioning'
 import { CREDENTIAL_VALIDATION_PATH, type CredentialValidationService } from '../validation'
 
 import { apiError } from './errors'
@@ -1199,25 +1195,16 @@ function getRulebookPublicationReadinessHandler(dependencies: ApiDependencies): 
     const registry = requireRegistry(dependencies)
     const rulebookId = context.req.param('rulebookId') ?? ''
     const label = context.req.param('version') ?? ''
-    const content = registry.getRulebookVersionContent(rulebookId, label)
-    if (content === null) {
+    // The registry builds the stored artifact and the current working-copy
+    // bytes exactly as publish does, so readiness cannot drift from publication.
+    const candidate = registry.getPublicationCandidate(rulebookId, label)
+    if (candidate === null) {
       throw apiError(404, 'not_found', 'The requested rulebook version does not exist.')
     }
-
-    // The current working copy is serialized exactly as a new snapshot would
-    // be, under the same label, so the freshness check compares like with like.
-    const draft = registry.getDraftContent(rulebookId)
-    const currentBytes = serializeRulebookVersion(
-      buildRulebookVersionDocument({
-        rulebook: draft.rulebook,
-        version: content.version.version,
-        specVersion: draft.rulebook.applicableSpec,
-        attestations: draft.attestations,
-        schemaReferences: draft.schemaReferences,
-      }),
-    )
+    const { rulebook, content, currentBytes } = candidate
     const readiness = assessPublicationReadiness({
       version: content.version,
+      rulebookStatus: rulebook.publicationStatus,
       bytes: content.bytes,
       currentBytes,
       document: parseRulebookVersionDocument(content.bytes),

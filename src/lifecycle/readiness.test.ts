@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'bun:test'
 
 import { sha256Hex } from '../registry/digest'
-import type { RulebookVersion } from '../registry/types'
+import type { PublicationStatus, RulebookVersion } from '../registry/types'
 import { serializeRulebookVersion, type RulebookVersionDocument } from '../registry/versioning'
 
 import { assessPublicationReadiness } from './readiness'
@@ -64,10 +64,12 @@ function assess(
   options: {
     readonly version?: Partial<RulebookVersion>
     readonly current?: RulebookVersionDocument
+    readonly rulebookStatus?: PublicationStatus
   } = {},
 ) {
   return assessPublicationReadiness({
     version: record(document, options.version),
+    rulebookStatus: options.rulebookStatus ?? 'draft',
     bytes: serializeRulebookVersion(document),
     currentBytes: serializeRulebookVersion(options.current ?? document),
     document,
@@ -93,8 +95,19 @@ describe('publication readiness', () => {
       'pass',
       'pass',
       'pass',
+      'pass',
     ])
     expect(result.limitations.length).toBeGreaterThan(0)
+  })
+
+  test('a draft on an already-published rulebook is not ready', () => {
+    for (const status of ['published', 'historical'] as const) {
+      const result = assess(snapshot(), { rulebookStatus: status })
+
+      expect(result.ready).toBe(false)
+      expect(statusOf(result, 'rulebook_status')).toBe('fail')
+      expect(result.checks.filter((check) => check.status === 'fail')).toHaveLength(1)
+    }
   })
 
   test('a stale draft snapshot blocks publication until it is refreshed', () => {
@@ -121,6 +134,7 @@ describe('publication readiness', () => {
     const document = snapshot()
     const result = assessPublicationReadiness({
       version: record(document, { contentDigest: 'f'.repeat(64) }),
+      rulebookStatus: 'draft',
       bytes: serializeRulebookVersion(document),
       currentBytes: serializeRulebookVersion(document),
       document,

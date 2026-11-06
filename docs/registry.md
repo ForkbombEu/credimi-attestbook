@@ -59,9 +59,12 @@ Implemented by #41:
   excluded, object keys are visited in sorted order and changes are JSON Pointer paths sorted
   by path;
 - `lifecycle/readiness.ts`: publication-readiness checks over the stored bytes, the current
-  working copy and the snapshot content (draft state, digest integrity, staleness, structural
-  and TS11 v1.0.1 validation, profile coverage and attestation types), with explicit
-  limitations and no conformance claim;
+  working copy, the snapshot content and the owning rulebook's status (draft state, rulebook
+  transition, digest integrity, staleness, structural and TS11 v1.0.1 validation, profile
+  coverage and attestation types), with explicit limitations and no conformance claim. The
+  registry supplies the same candidate inputs publish uses, so readiness and publication
+  cannot disagree; a draft version left on a `published` rulebook is not publishable until
+  the next version reopens the working copy;
 - `Registry.refreshDraftRulebookVersion` is exposed over the API: a draft snapshot can be
   re-taken from the current working copy, while a published or historical version stays
   immutable.

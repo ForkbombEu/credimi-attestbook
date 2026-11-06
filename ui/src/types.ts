@@ -106,6 +106,7 @@ export type PublicationReadinessCheckStatus = 'pass' | 'fail' | 'warn' | 'not_ap
 
 export type PublicationReadinessCheckId =
   | 'draft_version'
+  | 'rulebook_status'
   | 'snapshot_integrity'
   | 'snapshot_current'
   | 'content_valid'

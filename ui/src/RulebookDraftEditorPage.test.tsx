@@ -311,6 +311,42 @@ describe('rulebook draft editor', () => {
     expect(screen.getByText('This rulebook is published.')).toBeVisible()
   })
 
+  test('keeps publish disabled when the readiness rulebook-status check fails', async () => {
+    const api = editor({
+      getPublicationReadiness: vi.fn(async () =>
+        readiness({
+          ready: false,
+          checks: [
+            {
+              id: 'rulebook_status',
+              status: 'fail',
+              message:
+                'The rulebook is already published; create the next draft version before publishing another draft.',
+            },
+          ],
+        }),
+      ),
+    })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id, token: 'att_secret' })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    const lifecycle = await screen.findByRole('region', {
+      name: 'Draft lifecycle and publication',
+    })
+    await user.click(within(lifecycle).getByRole('button', { name: 'Check readiness' }))
+
+    expect(
+      await within(lifecycle).findByText(/Not ready to publish: resolve the failed checks first/),
+    ).toBeVisible()
+    expect(
+      within(lifecycle).getByText(
+        'The rulebook is already published; create the next draft version before publishing another draft.',
+      ),
+    ).toBeVisible()
+    expect(within(lifecycle).getByRole('button', { name: 'Publish' })).toBeDisabled()
+  })
+
   test('freezes the working copy under a typed version label', async () => {
     const api = editor({ listVersions: vi.fn(async () => []) })
     const user = userEvent.setup()

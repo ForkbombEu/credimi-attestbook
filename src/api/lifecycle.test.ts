@@ -223,6 +223,7 @@ describe('publication readiness API', () => {
     expect(ready.data.ready).toBe(true)
     expect(ready.data.checks.map((check) => check.id)).toEqual([
       'draft_version',
+      'rulebook_status',
       'snapshot_integrity',
       'snapshot_current',
       'content_valid',
@@ -280,6 +281,67 @@ describe('publication readiness API', () => {
       token,
     )
     expect(missingVersion.status).toBe(404)
+  })
+})
+
+describe('readiness matches the publish transition', () => {
+  test('a leftover draft on a published rulebook is not ready and cannot be published', async () => {
+    const { app, registry, rulebookId, token } = setup()
+
+    const create = (version: string) =>
+      app.request(`/api/v1/rulebooks/${rulebookId}/versions`, {
+        method: 'POST',
+        headers: headers(token),
+        body: JSON.stringify({ version }),
+      })
+
+    expect((await create('1.1')).status).toBe(201)
+    const firstPublish = await postEmpty(
+      app,
+      `/api/v1/rulebooks/${rulebookId}/versions/1.1/publish`,
+      token,
+    )
+    expect(firstPublish.status).toBe(200)
+    expect(registry.getRulebook(rulebookId)?.publicationStatus).toBe('published')
+
+    const readiness = await app.request(
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publication-readiness`,
+    )
+    expect(readiness.status).toBe(200)
+    const body = await json<{ data: PublicationReadinessResource }>(readiness)
+    assertSchema('PublicationReadinessResponse', body)
+    expect(body.data.ready).toBe(false)
+    const rulebookStatus = body.data.checks.find((check) => check.id === 'rulebook_status')
+    expect(rulebookStatus?.status).toBe('fail')
+    expect(
+      body.data.checks
+        .filter((check) => check.id !== 'rulebook_status')
+        .every((check) => check.status === 'pass'),
+    ).toBe(true)
+
+    const rejected = await postEmpty(
+      app,
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publish`,
+      token,
+    )
+    expect(rejected.status).toBe(409)
+    expect((await errorJson(rejected)).error.code).toBe('immutable')
+    expect(registry.getRulebookVersion(rulebookId, '1.1')?.status).toBe('published')
+
+    // Creating the next version reopens the working copy; the leftover draft is
+    // then publishable again under the same transition policy.
+    expect((await create('1.2')).status).toBe(201)
+    const reopened = await app.request(
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publication-readiness`,
+    )
+    expect((await json<{ data: PublicationReadinessResource }>(reopened)).data.ready).toBe(true)
+    const published = await postEmpty(
+      app,
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publish`,
+      token,
+    )
+    expect(published.status).toBe(200)
+    expect(registry.getRulebookVersion(rulebookId, '1.1')?.status).toBe('historical')
   })
 })
 

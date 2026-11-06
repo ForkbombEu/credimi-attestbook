@@ -195,6 +195,7 @@ export const PUBLICATION_READINESS_CHECK_STATUS_SCHEMA = z.enum([
 export const publicationReadinessCheckSchema = z.object({
   id: z.enum([
     'draft_version',
+    'rulebook_status',
     'snapshot_integrity',
     'snapshot_current',
     'content_valid',

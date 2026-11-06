@@ -18,7 +18,8 @@
 
 import { validateDraftContent } from '../editor'
 import { sha256Hex } from '../registry/digest'
-import type { RulebookVersion } from '../registry/types'
+import { isRulebookTransitionAllowed } from '../registry/transitions'
+import type { PublicationStatus, RulebookVersion } from '../registry/types'
 import type { RulebookVersionDocument } from '../registry/versioning'
 
 export const PUBLICATION_READINESS_CHECK_STATUSES = [
@@ -32,6 +33,7 @@ export type PublicationReadinessCheckStatus = (typeof PUBLICATION_READINESS_CHEC
 /** Stable check identifiers of the readiness contract. */
 export const PUBLICATION_READINESS_CHECK_IDS = [
   'draft_version',
+  'rulebook_status',
   'snapshot_integrity',
   'snapshot_current',
   'content_valid',
@@ -56,6 +58,8 @@ export interface PublicationReadiness {
 
 export interface PublicationReadinessInput {
   readonly version: RulebookVersion
+  /** Current working-copy status of the rulebook that owns the version. */
+  readonly rulebookStatus: PublicationStatus
   /** Exact stored snapshot bytes of the version. */
   readonly bytes: Uint8Array
   /** Snapshot bytes the current working copy would freeze under this label. */
@@ -100,6 +104,18 @@ export function assessPublicationReadiness(input: PublicationReadinessInput): Pu
           'draft_version',
           'fail',
           `The version is ${version.status}; only a draft version can be published, and published or historical artifacts are immutable.`,
+        ),
+  )
+
+  checks.push(
+    isRulebookTransitionAllowed(input.rulebookStatus, 'published')
+      ? check('rulebook_status', 'pass', 'The rulebook working copy can be published.')
+      : check(
+          'rulebook_status',
+          'fail',
+          input.rulebookStatus === 'published'
+            ? 'The rulebook is already published; create the next draft version before publishing another draft.'
+            : `The rulebook is ${input.rulebookStatus}; its versions cannot be published.`,
         ),
   )
 

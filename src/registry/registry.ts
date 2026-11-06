@@ -989,6 +989,37 @@ export class Registry {
   }
 
   /**
+   * Inputs for a publication-readiness assessment, built exactly as
+   * `publishRulebookVersion` builds them: the stored artifact, the rulebook
+   * that owns it and the bytes the current working copy would freeze under the
+   * same label. Readiness and publication therefore read the same state and
+   * cannot disagree about what publish would do.
+   */
+  getPublicationCandidate(
+    rulebookId: string,
+    version: string,
+  ): {
+    readonly rulebook: Rulebook
+    readonly content: RulebookVersionContent
+    readonly currentBytes: Uint8Array
+  } | null {
+    const content = this.getRulebookVersionContent(rulebookId, version)
+    if (content === null) {
+      return null
+    }
+    const rulebook = this.requireRulebook(content.version.rulebookId)
+    return {
+      rulebook,
+      content,
+      currentBytes: this.buildVersionBytes(
+        rulebook,
+        content.version.version,
+        rulebook.applicableSpec,
+      ),
+    }
+  }
+
+  /**
    * Freezes the rulebook's current draft content as a new draft version. When
    * the rulebook was published, this reopens the working copy for the next
    * version; every already-published version stays immutable.
