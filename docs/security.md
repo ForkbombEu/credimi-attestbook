@@ -24,13 +24,13 @@ provisioning) and `src/registry/tokens.ts` (token primitives).
 | Actor | Credentials | Authority |
 | --- | --- | --- |
 | Anonymous reader | none | Public catalogue, attestation, schema-reference, version, snapshot and health reads; structural credential validation. |
-| Provider account | Provider bearer token (`Authorization: Bearer att_…`) | Create and mutate only the rulebooks owned by that provider; import drafts owned by that provider; preview imports. |
+| Provider account | Provider bearer token (`Authorization: Bearer att_…`) | Create and mutate only the rulebooks owned by that provider; import drafts owned by that provider; preview imports; discover issuer metadata. |
 | Operator | Out-of-band deployment access | Provision a provider and its first token, audit inspection and deployment configuration. Nothing in the HTTP API performs provider administration. |
-| Remote import source | none | Untrusted input; bounded and validated by the import pipeline, never trusted for provider identity or publication authority. |
+| Remote import or issuer source | none | Untrusted input; bounded and validated by the import/discovery pipelines, never trusted for provider identity or publication authority. |
 
 Writes are authenticated; reads are deliberately public, mirroring TS11's public-read
 expectation. Provider identity is never inferred from a remote URL, a `rulebookURI`, an
-import source or a request body.
+import source, issuer metadata or a request body.
 
 ## 2. Authentication
 
@@ -72,9 +72,9 @@ The following rules implement that model:
   identity.
 - **Public reads.** Provider, rulebook, attestation, schema-reference, version, snapshot,
   digest, publication-export and export-manifest reads need no token, including working
-  drafts, by design. The one read-shaped route that requires authentication is the import
-  preview, because a URL preview performs a bounded outbound fetch under the untrusted-import
-  controls.
+  drafts, by design. The read-shaped routes that require authentication are the import preview
+  and issuer discovery, because both perform a bounded outbound fetch under the
+  untrusted-input controls.
 - **Provider administration.** Provider creation, token issuance for a provider without a
   token and audit inspection are operator actions. No HTTP route exposes
   `provisionProvider`.
@@ -94,6 +94,7 @@ The following rules implement that model:
 | `POST …/versions/{version}/publish` | yes | Actor must own the stored rulebook; ownership is checked before replay and version lookup | `401`; `403` when foreign; `404` only for the owner; `409` for stale or immutable state |
 | `POST /api/v1/imports/preview` | yes | No write; the token gates the outbound fetch | `401`; `400`/`422`/`502` for the source |
 | `POST /api/v1/imports` | yes | Import identity and created drafts are scoped to the actor's provider | `401`; `422` for a refused source |
+| `POST /api/v1/issuers/discover` | yes | No write and no stored issuer state; the token gates the bounded outbound fetch | `401`; `400`/`422`/`502` for the URL or metadata |
 | `POST /api/v1/credentials/validate` | no | Read-only, public by design | `400`/`404`/`503` |
 
 The browser editor never persists its provider token: it lives in the app's React memory for
@@ -197,12 +198,17 @@ trail is not exposed over HTTP; it is read by operators from the database.
   the database unchanged.
 - `src/api/routes.test.ts` and `src/api/openapi.test.ts` cover the HTTP error envelope,
   auth-before-body-read, cross-provider publish denial and the generated security contract.
+- `src/api/discovery.test.ts` verifies that issuer discovery authenticates before any
+  discovery work, maps the shared bounded-fetch failures and validates its response against
+  the generated contract; `src/discovery/discover.test.ts` covers the SSRF, size,
+  content-type, redirect and metadata-validation controls with an offline transport.
 - Run `bun run check` and `bun run openapi:check` from the repository root.
 
 ## 10. References
 
 - [Specification §13 and §15](specification.md)
 - [API contract and error table](api.md)
+- [Issuer discovery contract](discovery.md)
 - [Registry authorization and ownership](registry.md)
 - [Architecture §6](architecture.md)
 - [Decision D-10](implementation-plan.md)

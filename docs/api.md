@@ -67,10 +67,10 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.3.0`,
-  additive after the lifecycle and comparison operations added by #41 and the publication
-  export operations added by #42); it is separate from the package version reported by
-  `/health`.
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.4.0`,
+  additive after the lifecycle and comparison operations added by #41, the publication
+  export operations added by #42 and issuer discovery added by #43); it is separate from
+  the package version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -105,6 +105,7 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export/manifest` | no | `200` | Publication export manifest: frozen identity, digest, bounded provenance, integrity result and the explicit signature boundary. Drafts answer `409 conflict`. |
 | `POST` | `/api/v1/imports/preview` | yes | `200` | Bounded, read-only URL/JSON import preview. |
 | `POST` | `/api/v1/imports` | yes | `200` | Import compatible entries as drafts, reporting per-entry dispositions. |
+| `POST` | `/api/v1/issuers/discover` | yes | `200` | Bounded OpenID4VCI issuer metadata discovery with candidate rulebook associations, ambiguity and unmatched reporting. |
 | `POST` | `/api/v1/credentials/validate` | no | `200` | Structural credential validation with per-dimension evidence. |
 
 Representations are the public projection of the services: rulebook `provenance`,
@@ -320,6 +321,52 @@ Publication itself stays an authenticated, owner-scoped transition
 publication writes the `version.publish` audit row with the actor provider, version,
 digest, profile and superseded versions, in the same transaction as the state change.
 
+### 3.5 Issuer metadata discovery
+
+`POST /api/v1/issuers/discover` is the authenticated, read-only FR-006 slice. The request is
+the Credential Issuer Identifier:
+
+```json
+{ "credentialIssuer": "https://issuer.example" }
+```
+
+Discovery inserts `/.well-known/openid-credential-issuer` into the issuer identifier between
+the host and the path (OpenID4VCI 1.0 §12.2.2), then retrieves it under the import pipeline's
+§15 controls (https-only URL validation, public-address pinning, redirect re-validation, total
+deadline, response-size and JSON-shape bounds), validates the members it uses and extracts the
+supported credential configurations. An explicit earlier appended-path metadata URL is also
+accepted for older issuers. It understands the OpenID4VCI 1.0 `credential_configurations_supported`
+object and the earlier `credentials_supported` shape.
+
+Each configuration reports its `format`, type identifiers (`vct`/`doctype`/legacy `type`;
+`vct` is a case-sensitive StringOrURI and may be a URN), display name, exposed schema references
+and a `mapping` with `status`, `candidates` and, for an unmatched configuration, a `reason`.
+`matched` carries exactly one candidate, `ambiguous` more than one and `unmatched` none. Every
+candidate is an **exact pin**:
+
+```json
+{
+  "rulebookId": "…",
+  "rulebookName": "PID Rulebook",
+  "version": "1.0",
+  "contentDigest": "…64 lowercase hex characters…",
+  "specVersion": "ts11@1.0.1"
+}
+```
+
+Only published or historical rulebook versions are candidates; drafts are mutable and never
+used. Several matching versions of the same rulebook collapse to its current version, so a
+single history does not look ambiguous; matching several rulebooks is reported as ambiguous
+rather than resolved by a policy the API has not been given. The result also carries the
+retrieval provenance (`metadataUrl`, redirects, retrieval time, content type, byte length and
+the SHA-256 of the exact bytes), bounded issuer fields, aggregate counts, diagnostics and
+limitations.
+
+The route writes nothing: discovered issuers, metadata snapshots and explicit manual mappings
+are not persisted in this slice. Issuer metadata is never treated as rulebook content, no
+exposed reference is fetched and no signature, trust or conformance result is derived from it.
+The discovery contract is documented in [`docs/discovery.md`](discovery.md).
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -350,10 +397,10 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Registry / draft editor | published or historical rulebook cannot be edited | `409` | `immutable` |
 | Registry / version handlers | published/historical immutability, historical republication, refresh of a frozen version | `409` | `immutable` |
 | Body limit middleware | body larger than 4 MiB | `413` | `payload_too_large` |
-| Import | unsafe/malformed/unsupported source, limits, refused import | `422` | `import_rejected` |
-| Import | remote fetch failure, DNS failure, timeout, redirect limit, oversized remote response, unsupported remote status | `502` | `import_fetch_failed` |
-| Import | `invalid_source`/`invalid_url` client input | `400` | `invalid_request` |
-| API wiring | registry or validation not configured | `503` | `registry_unavailable` / `validation_unavailable` |
+| Import or issuer discovery | unsafe/malformed/unsupported source or issuer metadata, limits, refused input | `422` | `import_rejected` |
+| Import or issuer discovery | remote fetch failure, DNS failure, timeout, redirect limit, oversized remote response, unsupported remote status | `502` | `import_fetch_failed` |
+| Import or issuer discovery | `invalid_source`/`invalid_url` client input | `400` | `invalid_request` |
+| API wiring | registry, validation or issuer discovery not configured | `503` | `registry_unavailable` / `validation_unavailable` |
 | API | unexpected failure | `500` | `internal_error` |
 
 Unknown routes under any path answer `404` with `not_found` and the same envelope. The
@@ -368,13 +415,13 @@ secret-handling guarantees, is documented in [`docs/security.md`](security.md). 
 summarizes the HTTP contract.
 
 - Reads are public, mirroring TS11's public-read requirement and the registry service's
-  public read surface. The single exception is the import preview: a URL preview makes the
-  server perform a bounded outbound fetch under the untrusted-import controls, so the HTTP
-  route requires the same provider bearer token as import even though it writes nothing.
-- Writes and the import preview require a provider bearer token. Tokens use the `att_`
-  prefix and are stored only as SHA-256 hashes; the raw secret is returned once by operator
-  provisioning, which is not an HTTP route. The API never echoes a token. The route table's
-  `security` flag gates authentication centrally, before any request body is read, so a
+  public read surface. The two exceptions are the import preview and issuer discovery: both
+  make the server perform a bounded outbound fetch under the untrusted-import controls, so
+  their HTTP routes require the same provider bearer token even though they write nothing.
+- Writes, the import preview and issuer discovery require a provider bearer token. Tokens use
+  the `att_` prefix and are stored only as SHA-256 hashes; the raw secret is returned once by
+  operator provisioning, which is not an HTTP route. The API never echoes a token. The route
+  table's `security` flag gates authentication centrally, before any request body is read, so a
   protected operation cannot forget the check. Missing, malformed, unknown and revoked
   credentials all answer `401` with `unauthorized` and the bearer challenge.
 - Ownership is enforced by the registry service on the stored resource, not by the route.
@@ -451,28 +498,34 @@ Run the relevant checks from the repository root:
 ```
 bun run openapi:check   # generated OpenAPI 3.1 document validates
 bun test src/api        # contract, success and error coverage
+bun test src/discovery  # discovery extraction, bounds and association
 bun run check           # formatting, lint, strict typecheck and all tests
 ```
 
 The API tests use real temporary SQLite databases, real registry services, the real import
-pipeline (offline JSON sources only) and a genuinely signed SD-JWT VC fixture. They do not
-claim coverage of HTTP rate limits or provider-management routes. The catalog UI has its own
-component and browser tests described in [`docs/ui.md`](ui.md).
+pipeline (offline JSON sources only) and a genuinely signed SD-JWT VC fixture. Discovery tests
+use an injected transport and DNS resolver, so no test performs a real network request. They
+do not claim coverage of HTTP rate limits or provider-management routes. The catalog UI has its
+own component and browser tests described in [`docs/ui.md`](ui.md).
 
 ## 9. Limitations and next slices
 
 - Catalogue pagination is applied in memory after filtering; versions and attestations are
   returned in full. A paginated store query is a later registry slice.
 - No generic `Idempotency-Key` store, no request-body content-type enforcement beyond JSON
-  parsing, and no HTTP rate limits for reads, preview or import. Rate limiting is still
-  missing for preview and import, so an authenticated provider can repeat a bounded outbound
-  fetch; the import service's own size, time, redirect and fan-out limits still apply to
-  every call. Rate limiting, token expiry/rotation and provider-administration routes remain
-  future hardening work documented in [`docs/security.md`](security.md) §8.
+  parsing, and no HTTP rate limits for reads, preview, import or discovery. Rate limiting is
+  still missing for the outbound-fetch routes, so an authenticated provider can repeat a
+  bounded fetch; the import and discovery services' own size, time, redirect and fan-out
+  limits still apply to every call. Rate limiting, token expiry/rotation and
+  provider-administration routes remain future hardening work documented in
+  [`docs/security.md`](security.md) §8.
 - Import previews expose a projection (no internal canonical document) and do not persist a
   preview; an import re-runs the preview under the same controls.
+- Discovery is read-only: it does not persist discovered issuers, metadata snapshots or
+  manual mappings, and it does not fetch exposed references or verify signed metadata
+  ([`docs/discovery.md`](discovery.md) §1 and §9).
 - Validation results are returned synchronously and are not persisted
   (`GET /api/v1/validations/{id}` does not exist in this slice; the specification lists it as
   a suggested resource, not an implemented one).
-- The TS11 catalogue API, issuer discovery and capture routes remain unimplemented and are
-  absent from the OpenAPI document rather than present as placeholders.
+- The TS11 catalogue API and capture routes remain unimplemented and are absent from the
+  OpenAPI document rather than present as placeholders.

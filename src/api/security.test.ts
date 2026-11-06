@@ -100,13 +100,14 @@ function auditCount(registryFixture: RegistryFixture): number {
 }
 
 describe('write operation security surface', () => {
-  test('the protected operation set is exactly the write surface', () => {
+  test('the protected operation set is exactly the write and outbound-fetch surface', () => {
     const protectedOperations = API_ROUTES.filter((route) => route.security)
       .map((route) => route.operationId)
       .sort()
     expect(protectedOperations).toEqual([
       'createRulebook',
       'createRulebookVersion',
+      'discoverIssuer',
       'importRulebooks',
       'previewImport',
       'publishRulebookVersion',
@@ -114,7 +115,7 @@ describe('write operation security surface', () => {
       'replaceRulebookDraft',
     ])
 
-    // Credential validation is a read-only POST and stays public.
+    // Credential validation and draft validation are read-only POSTs and stay public.
     const publicPosts = API_ROUTES.filter(
       (route) => route.method === 'post' && !route.security,
     ).map((route) => route.operationId)

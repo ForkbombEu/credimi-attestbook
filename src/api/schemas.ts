@@ -560,6 +560,93 @@ export const importResultSchema = z.object({
 export const importPreviewResponseSchema = z.object({ data: importPreviewSchema })
 export const importResultResponseSchema = z.object({ data: importResultSchema })
 
+// ----------------------------------------------------- issuer discovery
+
+export const discoverIssuerRequestSchema = z.object({
+  credentialIssuer: z.string(),
+})
+
+export const issuerMetadataShapeSchema = z.enum(['oid4vci_1_0', 'oid4vci_legacy'])
+
+export const pinnedRulebookVersionSchema = z.object({
+  rulebookId: z.string(),
+  rulebookName: z.string(),
+  version: z.string(),
+  contentDigest: z.string(),
+  specVersion: z.string(),
+})
+
+export const issuerDiscoveryConfigurationSchema = z.object({
+  configurationId: z.string(),
+  format: z.string(),
+  displayName: nullableString,
+  typeIdentifiers: z.array(
+    z.object({
+      kind: z.enum(['vct', 'doctype', 'type']),
+      value: z.string(),
+    }),
+  ),
+  schemaReferences: z.array(
+    z.object({
+      formatIdentifier: z.string(),
+      uri: z.string(),
+      source: z.enum(['vct', 'schema']),
+    }),
+  ),
+  mapping: z.object({
+    status: z.enum(['matched', 'ambiguous', 'unmatched']),
+    candidates: z.array(pinnedRulebookVersionSchema),
+    reason: nullableString,
+  }),
+})
+
+export const issuerDiscoverySourceSchema = z.object({
+  issuerIdentifier: z.string(),
+  metadataUrl: z.string(),
+  requestedUrl: z.string(),
+  finalUrl: z.string(),
+  retrievedAt: timestamp,
+  contentType: nullableString,
+  status: z.number().int(),
+  byteLength: z.number().int().nonnegative(),
+  contentDigest: z.string(),
+  redirects: z.array(z.string()),
+  metadataShape: issuerMetadataShapeSchema,
+})
+
+export const issuerMetadataSummarySchema = z.object({
+  credentialIssuer: z.string(),
+  credentialEndpoint: nullableString,
+  authorizationServers: z.array(z.string()),
+})
+
+export const issuerDiscoverySummarySchema = z.object({
+  totalConfigurations: z.number().int().nonnegative(),
+  validConfigurations: z.number().int().nonnegative(),
+  invalidConfigurations: z.number().int().nonnegative(),
+  matched: z.number().int().nonnegative(),
+  ambiguous: z.number().int().nonnegative(),
+  unmatched: z.number().int().nonnegative(),
+  mappedRulebooks: z.number().int().nonnegative(),
+})
+
+export const issuerDiscoveryDiagnosticSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  path: z.string().optional(),
+})
+
+export const issuerDiscoveryResultSchema = z.object({
+  source: issuerDiscoverySourceSchema,
+  issuer: issuerMetadataSummarySchema,
+  configurations: z.array(issuerDiscoveryConfigurationSchema),
+  summary: issuerDiscoverySummarySchema,
+  diagnostics: z.array(issuerDiscoveryDiagnosticSchema),
+  limitations: z.array(z.string()),
+})
+
+export const issuerDiscoveryResponseSchema = z.object({ data: issuerDiscoveryResultSchema })
+
 // ------------------------------------------------------ validation results
 
 export const validationFindingSchema = z.object({
@@ -672,6 +759,9 @@ export const OPENAPI_COMPONENTS = {
   ImportPreviewResponse: importPreviewResponseSchema,
   ImportResult: importResultSchema,
   ImportResultResponse: importResultResponseSchema,
+  DiscoverIssuerRequest: discoverIssuerRequestSchema,
+  IssuerDiscoveryResult: issuerDiscoveryResultSchema,
+  IssuerDiscoveryResponse: issuerDiscoveryResponseSchema,
   ValidateCredentialRequest: validateCredentialRequestSchema,
   CredentialValidationResult: credentialValidationResultSchema,
   CredentialValidationResponse: credentialValidationResponseSchema,
@@ -690,6 +780,7 @@ const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
   'SaveDraftRequest',
   'ValidateDraftRequest',
   'ImportRequest',
+  'DiscoverIssuerRequest',
   'ValidateCredentialRequest',
 ])
 
@@ -725,4 +816,5 @@ export type SaveDraftRequestResource = z.infer<typeof saveDraftRequestSchema>
 export type RulebookPageResource = z.infer<typeof rulebookPageSchema>
 export type ImportPreviewResource = z.infer<typeof importPreviewSchema>
 export type ImportResultResource = z.infer<typeof importResultSchema>
+export type IssuerDiscoveryResource = z.infer<typeof issuerDiscoveryResultSchema>
 export type CredentialValidationResource = z.infer<typeof credentialValidationResultSchema>
