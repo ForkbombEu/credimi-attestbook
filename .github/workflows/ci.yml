@@ -77,8 +77,8 @@ jobs:
       - name: Build production bundle
         run: bun run build
 
-      - name: Verify the bundle exists
-        run: test -s dist/server.js
+      - name: Verify the bundles exist
+        run: test -s dist/server.js && test -s dist/validation/schema-sandbox-entry.js
 
   docker:
     name: docker smoke
