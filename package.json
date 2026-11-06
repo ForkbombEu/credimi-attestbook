@@ -17,6 +17,7 @@
     "test": "bun test ./src/",
     "test:ui": "vitest run --config ui/vite.config.ts",
     "test:e2e": "playwright test --config ui/playwright.config.ts",
+    "acceptance": "bun src/acceptance/cli.ts",
     "typecheck": "tsc --noEmit",
     "typecheck:ui": "tsc --noEmit -p ui/tsconfig.json",
     "openapi:check": "bun src/api/openapi-check.ts",
