@@ -3,15 +3,18 @@
 **Status:** Phase 1 implementation of
 [issue #36](https://github.com/ForkbombEu/credimi-attestbook/issues/36) (UI-001),
 [issue #37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (UI-002),
-[issue #38](https://github.com/ForkbombEu/credimi-attestbook/issues/38) (UI-005) and the
+[issue #38](https://github.com/ForkbombEu/credimi-attestbook/issues/38) (UI-005), the
 draft-editor slice of [issue #40](https://github.com/ForkbombEu/credimi-attestbook/issues/40)
-(UI-003). It delivers a responsive, searchable catalog of rulebooks, a rulebook detail view
-with attestation types, schema references, provenance, standards-compatibility disclosure
-and version history, a credential validation playground that calls the real
+(UI-003) and the lifecycle/comparison slice of
+[issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) (UI-003). It delivers
+a responsive, searchable catalog of rulebooks, a rulebook detail view with attestation types,
+schema references, provenance, standards-compatibility disclosure, version history and
+deterministic version comparison, a credential validation playground that calls the real
 `POST /api/v1/credentials/validate` API, and a draft editor for rulebook creation, metadata
-editing, JSON/schema editing and live validation. All views are clients of the public
-AttestBook API. The slice does not add the import UI, draft lifecycle transitions,
-publication controls or version diff; those remain #41, #42 and later follow-ups.
+editing, JSON/schema editing, live validation and the draft lifecycle (freeze, refresh,
+readiness and publish). All views are clients of the public AttestBook API. The slice does
+not add the import UI, artifact export/signing or the remaining FR-008 publication work;
+those remain #42 and later follow-ups.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) §14 (UI-001/UI-002/UI-005)
 and §2.2 (independent standalone UI).
@@ -81,7 +84,23 @@ Implemented by these slices:
     to mutate. Editing never changes a frozen version snapshot or its content-addressed
     artifact;
   - an entry action on the catalog (`New rulebook`) and on the draft detail page
-    (`Edit draft`).
+    (`Edit draft`);
+- a deterministic version comparison panel on `/rulebooks/{id}` (#41):
+  - two labelled version selects and an explicit `Compare` action; the public comparison
+    endpoint returns JSON Pointer changes sorted by path, and snapshot identity fields are
+    excluded so two labels with equal authored content compare as identical;
+  - a table of path, change kind and before/after values, with explicit empty, loading and
+    retryable error states;
+- a draft lifecycle and publication panel on `/rulebooks/{id}/edit` (#41):
+  - the version history with status and digest, newest first;
+  - authenticated `Freeze as draft version` with a typed label, `Refresh` of a draft
+    snapshot, and `Check readiness` for a chosen draft version;
+  - `Publish` is enabled only after the server's readiness checks for that exact draft
+    version report ready; readiness checks and their limitations are shown individually;
+  - the server's safe conflict and immutability messages are surfaced, and a successful
+    transition updates the editor's read-only state without re-fetching the working copy;
+  - creating a version from a published rulebook reopens the working copy for the next
+    version while the published snapshot stays immutable.
 
 Deliberately **not** in these slices:
 
@@ -89,10 +108,9 @@ Deliberately **not** in these slices:
   for the pinned references, but UI-005 does not require an editor for them, so schema
   validation is reported **not tested** unless a schema document is supplied through the
   API directly;
-- draft lifecycle transitions (freeze/refresh/publish), version comparison/diff, publication
-  controls, signing and export (UI-003/UI-004, #41–#42 and a later import-UI issue). The
-  editor edits the working copy only; the detail view and playground stay read-only and
-  claim no lifecycle or publication functionality;
+- stable artifact export beyond the existing exact-bytes link, publication signing and the
+  remaining FR-008 publication work (UI-003/UI-004, #42 and a later import-UI issue). The
+  comparison and readiness views make no conformance or publication claim of their own;
 - catalogue- or rulebook-level validation/compatibility evaluation. The catalog reports
   **Not tested** for every rulebook and the detail view repeats that result, because
   structural validation is a per-credential operation against a pinned rulebook version and
@@ -144,7 +162,14 @@ The browser is a client of the public API only:
    `POST /api/v1/rulebooks`;
 9. on `/rulebooks/{id}/edit`: `GET /api/v1/rulebooks/{id}/draft` reads the editable document,
    live validation uses `POST /api/v1/rulebooks/validate-draft`, and `Save draft` performs one
-   authenticated `PUT /api/v1/rulebooks/{id}/draft`.
+   authenticated `PUT /api/v1/rulebooks/{id}/draft`;
+10. the lifecycle panel reads `GET /api/v1/rulebooks/{id}/versions` and
+    `GET /api/v1/rulebooks/{id}/versions/{version}/publication-readiness`, and performs the
+    authenticated `POST /api/v1/rulebooks/{id}/versions`, `.../{version}/refresh` and
+    `.../{version}/publish` transitions;
+11. the comparison panel calls
+    `GET /api/v1/rulebooks/{id}/versions/{version}/compare?to={version}`; the result is
+    rendered as returned and never re-derived client-side.
 
 The client router uses real paths with the History API. The Bun server serves the built
 entry document for `/`, `/rulebooks/*` and `/playground`; `/api/*` stays separate and unknown
@@ -273,8 +298,9 @@ dimensions.
   `aria-describedby`, an error summary with `role="alert"`, a live `role="status"` validation
   summary and table semantics for the findings. It is covered by component tests and a
   Playwright spec that runs against the real server, including a full axe-core scan and a
-  390 px viewport check. Draft lifecycle transitions, version diff, publication and export
-  are deliberately not exposed here.
+  390 px viewport check. The version comparison and lifecycle panels are covered by their own
+  component tests and the lifecycle Playwright spec; artifact export/signing and the remaining
+  FR-008 publication work are not exposed here.
 
 ## 4. Build, serve and develop
 
@@ -336,8 +362,8 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   not-found state (colour contrast is disabled in jsdom because it cannot compute painted
   colours; the browser tests run the full rule set).
 
-Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, `ui/e2e/playground.spec.ts`,
-Playwright + Chromium):
+Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, `ui/e2e/editor.spec.ts`,
+`ui/e2e/lifecycle.spec.ts`, `ui/e2e/playground.spec.ts`, Playwright + Chromium):
 
 - seven seeded rulebooks from the real registry/API, including the published validation-smoke
   rulebook used by the playground, with provider, version, status,
@@ -424,6 +450,21 @@ comparison for the new view:
 - [after, narrow viewport: `playground-after-mobile.png`](ui/playground-after-mobile.png) — the
   same result at 390 px.
 
+The pull request for the lifecycle and comparison slice carries the required before/after
+captures at 1280 px and the same light theme, against the same seeded API state. The
+baseline is `327a5a2` (`main` before the slice):
+
+- [before: `lifecycle-before-detail.png`](ui/lifecycle-before-detail.png) — the baseline
+  detail page ends at the version history and has no comparison panel;
+- [after: `lifecycle-after-detail.png`](ui/lifecycle-after-detail.png) — the same rulebook
+  with the deterministic `Compare versions` panel and the `/name` change between `1.0` and
+  `1.1`;
+- [before: `lifecycle-before-editor.png`](ui/lifecycle-before-editor.png) — the baseline
+  editor shows the working copy and live validation but no lifecycle controls;
+- [after: `lifecycle-after-editor.png`](ui/lifecycle-after-editor.png) — the same editor with
+  the `Draft lifecycle and publication` panel, the `0.1` version row and the readiness
+  checks for that draft.
+
 The catalog and detail slices' captures remain in the same directory
 ([`catalog-before.png`](ui/catalog-before.png),
 [`catalog-after.png`](ui/catalog-after.png),
@@ -451,10 +492,10 @@ The catalog and detail slices' captures remain in the same directory
 - Provenance is the public projection only (source URL and registry timestamps). The public
   API deliberately does not expose registry-internal import provenance, so the detail view
   says so rather than inventing it.
-- The detail view stays a read-only projection and only links to the draft editor. Draft
-  lifecycle transitions (freeze/refresh/publish), version diff, publication, signing and
-  export remain #41/#42 or later slices; no lifecycle or publication functionality is
-  claimed by this slice.
+- The detail view stays a read-only projection and only links to the draft editor. Version
+  comparison is a public read; lifecycle writes live in the editor's publication panel.
+  Stable artifact export beyond the exact-bytes link, signing and the remaining FR-008
+  publication work remain #42 or later slices, and readiness is not a conformance claim.
 - UI responses set `X-Content-Type-Options: nosniff` and Vite assets are immutable-cached;
   a content security policy and the rest of the HTTP hardening remain
   [issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35).
@@ -481,7 +522,9 @@ The catalog and detail slices' captures remain in the same directory
 - The editor holds the provider bearer token in React memory only, so a full page reload
   clears it; it is never written to browser storage. There is no login or session endpoint.
   The save is a last-write-wins full replacement with no optimistic-concurrency token, so two
-  open editor tabs can overwrite each other's working copy; lifecycle and conflict handling
-  remain #41.
+  open editor tabs can overwrite each other's working copy. The lifecycle panel surfaces the
+  server's stale-snapshot, duplicate-label and immutability conflicts, and publish stays
+  disabled until readiness passes for that exact draft version, but there is still no
+  optimistic-concurrency token for the working copy itself.
 - No dark theme or offline cache; routing covers the catalog, detail, playground, new-draft
   and edit-draft views, and any other path falls back to the catalog.

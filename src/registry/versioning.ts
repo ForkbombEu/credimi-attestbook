@@ -120,3 +120,16 @@ export function buildRulebookVersionDocument(
 export function serializeRulebookVersion(document: RulebookVersionDocument): Uint8Array {
   return Buffer.from(JSON.stringify(document), 'utf8')
 }
+
+/**
+ * Parses stored snapshot bytes back into the document that was serialized.
+ * The registry only stores bytes it produced (and protects their digest), so a
+ * parse failure is a server fault rather than caller-visible input.
+ */
+export function parseRulebookVersionDocument(bytes: Uint8Array): RulebookVersionDocument {
+  const parsed = JSON.parse(new TextDecoder().decode(bytes)) as unknown
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    throw new Error('a stored rulebook version snapshot is not a JSON object')
+  }
+  return parsed as RulebookVersionDocument
+}

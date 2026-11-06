@@ -27,6 +27,7 @@ import {
 } from './errors'
 import { RegistryStore } from './store'
 import { generateBearerToken, hashBearerToken } from './tokens'
+import { assertRulebookTransition, assertVersionTransition } from './transitions'
 import type {
   AttestationType,
   AuthenticatedActor,
@@ -988,6 +989,37 @@ export class Registry {
   }
 
   /**
+   * Inputs for a publication-readiness assessment, built exactly as
+   * `publishRulebookVersion` builds them: the stored artifact, the rulebook
+   * that owns it and the bytes the current working copy would freeze under the
+   * same label. Readiness and publication therefore read the same state and
+   * cannot disagree about what publish would do.
+   */
+  getPublicationCandidate(
+    rulebookId: string,
+    version: string,
+  ): {
+    readonly rulebook: Rulebook
+    readonly content: RulebookVersionContent
+    readonly currentBytes: Uint8Array
+  } | null {
+    const content = this.getRulebookVersionContent(rulebookId, version)
+    if (content === null) {
+      return null
+    }
+    const rulebook = this.requireRulebook(content.version.rulebookId)
+    return {
+      rulebook,
+      content,
+      currentBytes: this.buildVersionBytes(
+        rulebook,
+        content.version.version,
+        rulebook.applicableSpec,
+      ),
+    }
+  }
+
+  /**
    * Freezes the rulebook's current draft content as a new draft version. When
    * the rulebook was published, this reopens the working copy for the next
    * version; every already-published version stays immutable.
@@ -1002,6 +1034,11 @@ export class Registry {
     const rulebook = this.requireOwnedRulebook(actor, rulebookId)
     if (rulebook.publicationStatus === 'historical') {
       throw immutable('The rulebook is historical; a new version cannot be created for it.')
+    }
+    if (rulebook.publicationStatus === 'published') {
+      // Creating the next version reopens the working copy. The version rows
+      // themselves stay immutable; only the rulebook status changes.
+      assertRulebookTransition(rulebook.publicationStatus, 'draft')
     }
 
     const version = requireSemanticVersion(input.version, 'version')
@@ -1128,9 +1165,7 @@ export class Registry {
     if (existing === null) {
       throw notFound('The rulebook version does not exist.')
     }
-    if (existing.status !== 'draft') {
-      throw immutable(`The version is ${existing.status}; only a draft version can be published.`)
-    }
+    assertVersionTransition(existing.status, 'published')
 
     // Publishing must not silently freeze content that changed after the draft
     // snapshot was taken; the provider refreshes the draft explicitly.
@@ -1138,6 +1173,7 @@ export class Registry {
     if (sha256Hex(currentBytes) !== existing.contentDigest) {
       throw conflict('The draft version content is stale; refresh it before publishing.')
     }
+    assertRulebookTransition(rulebook.publicationStatus, 'published')
 
     const supersededVersions = this.store
       .listRulebookVersions(rulebook.id)

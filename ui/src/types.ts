@@ -70,6 +70,62 @@ export interface RulebookPage {
   readonly pagination: Pagination
 }
 
+// ---------------------------------- version comparison and publication readiness
+//
+// Wire types of the version lifecycle endpoints (issue #41). They mirror the
+// public projections in `src/api/schemas.ts`; both reads are public and carry
+// no registry-internal metadata.
+
+/** A JSON value inside a version snapshot. */
+export type JsonValue =
+  string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue }
+
+export type VersionDiffChangeKind = 'added' | 'removed' | 'changed'
+
+export interface VersionDiffChange {
+  /** JSON Pointer into the comparable content of a snapshot. */
+  readonly path: string
+  readonly kind: VersionDiffChangeKind
+  readonly before?: JsonValue
+  readonly after?: JsonValue
+}
+
+export interface VersionDiff {
+  readonly from: RulebookVersion
+  readonly to: RulebookVersion
+  readonly identical: boolean
+  readonly changes: readonly VersionDiffChange[]
+  readonly summary: {
+    readonly added: number
+    readonly removed: number
+    readonly changed: number
+  }
+}
+
+export type PublicationReadinessCheckStatus = 'pass' | 'fail' | 'warn' | 'not_applicable'
+
+export type PublicationReadinessCheckId =
+  | 'draft_version'
+  | 'rulebook_status'
+  | 'snapshot_integrity'
+  | 'snapshot_current'
+  | 'content_valid'
+  | 'standards_profile'
+  | 'attestation_types'
+
+export interface PublicationReadinessCheck {
+  readonly id: PublicationReadinessCheckId
+  readonly status: PublicationReadinessCheckStatus
+  readonly message: string
+}
+
+export interface PublicationReadiness {
+  readonly version: RulebookVersion
+  readonly ready: boolean
+  readonly checks: readonly PublicationReadinessCheck[]
+  readonly limitations: readonly string[]
+}
+
 // -------------------------------------------------- credential validation
 //
 // Wire types of the public `POST /api/v1/credentials/validate` response

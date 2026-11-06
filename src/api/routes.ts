@@ -12,6 +12,7 @@ import packageJson from '../../package.json'
 import { validateDraftContent } from '../editor'
 import { RulebookImporter } from '../import'
 import type { ImportPreview, ImportResult, ImportSource } from '../import'
+import { assessPublicationReadiness, compareVersionDocuments } from '../lifecycle'
 import type { Registry } from '../registry/registry'
 import { invalidInput, unauthorized } from '../registry/errors'
 import type {
@@ -19,6 +20,7 @@ import type {
   CreateRulebookVersionInput,
   ReplaceDraftContentInput,
 } from '../registry/types'
+import { parseRulebookVersionDocument } from '../registry/versioning'
 import { CREDENTIAL_VALIDATION_PATH, type CredentialValidationService } from '../validation'
 
 import { apiError } from './errors'
@@ -31,9 +33,11 @@ import {
   toCredentialValidationResource,
   toImportPreviewResource,
   toImportResultResource,
+  toPublicationReadinessResource,
   toRulebookResource,
   toRulebookVersionResource,
   toSchemaReferenceResource,
+  toVersionDiffResource,
 } from './resources'
 
 /** Maximum product-API request body. Import sources are separately bounded. */
@@ -58,7 +62,10 @@ export type ApiOperationId =
   | 'getRulebookVersionContent'
   | 'createRulebook'
   | 'createRulebookVersion'
+  | 'refreshRulebookVersion'
   | 'publishRulebookVersion'
+  | 'compareRulebookVersions'
+  | 'getRulebookPublicationReadiness'
   | 'previewImport'
   | 'importRulebooks'
   | 'validateCredential'
@@ -471,6 +478,68 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     responses: [
       { status: 200, description: 'The published version.', schema: 'RulebookVersionResponse' },
       ...errors(400, 401, 403, 404, 409, 500, 503),
+    ],
+  },
+  {
+    operationId: 'refreshRulebookVersion',
+    method: 'post',
+    path: '/api/v1/rulebooks/:rulebookId/versions/:version/refresh',
+    summary: 'Refresh a draft version snapshot',
+    description:
+      'Authenticated re-snapshot of the owning provider’s draft version from the current working copy. An unchanged snapshot is an idempotent no-op. Published and historical versions are immutable and answer `409 immutable`.',
+    tag: 'versions',
+    security: true,
+    parameters: pathParameters(['rulebookId', 'version']),
+    responses: [
+      {
+        status: 200,
+        description: 'The refreshed draft version.',
+        schema: 'RulebookVersionResponse',
+      },
+      ...errors(400, 401, 403, 404, 409, 500, 503),
+    ],
+  },
+  {
+    operationId: 'compareRulebookVersions',
+    method: 'get',
+    path: '/api/v1/rulebooks/:rulebookId/versions/:version/compare',
+    summary: 'Compare two version snapshots',
+    description:
+      'Public, deterministic structural comparison of the authored content of two snapshots. Identity fields (`format`, `rulebookId` and the version label) are excluded, so two labels with the same content compare as identical. Changes carry JSON Pointer paths and are sorted by path.',
+    tag: 'versions',
+    security: false,
+    parameters: [
+      ...pathParameters(['rulebookId', 'version']),
+      {
+        name: 'to',
+        in: 'query',
+        required: true,
+        description: 'Version label to compare against; the path version is the baseline.',
+        schema: { type: 'string' },
+      },
+    ],
+    responses: [
+      { status: 200, description: 'The deterministic comparison.', schema: 'VersionDiffResponse' },
+      ...errors(400, 404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'getRulebookPublicationReadiness',
+    method: 'get',
+    path: '/api/v1/rulebooks/:rulebookId/versions/:version/publication-readiness',
+    summary: 'Check whether a version can be published',
+    description:
+      'Public pre-publication assessment of one stored version: draft state, snapshot digest integrity, freshness against the working copy, content validation, standards profile and attestation types. Readiness is not a publication and not a conformance claim.',
+    tag: 'versions',
+    security: false,
+    parameters: pathParameters(['rulebookId', 'version']),
+    responses: [
+      {
+        status: 200,
+        description: 'The publication-readiness checks and limitations.',
+        schema: 'PublicationReadinessResponse',
+      },
+      ...errors(400, 404, 500, 503),
     ],
   },
   {
@@ -1082,6 +1151,68 @@ function publishRulebookVersionHandler(dependencies: ApiDependencies): ApiHandle
   }
 }
 
+function refreshRulebookVersionHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    const token = bearerToken(context)
+    const refreshed = registry.refreshDraftRulebookVersion(
+      token,
+      context.req.param('rulebookId') ?? '',
+      context.req.param('version') ?? '',
+    )
+    return context.json({ data: toRulebookVersionResource(refreshed) }, 200)
+  }
+}
+
+function compareRulebookVersionsHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    const rulebookId = context.req.param('rulebookId') ?? ''
+    const fromLabel = context.req.param('version') ?? ''
+    const toLabel = context.req.query('to')
+    if (toLabel === undefined || toLabel.trim() === '') {
+      throw invalidInput('to must name the version to compare against')
+    }
+
+    const from = registry.getRulebookVersionContent(rulebookId, fromLabel)
+    if (from === null) {
+      throw apiError(404, 'not_found', 'The requested rulebook version does not exist.')
+    }
+    const to = registry.getRulebookVersionContent(rulebookId, toLabel.trim())
+    if (to === null) {
+      throw apiError(404, 'not_found', 'The requested rulebook version does not exist.')
+    }
+    const diff = compareVersionDocuments(
+      parseRulebookVersionDocument(from.bytes),
+      parseRulebookVersionDocument(to.bytes),
+    )
+    return context.json({ data: toVersionDiffResource(from.version, to.version, diff) }, 200)
+  }
+}
+
+function getRulebookPublicationReadinessHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    const rulebookId = context.req.param('rulebookId') ?? ''
+    const label = context.req.param('version') ?? ''
+    // The registry builds the stored artifact and the current working-copy
+    // bytes exactly as publish does, so readiness cannot drift from publication.
+    const candidate = registry.getPublicationCandidate(rulebookId, label)
+    if (candidate === null) {
+      throw apiError(404, 'not_found', 'The requested rulebook version does not exist.')
+    }
+    const { rulebook, content, currentBytes } = candidate
+    const readiness = assessPublicationReadiness({
+      version: content.version,
+      rulebookStatus: rulebook.publicationStatus,
+      bytes: content.bytes,
+      currentBytes,
+      document: parseRulebookVersionDocument(content.bytes),
+    })
+    return context.json({ data: toPublicationReadinessResource(content.version, readiness) }, 200)
+  }
+}
+
 function previewImportHandler(importer: ImportService | undefined): ApiHandler {
   return async (context) => {
     const service = requireImporter(importer)
@@ -1138,7 +1269,10 @@ export function createApiHandlers(
     getRulebookVersionContent: getRulebookVersionContentHandler(dependencies),
     createRulebook: createRulebookHandler(dependencies),
     createRulebookVersion: createRulebookVersionHandler(dependencies),
+    refreshRulebookVersion: refreshRulebookVersionHandler(dependencies),
     publishRulebookVersion: publishRulebookVersionHandler(dependencies),
+    compareRulebookVersions: compareRulebookVersionsHandler(dependencies),
+    getRulebookPublicationReadiness: getRulebookPublicationReadinessHandler(dependencies),
     previewImport: previewImportHandler(importer),
     importRulebooks: importRulebooksHandler(importer),
     validateCredential: validateCredentialHandler(dependencies),

@@ -446,6 +446,28 @@ describe('publication lifecycle and immutability', () => {
     ).toThrow(/immutable/i)
   })
 
+  test('rejects publishing a leftover draft while the rulebook is published', () => {
+    const { registry } = setup()
+    const { token } = provision('a')
+    const rulebook = createSeedRulebook(registry, token.secret)
+    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
+    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.1' })
+    registry.publishRulebookVersion(token.secret, rulebook.id, '1.1')
+
+    expectRegistryError(
+      () => registry.publishRulebookVersion(token.secret, rulebook.id, '1.0'),
+      'immutable',
+    )
+    expect(registry.getRulebookVersion(rulebook.id, '1.1')?.status).toBe('published')
+
+    // Creating the next version reopens the working copy; only then can the
+    // leftover draft transition to published.
+    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.2' })
+    const published = registry.publishRulebookVersion(token.secret, rulebook.id, '1.0')
+    expect(published.status).toBe('published')
+    expect(registry.getRulebookVersion(rulebook.id, '1.1')?.status).toBe('historical')
+  })
+
   test('publishing a newer version supersedes the previous one and reopens the rulebook', () => {
     const { registry } = setup()
     const { token } = provision('a')

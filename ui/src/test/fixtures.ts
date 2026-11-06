@@ -13,6 +13,7 @@ import type {
   ValidationDimensionId,
   ValidationSeverity,
   ValidationStatus,
+  VersionDiff,
 } from '../types'
 
 export const PROVIDERS: readonly Provider[] = [
@@ -157,6 +158,37 @@ export function createFakeApi(dataset: CatalogDataset = SAMPLE_DATASET): Catalog
     listSchemaReferences: (rulebookId) =>
       Promise.resolve(dataset.schemaReferences[rulebookId] ?? []),
     listVersions: (rulebookId) => Promise.resolve(dataset.versions[rulebookId] ?? []),
+    getVersionDiff: (rulebookId, fromVersion, toVersion) => {
+      const versions = dataset.versions[rulebookId] ?? []
+      const from = versions.find((candidate) => candidate.version === fromVersion)
+      const to = versions.find((candidate) => candidate.version === toVersion)
+      if (from === undefined || to === undefined) {
+        return Promise.reject(new CatalogApiError('No route matches the request path.', 404))
+      }
+      if (from.contentDigest === to.contentDigest) {
+        return Promise.resolve<VersionDiff>({
+          from,
+          to,
+          identical: true,
+          changes: [],
+          summary: { added: 0, removed: 0, changed: 0 },
+        })
+      }
+      return Promise.resolve<VersionDiff>({
+        from,
+        to,
+        identical: false,
+        changes: [
+          {
+            path: '/name',
+            kind: 'changed',
+            before: `Rulebook at ${from.version}`,
+            after: `Rulebook at ${to.version}`,
+          },
+        ],
+        summary: { added: 0, removed: 0, changed: 1 },
+      })
+    },
   }
 }
 

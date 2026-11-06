@@ -4,8 +4,9 @@
 [issue #28](https://github.com/ForkbombEu/credimi-attestbook/issues/28),
 [issue #29](https://github.com/ForkbombEu/credimi-attestbook/issues/29), the initial
 bounded import slice by [issue #30](https://github.com/ForkbombEu/credimi-attestbook/issues/30)
-and the idempotent re-import slice by
-[issue #31](https://github.com/ForkbombEu/credimi-attestbook/issues/31).
+the idempotent re-import slice by
+[issue #31](https://github.com/ForkbombEu/credimi-attestbook/issues/31) and the lifecycle and
+comparison slice by [issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41).
 They provide a persistent SQLite registry for providers, rulebooks, attestation types, schema
 references, write credentials and an audit trail, plus draft/published/historical rulebook
 versions with content-addressed artifacts, SHA-256 digests, provenance and immutable
@@ -45,6 +46,28 @@ Implemented by #29 (`migrations/0002_versions_artifacts.sql`):
   triggers that reject `UPDATE`/`DELETE`;
 - version provenance recorded on every version and a publication audit entry recording who
   published which digest under which profile, and which versions were superseded.
+
+Implemented by #41:
+
+- `transitions.ts`: the service-level lifecycle policy. A frozen version may only move
+  `draft -> published` (publication) and `published -> historical` (supersede), and a rulebook
+  working copy may only move `draft -> published` (publishing) or `published -> draft`
+  (creating the next version). Every other transition is rejected with `immutable` before any
+  write, in addition to the SQLite triggers;
+- `lifecycle/version-diff.ts`: a deterministic structural comparison of two stored snapshot
+  documents. Snapshot identity fields (`format`, `rulebookId` and the version label) are
+  excluded, object keys are visited in sorted order and changes are JSON Pointer paths sorted
+  by path;
+- `lifecycle/readiness.ts`: publication-readiness checks over the stored bytes, the current
+  working copy, the snapshot content and the owning rulebook's status (draft state, rulebook
+  transition, digest integrity, staleness, structural and TS11 v1.0.1 validation, profile
+  coverage and attestation types), with explicit limitations and no conformance claim. The
+  registry supplies the same candidate inputs publish uses, so readiness and publication
+  cannot disagree; a draft version left on a `published` rulebook is not publishable until
+  the next version reopens the working copy;
+- `Registry.refreshDraftRulebookVersion` is exposed over the API: a draft snapshot can be
+  re-taken from the current working copy, while a published or historical version stays
+  immutable.
 
 Implemented by #40:
 
@@ -93,7 +116,9 @@ Deliberately **not** in #28/#29/#30/#31:
 - HTTP rate limiting, token expiry/rotation and provider-management HTTP routes — not
   implemented in Phase 1; the write API's authentication, provider ownership and secret
   handling are documented in [`docs/security.md`](security.md);
-- publication UI, rulebook editor and version comparison/diff UI — Phase 2 and issue #37;
+- artifact export, publication signing and the remaining FR-008 publication surface
+  ([issue #42](https://github.com/ForkbombEu/credimi-attestbook/issues/42)); the draft
+  lifecycle, comparison and readiness checks themselves are implemented by #41;
 - semantic content canonicalization — explicitly out of scope (D-6, R-17).
 
 The server opens the database and applies migrations at startup; the registry service is

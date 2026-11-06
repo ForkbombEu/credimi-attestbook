@@ -14,6 +14,7 @@ import {
 } from './components/DetailSections'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { ErrorState, LoadingState } from './components/CatalogStates'
+import { VersionComparisonPanel } from './components/VersionComparisonPanel'
 import type { RulebookDetailSnapshot } from './detail'
 import { loadRulebookDetail } from './detail'
 import { AppLink, CATALOG_PATH, rulebookEditorPath } from './router'
@@ -126,7 +127,7 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
           ) : null}
 
           {state.status === 'ready' ? (
-            <DetailContent snapshot={state.snapshot} onNavigate={onNavigate} />
+            <DetailContent api={api} snapshot={state.snapshot} onNavigate={onNavigate} />
           ) : null}
         </div>
       </main>
@@ -137,9 +138,11 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
 }
 
 function DetailContent({
+  api,
   snapshot,
   onNavigate,
 }: {
+  readonly api: CatalogApi
   readonly snapshot: RulebookDetailSnapshot
   readonly onNavigate: (path: string) => void
 }) {
@@ -184,6 +187,7 @@ function DetailContent({
       <SchemaReferencesSection snapshot={snapshot} />
       <CompatibilitySection />
       <VersionsSection snapshot={snapshot} />
+      <VersionComparisonPanel api={api} rulebookId={rulebook.id} versions={versions} />
     </>
   )
 }

@@ -157,6 +157,64 @@ export const rulebookVersionListResponseSchema = z.object({
   data: z.array(rulebookVersionSchema),
 })
 
+// --------------------------------------------- version comparison & readiness
+
+export const VERSION_DIFF_CHANGE_KIND_SCHEMA = z.enum(['added', 'removed', 'changed'])
+
+/** One structural difference between two version snapshots (#41). */
+export const versionDiffChangeSchema = z.object({
+  /** JSON Pointer into the comparable content of a snapshot. */
+  path: z.string(),
+  kind: VERSION_DIFF_CHANGE_KIND_SCHEMA,
+  before: z.json().optional(),
+  after: z.json().optional(),
+})
+
+export const versionDiffSchema = z.object({
+  from: rulebookVersionSchema,
+  to: rulebookVersionSchema,
+  identical: z.boolean(),
+  changes: z.array(versionDiffChangeSchema),
+  summary: z.object({
+    added: z.number().int().nonnegative(),
+    removed: z.number().int().nonnegative(),
+    changed: z.number().int().nonnegative(),
+  }),
+})
+
+export const versionDiffResponseSchema = z.object({ data: versionDiffSchema })
+
+export const PUBLICATION_READINESS_CHECK_STATUS_SCHEMA = z.enum([
+  'pass',
+  'fail',
+  'warn',
+  'not_applicable',
+])
+
+/** One publication-readiness check of a stored version (#41). */
+export const publicationReadinessCheckSchema = z.object({
+  id: z.enum([
+    'draft_version',
+    'rulebook_status',
+    'snapshot_integrity',
+    'snapshot_current',
+    'content_valid',
+    'standards_profile',
+    'attestation_types',
+  ]),
+  status: PUBLICATION_READINESS_CHECK_STATUS_SCHEMA,
+  message: z.string(),
+})
+
+export const publicationReadinessSchema = z.object({
+  version: rulebookVersionSchema,
+  ready: z.boolean(),
+  checks: z.array(publicationReadinessCheckSchema),
+  limitations: z.array(z.string()),
+})
+
+export const publicationReadinessResponseSchema = z.object({ data: publicationReadinessSchema })
+
 export const healthResponseSchema = z.object({
   status: z.literal('ok'),
   service: z.literal('attestbook'),
@@ -539,6 +597,10 @@ export const OPENAPI_COMPONENTS = {
   RulebookVersionResponse: rulebookVersionResponseSchema,
   RulebookVersionListResponse: rulebookVersionListResponseSchema,
   RulebookVersionDocument: rulebookVersionDocumentSchema,
+  VersionDiff: versionDiffSchema,
+  VersionDiffResponse: versionDiffResponseSchema,
+  PublicationReadiness: publicationReadinessSchema,
+  PublicationReadinessResponse: publicationReadinessResponseSchema,
   CreateRulebookRequest: createRulebookRequestSchema,
   CreateRulebookVersionRequest: createRulebookVersionRequestSchema,
   DraftRulebook: draftRulebookSchema,
@@ -594,6 +656,10 @@ export type AttestationDetailResource = z.infer<typeof attestationDetailSchema>
 export type SchemaReferenceResource = z.infer<typeof schemaReferenceSchema>
 export type RulebookVersionResource = z.infer<typeof rulebookVersionSchema>
 export type RulebookVersionDocumentResource = z.infer<typeof rulebookVersionDocumentSchema>
+export type VersionDiffResource = z.infer<typeof versionDiffSchema>
+export type VersionDiffChangeResource = z.infer<typeof versionDiffChangeSchema>
+export type PublicationReadinessResource = z.infer<typeof publicationReadinessSchema>
+export type PublicationReadinessCheckResource = z.infer<typeof publicationReadinessCheckSchema>
 export type DraftRulebookResource = z.infer<typeof draftRulebookSchema>
 export type DraftDiagnosticResource = z.infer<typeof draftDiagnosticSchema>
 export type DraftValidationResource = z.infer<typeof draftValidationSchema>

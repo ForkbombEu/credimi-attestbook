@@ -30,6 +30,7 @@ describe('rulebook detail states', () => {
       listAttestations: () => new Promise(() => {}),
       listSchemaReferences: () => new Promise(() => {}),
       listVersions: () => new Promise(() => {}),
+      getVersionDiff: () => new Promise(() => {}),
     }
 
     renderDetail(pending)
