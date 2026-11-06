@@ -139,9 +139,11 @@ kind and (where exposed) the source's version/last-built/`updatedAt` signals. Be
 surveyed source publishes a per-entry content digest, AttestBook MUST compute and store its
 own content digest.
 
-**R4.8 — Version conflict detection & safe re-import (DESIGN).** Detect version/identity
-conflicts on re-import and never silently overwrite locally edited or published rulebooks
-(also FR-005).
+**R4.8 — Version conflict detection & safe re-import (DESIGN; implemented in #31).** Detect
+version/identity conflicts on re-import and never silently overwrite locally edited or
+published rulebooks (also FR-005). #31 implements this through a deterministic import
+identity, idempotent unchanged re-import and explicit conflict reporting; changed content is
+reported for resolution through the version lifecycle, never applied automatically.
 
 ### FR-005 — Catalog synchronization
 
@@ -149,14 +151,19 @@ conflicts on re-import and never silently overwrite locally edited or published 
 `Last-Modified` with `cache-control: max-age=600`; the SIROS adapter SHOULD use conditional
 requests. Sources without conditional support are re-fetched and diffed by digest.
 
-**R5.2 — Idempotent imports & change detection (DESIGN).** Imports are idempotent; change
-detection uses AttestBook-side content digests (no source exposes a reliable digest). Because
-the digest is byte-exact, re-serialized source JSON (key order/whitespace) is reported as a
-change; the importer compares normalized content when deciding whether the semantic content
-changed and never silently treats serialization-only differences as identical.
+**R5.2 — Idempotent imports & change detection (DESIGN; implemented in #31 for re-import).**
+Imports are idempotent; change detection uses AttestBook-side content digests (no source
+exposes a reliable digest). Because the digest is byte-exact, re-serialized source JSON (key
+order/whitespace) is reported as a change; the importer compares normalized content when
+deciding whether the semantic content changed and never silently treats serialization-only
+differences as identical. #31 implements this per-entry identity and content fingerprint and
+reports a `serialization_only_change` finding instead of writing.
 
-**R5.3 — Conflict reporting & version preservation (DESIGN).** Report conflicts explicitly;
-preserve historical versions; published artifacts remain immutable.
+**R5.3 — Conflict reporting & version preservation (DESIGN; implemented in #31 for
+re-import).** Report conflicts explicitly; preserve historical versions; published artifacts
+remain immutable. #31 returns a typed per-entry conflict and never writes over an existing
+rulebook, so published and historical versions are untouched; scheduled synchronization and
+source availability reporting remain later slices.
 
 **R5.4 — Source availability diagnostics (DESIGN).** Report per-source availability
 (reachability, schema changes, signature status) distinctly from import failures.

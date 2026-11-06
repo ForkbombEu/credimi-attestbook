@@ -1,17 +1,20 @@
 # Safe URL and JSON rulebook import
 
-**Status:** Phase 1 implementation of the initial import slice by
-[issue #30](https://github.com/ForkbombEu/credimi-attestbook/issues/30). It provides a
-bounded, unauthenticated **preview** and an authenticated **draft import** for supported
-TS11/OWF rulebook documents and catalog envelopes. It is not a conformance claim and does
-not implement re-import conflict handling, the HTTP API, remote schema resolution or
-catalogue signature verification.
+**Status:** Phase 1 implementation of the import slice by
+[issue #30](https://github.com/ForkbombEu/credimi-attestbook/issues/30), extended by
+[issue #31](https://github.com/ForkbombEu/credimi-attestbook/issues/31) with deterministic
+re-import identity, idempotent re-import and conflict detection. It provides a bounded,
+unauthenticated **preview** and an authenticated **draft import** for supported TS11/OWF
+rulebook documents and catalog envelopes. It is not a conformance claim and does not
+implement automatic source updates, the HTTP API, remote schema resolution, catalogue
+signature verification or scheduled synchronization.
 
-**Authoritative spec:** [`docs/specification.md`](specification.md) (FR-004, §15)
-**Requirements and research:** [`docs/requirements.md`](requirements.md) §FR-004 and the
-SR-1–SR-5 security controls; [`docs/catalog-research.md`](catalog-research.md) §5–§7
-**Decisions:** [`docs/implementation-plan.md`](implementation-plan.md) D-11 (SRI and
-reference controls) and D-12 (separate conformance/registration signals)
+**Authoritative spec:** [`docs/specification.md`](specification.md) (FR-004, FR-005, §15)
+**Requirements and research:** [`docs/requirements.md`](requirements.md) §FR-004/§FR-005 and
+the SR-1–SR-5 security controls; [`docs/catalog-research.md`](catalog-research.md) §5–§7
+**Decisions:** [`docs/implementation-plan.md`](implementation-plan.md) D-6 (digest and
+change detection), D-11 (SRI and reference controls) and D-12 (separate
+conformance/registration signals)
 **Registry contract:** [`docs/registry.md`](registry.md)
 
 ## 1. Scope and boundaries
@@ -33,17 +36,36 @@ Implemented by #30:
 - authenticated import of a compatible preview as draft rulebooks, including their
   attestation type and schema references, in one registry transaction for the whole source.
 
-Deliberately **not** in #30:
+Implemented by #31 (this slice):
 
-- idempotent re-import, duplicate/version conflict diagnostics and safe updates — issue
-  #31; #30 only creates the initial draft and never updates an existing rulebook;
+- a deterministic **import identity** per source entry, stored on the rulebook as
+  `rulebooks.import_key` and unique per provider, so duplicate detection does not depend on
+  the source digest;
+- **idempotent re-import**: re-importing unchanged normalized content writes nothing and
+  returns the existing rulebook;
+- **change detection and conflict reporting** for changed source content, locally edited
+  drafts, rulebooks with published/historical versions and source version changes; the
+  importer never overwrites local or published content;
+- a reported `serialization_only_change` finding when the source bytes changed but every
+  entry's normalized content stayed identical (R5.2, R-17);
+- an entry `contentFingerprint` in the rulebook provenance, used to decide whether a draft
+  was locally modified since the last import.
+
+Deliberately **not** in #30/#31:
+
+- automatic application of a changed source to an existing rulebook (a "safe update"). The
+  importer reports the conflict and leaves resolution to the version lifecycle (#29) and
+  the editor/API slices (#34, #37, #41); there is no invented version-label policy and no
+  destructive write;
+- conditional fetching, scheduled synchronization and source-availability diagnostics
+  (FR-005 beyond idempotent safe re-import);
 - the HTTP API, OpenAPI contract, write authorization at the HTTP layer and rate limiting
   — issues #34/#35;
 - fetching, resolving or verifying `rulebookURI` or `schemaURIs`; SRI verification over
   fetched schema bytes remains delegated to OWF with a caller-supplied resolver, and this
   slice reports unresolved references as `not_tested`;
 - JWS-signed catalogue responses, JWS/JWKS verification, SIROS/FIDES/EUDI-specific
-  adapters, Markdown rulebooks and periodic synchronization (FR-005);
+  adapters and Markdown rulebooks;
 - publication, version freezing and export — this slice stores draft rulebook content and
   provenance only. The exact source digest is retained in provenance, but the raw source
   bytes are not yet stored as a content-addressed version artifact; that belongs to the
@@ -65,11 +87,15 @@ const result = await importer.import(bearerToken, source)
 - `preview(source)` is read-only and returns `ImportPreview`.
 - `import(token, source)` authenticates the bearer token **before** any network request,
   re-runs the preview, refuses the whole source if any entry is incompatible, and then
-  creates one draft rulebook per entry through `Registry.createRulebooks`, which wraps the
-  whole source in one transaction. The preview applies the registry's input limits too, so
-  an entry the registry would refuse is already marked incompatible and nothing is written.
-  Source URL and provenance are stored on the rulebook; provenance never enters a standards
-  document.
+  classifies every compatible entry against its import identity (§5). New entries are
+  created through `Registry.createRulebooks`, which wraps them in one transaction;
+  unchanged entries write nothing, and changed entries are reported as conflicts without a
+  write. Source URL and provenance are stored on the created rulebook; provenance never
+  enters a standards document.
+- `ImportResult` carries the preview, one `ImportEntryResult` per entry (`created`,
+  `unchanged` or `conflict`), the rulebooks created by this call, the reported
+  `ImportConflict`s and source-level re-import diagnostics (§5). `result.rulebooks` is empty
+  when a re-import changed nothing or only reported conflicts.
 
 `ImportPreview` contains:
 
@@ -141,7 +167,122 @@ same write authentication and rate limits as import. Redirect
 targets are resolved independently. The single-writer SQLite deployment limit is documented
 in [`docs/implementation-plan.md`](implementation-plan.md) D-7.
 
-## 5. Provenance stored on import
+## 5. Re-import identity, idempotency and conflicts
+
+### 5.1 Import identity
+
+Re-import must recognise the rulebook created by an earlier import of the same external
+entry. The identity is deterministic and computed from the bounded, validated input only:
+
+```text
+source identity = requested https URL        (URL import)
+                | caller-supplied source URL (JSON import with sourceUrl)
+                | caller-supplied file name  (JSON import with name)
+                | exact source digest        (anonymous JSON, see limitation below)
+entry identity  = canonical SchemaMeta id
+                | derived rulebook name
+                | entry index
+entry key       = SHA-256("attestbook.import-entry@1", source identity, entry identity)
+```
+
+The key is stored as `rulebooks.import_key` and is unique per provider through a partial
+unique index (`migrations/0003_import_identity.sql`). Lookups
+(`Registry.findImportedRulebook`) are scoped to the authenticated provider, so two providers
+can import the same catalogue entry without sharing ownership (FR-003). The key is
+import-internal product metadata: it never enters a version snapshot or a standards
+document.
+
+Two entries of one source must not share an entry identity: that would map two catalogue
+entries to one rulebook, which the unique index cannot represent. The import rejects such a
+source with `import_rejected` and names the colliding entry indexes before any write, instead
+of letting the database constraint reject the batch with a generic error. Catalogs should
+give every entry a distinct canonical `id` or display name.
+
+The source identity deliberately uses the **requested** URL, not the post-redirect final
+URL, so a changed CDN redirect does not create a new entry identity. The final URL and every
+redirect still feed the provenance and the content fingerprint below, so a redirect change
+alone is reported as the `source_changed` conflict described in §5.5.
+
+### 5.2 Content fingerprint
+
+The source digest is byte-exact (D-6), so re-serialized JSON (key order or whitespace) has a
+different digest. To separate that from a semantic change, every imported entry also stores
+a **content fingerprint** in provenance (`contentFingerprint`): the SHA-256 over a canonical
+JSON document containing the rulebook name, description, source URL, applicable profile and
+each attestation type with its schema references and retained internal metadata. Object keys
+are sorted recursively; array order stays significant. Provenance, timestamps and the import
+key are excluded.
+
+The fingerprint is computed from the **registry-normalized** content, the form a real write
+stores: text is trimmed, URLs are stored in parsed form and bounded arrays are validated
+exactly as `createRulebooks` does (`Registry.normalizeRulebookInput`). The first import and a
+later re-import therefore compare like with like even when the source pads a format
+identifier or normalizes a URL differently. This is a comparison aid for change detection,
+not a claim of semantic identity, canonicalization for storage, or standards conformance. It
+is not computed from the raw source document.
+
+### 5.3 Re-import decision
+
+| Existing rulebook for the entry | Incoming content | Outcome |
+| --- | --- | --- |
+| none | any compatible entry | `created`: written once, in one transaction with the other new entries |
+| present | fingerprint equal, same source version, same source-byte digest | `unchanged`: idempotent no-op, nothing written |
+| present | fingerprint equal, same source version, different source-byte digest | `unchanged` plus a source-level `serialization_only_change` diagnostic (R5.2, R-17) |
+| present | fingerprint equal, different source version | conflict `source_version_changed` |
+| present | fingerprint differs, rulebook has published or historical versions | conflict `published_content` (the version labels are listed) |
+| present | fingerprint differs, stored draft differs from the last imported fingerprint | conflict `locally_modified` |
+| present | fingerprint differs, draft is unmodified | conflict `source_changed` |
+
+A conflict **never writes**. Every outcome leaves the existing rulebook, its attestations,
+its schema references, its provenance and every version untouched. New sibling entries of
+the same catalogue are still created (and unchanged siblings stay no-ops); the result lists
+each entry's disposition independently.
+
+An `ImportConflict` carries the reason code, a human-readable message, the rulebook id, the
+preserved published/historical version labels, whether the draft was locally modified, the
+existing and incoming content fingerprints, and the existing and incoming source versions.
+Conflicts are returned to the caller; they are not persisted as a separate import-run
+history in this slice, so the rulebook provenance remains the record of the import that
+created it.
+
+### 5.4 Concurrency
+
+A duplicate rulebook cannot be created even by two concurrent imports: the partial unique
+index on `(provider_id, import_key)` makes the second write fail. `createRulebooks` wraps
+the new entries of one import in one transaction, so that failure rolls the whole batch back
+and the importer reports the source as `import_rejected` instead of leaving a partial
+catalogue. A retry then classifies the entry as `unchanged`. This relies on the documented
+single-writer SQLite deployment (D-7).
+
+### 5.5 Limitations
+
+- A changed source is reported, not applied. Resolving a `source_changed` conflict means the
+  provider explicitly advances the draft through the version lifecycle (`refresh`/`create`
+  and `publish`, #29) or deletes the unversioned draft and re-imports; this slice invents no
+  automatic version label and never rewrites content.
+- Only documents with a stable identity are matched reliably. A source that renames the
+  displayed rulebook and has no canonical `id`, a source that changes its canonical `id`, or
+  a JSON import without `sourceUrl`/`name` whose bytes changed can be treated as a new entry
+  and create a second rulebook. That is safe (nothing is overwritten) but duplicate detection
+  cannot help; supplying `sourceUrl` or `name` is recommended for JSON imports.
+- Rulebooks created by the pre-#31 import slice carry no `import_key`. Re-importing their
+  source is treated as a new import (a new draft rulebook) rather than matched to them;
+  there is no deterministic backfill because the old provenance did not record a stable
+  entry identity at the required granularity.
+- A source version change with identical normalized content is reported as a conflict rather
+  than silently updating the stored provenance, so the caller sees that the source claims a
+  new version.
+- Two entries of one source must have distinct entry identities (a canonical `id` or a
+  distinct display name / derived name). A catalogue that repeats one is rejected with
+  `import_rejected` before any write instead of mapping two entries to one rulebook; the
+  message names the colliding entry indexes.
+- A changed redirect target changes the stored final source URL, so an otherwise
+  byte-identical source is reported as a `source_changed` conflict until the rulebook's
+  source URL is updated explicitly. The import never changes it silently.
+- Conditional fetching (`ETag`/`Last-Modified`), scheduled synchronization, source
+  availability diagnostics and signature verification are later FR-005 slices.
+
+## 6. Provenance stored on import
 
 For every created draft rulebook, `rulebook.sourceUrl` holds the final URL for URL imports
 (or the caller-supplied `sourceUrl` for JSON imports) and `rulebook.provenance` holds:
@@ -163,16 +304,19 @@ For every created draft rulebook, `rulebook.sourceUrl` holds the final URL for U
   "profile": "ts11@1.0.1",
   "conformance": "conformant_subset",
   "sourceConformance": { "level": "partial", "missing": ["attestationLoS"] },
+  "contentFingerprint": "<lowercase hex sha256 of the normalized rulebook content>",
   "importedAt": "2026-11-05T10:05:00.000Z"
 }
 ```
 
 The digest identifies the exact source bytes, compensating for the surveyed catalogs not
-publishing a reliable per-entry digest. Provenance is product metadata and is never merged
-into a TS11/OWF document. Publication authority is not inferred from the source URL (FR-003);
-the importing provider owns the created draft.
+publishing a reliable per-entry digest. `contentFingerprint` identifies the normalized
+content and is the basis for local-edit detection on re-import (§5). Both are product
+metadata and are never merged into a TS11/OWF document or a version snapshot. Publication
+authority is not inferred from the source URL (FR-003); the importing provider owns the
+created draft.
 
-## 6. Verification
+## 7. Verification
 
 Offline fixtures and injected transport/resolver keep the suite deterministic:
 
@@ -193,19 +337,30 @@ Offline fixtures and injected transport/resolver keep the suite deterministic:
 - `src/import/importer.test.ts` — authenticated URL/OWF/catalog imports, retained source URL
   and digest, persisted attestation/schema references and OWF meta, all-or-nothing refusal
   and authentication before the network;
+- `src/import/reimport.test.ts` — idempotent re-import of unchanged bytes, a fingerprint
+  computed from registry-normalized values and URLs, a serialization-only source change, JSON
+  source-URL identity, provider-scoped identity, rejection of a catalogue whose entries share
+  an import identity, and the four conflict codes (changed source, locally edited draft,
+  published version, source version change), including a grown/changed catalogue with mixed
+  `unchanged`/`created`/`conflict` outcomes;
+- `src/registry/import-identity.test.ts` — import key persistence, per-provider uniqueness at
+  service and SQL level, cross-provider isolation, lookup scoping, invalid-key rejection,
+  write-free input normalization and
+  exclusion of the identity from a version snapshot;
 - `src/registry/create-rulebook-refs.test.ts` — transactional creation of attestation
   schema references, duplicate-format and per-attestation fan-out rejection, rollback.
 
-Run the suite with `bun run check`. These tests demonstrate the #30 acceptance criteria;
-they do not claim TS11 conformance, catalogue signature verification, full FR-005
-synchronization or interoperability.
+Run the suite with `bun run check`. These tests demonstrate the #30/#31 acceptance criteria;
+they do not claim TS11 conformance, catalogue signature verification, automatic source
+updates, full FR-005 synchronization or interoperability.
 
-## 7. Related work
+## 8. Related work
 
-- Issue [#31](https://github.com/ForkbombEu/credimi-attestbook/issues/31) — idempotent
-  re-import and conflict detection.
 - Issues [#34](https://github.com/ForkbombEu/credimi-attestbook/issues/34) and
   [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) — REST/OpenAPI surface
-  and HTTP write security.
+  and HTTP write security, which will expose the per-entry import result.
+- Issues [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) and
+  [#41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) — version history and
+  the editor workflow that resolves a reported conflict.
 - Issue [#52](https://github.com/ForkbombEu/credimi-attestbook/issues/52) — further remote
   import hardening.

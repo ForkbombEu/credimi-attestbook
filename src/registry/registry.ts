@@ -84,7 +84,8 @@ export interface RegistryOptions {
 
 const MAX_BEARER_TOKEN_LENGTH = 256
 
-interface PreparedRulebook {
+/** A validated, normalized rulebook and children that a write would insert. */
+export interface PreparedRulebook {
   readonly rulebook: Rulebook
   readonly attestations: readonly AttestationType[]
   readonly schemaReferences: readonly SchemaReference[]
@@ -282,6 +283,32 @@ export class Registry {
 
   getRulebook(id: string): Rulebook | null {
     return this.store.getRulebook(requireIdentifier(id, 'rulebookId'))
+  }
+
+  /**
+   * Looks up the rulebook created from one external import entry identity
+   * (#31). Scoped to the authenticated provider, so one provider cannot
+   * discover another provider's import identities. Import-internal; the public
+   * read API remains `getRulebook`/`listRulebooks`.
+   */
+  findImportedRulebook(accessToken: string, importKey: string): Rulebook | null {
+    const actor = this.authenticate(accessToken)
+    return this.store.findRulebookByImportKey(
+      actor.providerId,
+      requireSha256Digest(importKey, 'importKey'),
+    )
+  }
+
+  /**
+   * Validates and normalizes a create input exactly as `createRulebooks` would,
+   * without writing (#31). Import uses it so its content fingerprint describes
+   * the stored form (trimmed text, parsed URL form, bounded arrays) instead of
+   * the raw caller input. A caller-visible validation failure reuses the same
+   * `RegistryError` contract as a real write.
+   */
+  normalizeRulebookInput(accessToken: string, input: CreateRulebookInput): PreparedRulebook {
+    const actor = this.authenticate(accessToken)
+    return this.prepareRulebook(actor, input, this.now())
   }
 
   listAttestations(rulebookId: string): readonly AttestationType[] {
@@ -925,6 +952,8 @@ export class Registry {
     const provenance =
       input.provenance === undefined ? {} : requireJsonObject(input.provenance, 'provenance')
     const applicableSpec = requireText(input.applicableSpec, 'applicableSpec', MAX_SPEC_LENGTH)
+    const importKey =
+      input.importKey === undefined ? null : requireSha256Digest(input.importKey, 'importKey')
     const metadata =
       input.metadata === undefined ? {} : requireJsonObject(input.metadata, 'metadata')
 
@@ -982,6 +1011,7 @@ export class Registry {
       name,
       description,
       sourceUrl,
+      importKey,
       provenance,
       applicableSpec,
       publicationStatus: 'draft',

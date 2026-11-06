@@ -411,8 +411,8 @@ merged head, shows:
   version-specific retrieval.
 - **#30:** import adapters for URL/JSON, preview, structural validation, compatibility
   report, conformance classification, source/provenance recording, bounded fetching.
-- **#31:** idempotent re-import, conflict diagnostics, safe updates without overwriting
-  local or published content.
+- **#31:** idempotent re-import, conflict diagnostics and safe re-import that never
+  overwrites local or published content (implementation in `docs/import.md` §5).
 - **#32:** SD-JWT VC parse and structural/attestation checks against a pinned rulebook
   version; typed validation API; mdoc/other formats explicitly unsupported/`NOT_TESTED`.
 - **#33:** the eight-dimension status model, conservative aggregation, evidence payload and

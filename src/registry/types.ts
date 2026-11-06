@@ -87,6 +87,13 @@ export interface Rulebook {
   readonly name: string
   readonly description: string
   readonly sourceUrl: string | null
+  /**
+   * Deterministic identity of the external import entry this rulebook was
+   * created from (SHA-256, issue #31); `null` for a locally authored rulebook.
+   * Import-internal product metadata: it never enters a standards document or
+   * a version snapshot.
+   */
+  readonly importKey: string | null
   /** Provenance is registry-internal; it never enters a standards document. */
   readonly provenance: JsonObject
   /** Profile identifier such as `ts11@1.0.1`; extensible text. */
@@ -205,6 +212,12 @@ export interface CreateRulebookInput {
   readonly name: string
   readonly description?: string
   readonly sourceUrl?: string
+  /**
+   * Server-computed identity of the external import entry (#31). Re-import uses
+   * it to find the rulebook instead of creating a duplicate; local creates omit
+   * it. Stored as product metadata, never in a standards document.
+   */
+  readonly importKey?: string
   readonly provenance?: JsonObject
   readonly applicableSpec: string
   readonly metadata?: JsonObject

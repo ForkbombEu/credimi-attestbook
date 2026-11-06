@@ -72,18 +72,21 @@ Matrix A — Requirements to normative clauses
 | FR-013/014 | Issuer/verifier fixtures | OpenID4VCI/OpenID4VP (not TS11) | REF | PROTO |
 | FR-019 | Correlation & traceability | TS11 §4.5.1 (version), `#integrity` (digest) | SHALL | STR |
 
-> FR-005 (catalog synchronization), FR-015–FR-018 (capture integration) and
-> FR-020–FR-022 (Credimi orchestration) are deliberately omitted from this
-> matrix: they are product/synchronization/capture/Credimi features with no
-> direct TS11 / ARF / legal normative clause; their test mapping is defined in
-> `docs/specification.md` §16 instead.
+> FR-005 (catalog synchronization) is deliberately omitted from Matrix A: its Phase 1 part
+> (idempotent imports, change detection and conflict reporting) is a product decision
+> without a direct TS11 / ARF / legal normative clause and is mapped under FR-004 in Matrix B
+> and in [`docs/import.md`](import.md) §5; scheduled synchronization and source diagnostics
+> remain later slices. FR-015–FR-018 (capture integration) and FR-020–FR-022 (Credimi
+> orchestration) are also omitted: they are capture/Credimi features with no direct TS11 /
+> ARF / legal normative clause; their test mapping is defined in `docs/specification.md` §16
+> instead.
 
 * * *
 
 Matrix B — Requirements to tests (spec §16)
 --------------------------------------------
 
-Test categories (spec §16): **standards**, **registry**, **validation**, **capture**, **integration**. Mapping of each SR/FR to the concrete planned check. Rows marked "Implemented in #27/#28/#29" name the adapter tests in `src/standards/` or the registry tests in `src/db/`/`src/registry/`; anything still listed as planned or unimplemented has no passing check yet.
+Test categories (spec §16): **standards**, **registry**, **validation**, **capture**, **integration**. Mapping of each SR/FR to the concrete planned check. Rows marked "Implemented in #27/#28/#29/#31/#32/#33" name the adapter tests in `src/standards/`, the registry/import tests in `src/db/`/`src/registry/`/`src/import/` or the validation tests in `src/validation/`; anything still listed as planned or unimplemented has no passing check yet.
 
 | ID | Requirement | Test category | Planned check | Dimension verified |
 |----|-------------|---------------|---------------|--------------------|
@@ -100,7 +103,7 @@ Test categories (spec §16): **standards**, **registry**, **validation**, **capt
 | FR-001 | Rulebook management & metadata boundary | registry | Implemented in #28: rulebook/attestation/schema-reference CRUD with internal metadata kept in separate columns and JSON, duplicate and invalid-write rejection (`src/registry/registry.test.ts`, `src/db/migrations.test.ts`); versions/digests added in #29 (`src/registry/versions.test.ts`) | STR |
 | FR-002 | Versioning/digest reproducibility | registry / validation | Implemented in #29: draft/published/historical versions, deterministic snapshot bytes and SHA-256 digest, version-specific and by-digest retrieval, digest verification, stale-snapshot conflict, and immutable published/historical rows at service and SQL level (`src/registry/versions.test.ts`, `src/db/migrations.test.ts`); implemented in #32: every validation run reports the pinned version and recomputed digest and aborts on a snapshot mismatch (`src/validation/engine.test.ts`); version comparison is #37 | STR |
 | FR-003 | Provider management, ownership | registry | Implemented in #28: provider provisioning, hashed bearer tokens, token revocation and cross-provider denial (`src/registry/authorization.test.ts`); secure write HTTP APIs are #35 | GOV |
-| FR-004 | Import | registry | Implemented in #30: bounded https URL/JSON import, catalog preview, structural validation, conformance/compatibility report and provenance (`src/import/*.test.ts`, `src/registry/create-rulebook-refs.test.ts`); re-import/conflicts remain #31 and the HTTP import API #34 | STR |
+| FR-004 | Import | registry | Implemented in #30: bounded https URL/JSON import, catalog preview, structural validation, conformance/compatibility report and provenance (`src/import/*.test.ts`, `src/registry/create-rulebook-refs.test.ts`); extended in #31 with deterministic import identity, idempotent re-import, serialization-only change reporting and the four conflict codes, with per-provider uniqueness enforced by a partial index (`src/import/reimport.test.ts`, `src/registry/import-identity.test.ts`); the HTTP import API remains #34 | STR |
 | FR-009/010 | Validation API + dimensions | validation | Implemented in #32: typed `POST /api/credentials/validate`, eight per-dimension statuses, conservative D-8 aggregation, pinned version/digest and paths for missing/wrong attributes and unsupported formats (`src/validation/*.test.ts`, `src/app.validation.test.ts`). Implemented in #33: exhaustive dimension applicability table and status/execution invariants (`src/validation/dimensions.ts`, `src/validation/dimensions.test.ts`), per-dimension evidence and explicit limitations, and cross-dimension non-implication tests (`src/validation/non-conflation.test.ts`) | STR/CRYPTO/TRUST/PROTO/INTEROP |
 | FR-010 (negative) | "schema valid ≠ crypto valid", "crypto ≠ trust", "rulebook ≠ protocol", "protocol ≠ interoperability" | validation | Implemented in #33: explicit negative tests proving each implication does **not** hold, including a schema-valid credential with an invalid signature that is never overall success (`src/validation/non-conflation.test.ts`, `src/validation/engine.test.ts`) | CRYPTO/TRUST/PROTO/INTEROP |
 | FR-011 | Format support | validation | Implemented in #32: real SD-JWT VC parsing with `@sd-jwt/core`; mdoc and W3C VC formats recognised and reported NOT_TESTED, never mocked (`src/validation/sd-jwt.test.ts`, `src/validation/engine.test.ts`) | STR |
