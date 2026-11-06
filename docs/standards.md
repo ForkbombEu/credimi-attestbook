@@ -420,7 +420,7 @@ provides no relevant capability.
 | FR-010 Validation dimensions | metadata structure + JWS signature | None | Credential parsing, format recognition, credential cryptography, trust, protocol, interoperability dimensions |
 | FR-011 Credential format support | none | None | SD-JWT VC and mdoc parsers/validators |
 | FR-012 Validation results | `{ valid, errors: [{ path, message }] }` | None | PASS/FAIL/NOT_TESTED/NOT_APPLICABLE/INCONCLUSIVE, severity, stable codes, attribute paths, evidence |
-| FR-013 Issuer test fixtures | Credential configuration template, claims extraction | Partial | Attribute definitions, payload generation, overrides, negative cases, credential validation |
+| FR-013 Issuer test fixtures | Credential configuration template, claims extraction | Partial | Implemented in #44 for an integrity-verified JSON Schema 2020-12 subset: attribute definitions, unsigned payload synthesis, overrides and verified negative cases (`src/fixtures/`). Type-Metadata-only synthesis, unsupported keywords, schema fetching, signing and issuance are reported boundaries. |
 | FR-014 Verifier test fixtures | DCQL builder, trusted-authority mapping | Partial | Constraint inspection, validation policies, negative cases, OpenID4VP request generation |
 | FR-015 Capture artifact model | none | None | Envelope, redaction, integrity, external artifact references |
 | FR-016 capture-issuer integration | none | None | Adapter, normalization, correlation |

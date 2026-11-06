@@ -9,6 +9,8 @@
 
 import { z } from 'zod'
 
+import { ISSUER_FIXTURE_KIND, ISSUER_FIXTURE_NEGATIVE_CATEGORIES } from '../fixtures/types'
+
 export const PUBLICATION_STATUS_SCHEMA = z.enum(['draft', 'published', 'historical'])
 
 export const VALIDATION_STATUS_SCHEMA = z.enum([
@@ -721,7 +723,119 @@ export const credentialValidationResponseSchema = z.object({
   data: credentialValidationResultSchema,
 })
 
+// ---------------------------------------------------------- issuer fixtures
+
+export const generateIssuerFixtureRequestSchema = z.object({
+  rulebookId: z.string(),
+  rulebookVersion: z.string(),
+  attestationType: z.string(),
+  format: z.string().optional(),
+  schemaDocuments: z
+    .array(
+      z.object({
+        uri: z.string(),
+        content: z.string(),
+      }),
+    )
+    .optional(),
+  overrides: z
+    .array(
+      z.object({
+        path: z.string(),
+        value: z.json(),
+      }),
+    )
+    .optional(),
+})
+
+export const issuerFixtureAttributeSchema = z.object({
+  pointer: z.string(),
+  name: z.string(),
+  required: z.boolean(),
+  types: z.array(z.string()),
+  constraints: z.record(z.string(), z.json()),
+  sources: z.array(z.string()),
+  generated: z.boolean(),
+  reason: z.string().optional(),
+})
+
+export const issuerFixtureFindingSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  path: z.string().optional(),
+  keyword: z.string().optional(),
+})
+
+export const issuerFixtureNegativeCaseSchema = z.object({
+  id: z.string(),
+  label: z.string(),
+  category: z.enum(ISSUER_FIXTURE_NEGATIVE_CATEGORIES),
+  keyword: z.string(),
+  path: z.string(),
+  expected: z.literal('FAIL'),
+  reason: z.string(),
+  payload: z.record(z.string(), z.json()),
+})
+
+export const issuerFixtureSchema = z.object({
+  kind: z.literal(ISSUER_FIXTURE_KIND),
+  signed: z.literal(false),
+  issued: z.literal(false),
+  rulebook: z.object({
+    id: z.string(),
+    name: z.string(),
+    version: z.string(),
+    digest: z.string(),
+    digestVerified: z.literal(true),
+    specVersion: z.string(),
+    status: PUBLICATION_STATUS_SCHEMA,
+  }),
+  attestation: z.object({
+    name: z.string(),
+    attestationLoS: z.string(),
+    bindingType: z.string(),
+    supportedFormats: z.array(z.string()),
+  }),
+  formats: z.array(z.string()),
+  schemaReferences: z.array(
+    z.object({
+      formatIdentifier: z.string(),
+      uri: z.string(),
+      integrity: nullableString,
+      integrityVerified: z.boolean(),
+      kind: z.enum(['json_schema', 'type_metadata']).nullable(),
+      applied: z.boolean(),
+      diagnostic: z.string().optional(),
+    }),
+  ),
+  attributes: z.array(issuerFixtureAttributeSchema),
+  payload: z.record(z.string(), z.json()),
+  payloadValidation: z.object({
+    status: z.enum(['PASS', 'FAIL']),
+    findings: z.array(issuerFixtureFindingSchema),
+  }),
+  overrides: z.array(
+    z.object({
+      path: z.string(),
+      value: z.json(),
+      applied: z.literal(true),
+    }),
+  ),
+  negativeCases: z.array(issuerFixtureNegativeCaseSchema),
+  diagnostics: z.array(
+    z.object({
+      code: z.string(),
+      message: z.string(),
+      path: z.string().optional(),
+    }),
+  ),
+  limitations: z.array(z.string()),
+})
+
+export const issuerFixtureResponseSchema = z.object({ data: issuerFixtureSchema })
+
 /** Every schema published as an OpenAPI component, keyed by component name. */
+
 export const OPENAPI_COMPONENTS = {
   ErrorEnvelope: errorEnvelopeSchema,
   HealthResponse: healthResponseSchema,
@@ -765,6 +879,9 @@ export const OPENAPI_COMPONENTS = {
   ValidateCredentialRequest: validateCredentialRequestSchema,
   CredentialValidationResult: credentialValidationResultSchema,
   CredentialValidationResponse: credentialValidationResponseSchema,
+  GenerateIssuerFixtureRequest: generateIssuerFixtureRequestSchema,
+  IssuerFixture: issuerFixtureSchema,
+  IssuerFixtureResponse: issuerFixtureResponseSchema,
 } as const
 
 export type OpenApiComponentName = keyof typeof OPENAPI_COMPONENTS
@@ -782,6 +899,7 @@ const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
   'ImportRequest',
   'DiscoverIssuerRequest',
   'ValidateCredentialRequest',
+  'GenerateIssuerFixtureRequest',
 ])
 
 /** Generated JSON Schema for one component (OpenAPI 3.1 dialect). */
@@ -817,4 +935,8 @@ export type RulebookPageResource = z.infer<typeof rulebookPageSchema>
 export type ImportPreviewResource = z.infer<typeof importPreviewSchema>
 export type ImportResultResource = z.infer<typeof importResultSchema>
 export type IssuerDiscoveryResource = z.infer<typeof issuerDiscoveryResultSchema>
+export type IssuerFixtureResource = z.infer<typeof issuerFixtureSchema>
+export type GenerateIssuerFixtureRequestResource = z.infer<
+  typeof generateIssuerFixtureRequestSchema
+>
 export type CredentialValidationResource = z.infer<typeof credentialValidationResultSchema>

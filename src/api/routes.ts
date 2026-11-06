@@ -11,6 +11,7 @@ import type { Context, Hono } from 'hono'
 import packageJson from '../../package.json'
 import { IssuerDiscovery, type IssuerDiscoveryService } from '../discovery'
 import { validateDraftContent } from '../editor'
+import { ISSUER_FIXTURE_PATH, IssuerFixtureGenerator, type IssuerFixtureService } from '../fixtures'
 import { RulebookImporter } from '../import'
 import type { ImportPreview, ImportResult, ImportSource } from '../import'
 import { assessPublicationReadiness, compareVersionDocuments } from '../lifecycle'
@@ -38,6 +39,7 @@ import {
   toImportPreviewResource,
   toImportResultResource,
   toIssuerDiscoveryResource,
+  toIssuerFixtureResource,
   toPublicationExportManifestResource,
   toPublicationReadinessResource,
   toRulebookResource,
@@ -77,6 +79,7 @@ export type ApiOperationId =
   | 'previewImport'
   | 'importRulebooks'
   | 'discoverIssuer'
+  | 'generateIssuerFixture'
   | 'validateCredential'
 
 export interface ApiParameterSpec {
@@ -688,6 +691,32 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     ],
   },
   {
+    operationId: 'generateIssuerFixture',
+    method: 'post',
+    path: ISSUER_FIXTURE_PATH,
+    summary: 'Generate unsigned issuer fixtures from a pinned rulebook version',
+    description:
+      'Synthesizes an unsigned credential claim payload from the JSON Schema 2020-12 attribute constraints that the selected attestation type references in one pinned rulebook version. The caller supplies the exact schema document bytes; they are matched to the version references and verified against their sha256 SRI value before grounding the payload. Attribute definitions, deterministic overrides and labelled negative cases are returned. The payload is never signed or issued and is validated only against the supplied schema documents.',
+    tag: 'issuers',
+    security: false,
+    request: {
+      schema: 'GenerateIssuerFixtureRequest',
+      mediaType: 'application/json',
+      required: true,
+      description:
+        'Pinned rulebook version, attestation type, the exact schema documents and optional attribute overrides.',
+    },
+    responses: [
+      {
+        status: 200,
+        description:
+          'The unsigned payload, its attribute definitions, applied overrides, verified negative cases, diagnostics and limitations.',
+        schema: 'IssuerFixtureResponse',
+      },
+      ...errors(400, 404, 413, 500, 503),
+    ],
+  },
+  {
     operationId: 'validateCredential',
     method: 'post',
     path: CREDENTIAL_VALIDATION_PATH,
@@ -724,6 +753,7 @@ export interface ApiDependencies {
   readonly validation?: CredentialValidationService
   readonly importer?: ImportService
   readonly issuerDiscovery?: IssuerDiscoveryService
+  readonly issuerFixtures?: IssuerFixtureService
 }
 
 export type ApiHandler = (context: Context) => Response | Promise<Response>
@@ -759,6 +789,17 @@ function requireImporter(importer: ImportService | undefined): ImportService {
     )
   }
   return importer
+}
+
+function requireIssuerFixtures(service: IssuerFixtureService | undefined): IssuerFixtureService {
+  if (service === undefined) {
+    throw apiError(
+      503,
+      'registry_unavailable',
+      'The issuer fixture generator is not configured on this server.',
+    )
+  }
+  return service
 }
 
 function requireIssuerDiscovery(
@@ -1413,6 +1454,14 @@ function importRulebooksHandler(importer: ImportService | undefined): ApiHandler
   }
 }
 
+function generateIssuerFixtureHandler(service: IssuerFixtureService | undefined): ApiHandler {
+  return async (context) => {
+    const fixtures = requireIssuerFixtures(service)
+    const body = await readJsonBody(context)
+    return context.json({ data: toIssuerFixtureResource(fixtures.generate(body)) }, 200)
+  }
+}
+
 function validateCredentialHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const validation = requireValidation(dependencies)
@@ -1458,6 +1507,11 @@ export function createApiHandlers(
     (dependencies.registry === undefined
       ? undefined
       : new IssuerDiscovery({ rulebooks: dependencies.registry }))
+  const issuerFixtures =
+    dependencies.issuerFixtures ??
+    (dependencies.registry === undefined
+      ? undefined
+      : new IssuerFixtureGenerator({ source: dependencies.registry }))
 
   return {
     getHealth: healthHandler(),
@@ -1483,6 +1537,7 @@ export function createApiHandlers(
     previewImport: previewImportHandler(importer),
     importRulebooks: importRulebooksHandler(importer),
     discoverIssuer: discoverIssuerHandler(issuerDiscovery),
+    generateIssuerFixture: generateIssuerFixtureHandler(issuerFixtures),
     validateCredential: validateCredentialHandler(dependencies),
   }
 }

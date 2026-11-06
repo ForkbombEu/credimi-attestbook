@@ -16,6 +16,7 @@ import type {
   ImportedSchemaReference,
 } from '../import'
 import type { IssuerDiscoveryResult } from '../discovery'
+import type { IssuerFixtureResult } from '../fixtures'
 import type { PublicationReadiness, VersionContentDiff } from '../lifecycle'
 import type { PublicationExportManifest } from '../publication'
 import type {
@@ -35,6 +36,7 @@ import {
   importPreviewSchema,
   importResultSchema,
   issuerDiscoveryResultSchema,
+  issuerFixtureSchema,
   providerSchema,
   publicationExportManifestSchema,
   publicationReadinessSchema,
@@ -419,4 +421,13 @@ export function toIssuerDiscoveryResource(result: IssuerDiscoveryResult) {
     })),
     limitations: [...result.limitations],
   })
+}
+
+/**
+ * Projects a fixture result. The generator already returns only public fields
+ * (no schema-document body, provider metadata or token); parsing with the
+ * shared schema turns contract drift into a server error.
+ */
+export function toIssuerFixtureResource(result: IssuerFixtureResult) {
+  return issuerFixtureSchema.parse(result)
 }

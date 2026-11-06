@@ -40,7 +40,7 @@ split from the closed duplicates #15–#19.
 | FR-010 | Eight independent validation dimensions | Phase 1: #33 | No dimension PASS without execution; applicability table in `docs/validation.md` §2 |
 | FR-011 | Credential format support, SD-JWT VC first, extensible interfaces | Phase 1: #32 (SD-JWT VC); later formats | mdoc explicitly `NOT_TESTED`, not mocked |
 | FR-012 | PASS / FAIL / NOT_TESTED / NOT_APPLICABLE / INCONCLUSIVE results | Phase 1: #33 | Conservative overall aggregation (D-8), enforced per dimension |
-| FR-013 | Issuer test fixtures | Phase 3: #44 | Not Phase 1 |
+| FR-013 | Issuer test fixtures | Phase 3: #44 | Unsigned payloads from integrity-verified JSON Schema constraints; no signing or issuance |
 | FR-014 | Verifier test fixtures and policies | Phase 3: #45 | Not Phase 1 |
 | FR-015 | Capture artifact model | Phase 0 contracts: [`docs/capture-integration.md`](capture-integration.md); Phase 4: #46 | Not implemented |
 | FR-016 | `capture-issuer` integration | Phase 4: #47 | Not claimed operational |

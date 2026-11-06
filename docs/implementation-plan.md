@@ -68,8 +68,9 @@ the two without a current migrated issue are marked explicitly.
   migrated issue currently owns these two follow-ups.
 - Issuer discovery (FR-006) was delivered by
   [#43](https://github.com/ForkbombEu/credimi-attestbook/issues/43); issuer fixtures (FR-013)
-  and verifier fixtures (FR-014) remain Phase 3 work in
-  [#44](https://github.com/ForkbombEu/credimi-attestbook/issues/44) and
+  were delivered by [#44](https://github.com/ForkbombEu/credimi-attestbook/issues/44) as
+  unsigned, integrity-grounded payloads, overrides and verified negative cases. Verifier
+  fixtures (FR-014) remain Phase 3 work in
   [#45](https://github.com/ForkbombEu/credimi-attestbook/issues/45).
 - Capture artifact ingestion, mock/real capture adapters and the capture explorer
   (FR-015–FR-019, UI-006) — Phase 4, issues
