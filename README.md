@@ -3,8 +3,8 @@
 AttestBook is a standalone, API-first platform for managing, validating and testing
 Attestation Rulebooks in the European Digital Identity Wallet ecosystem. This repository
 currently contains the Phase 0 research and architecture documents, the Phase 1 application
-scaffold, the persistent provider/rulebook registry slice and the bounded URL/JSON rulebook
-import slice.
+scaffold, the persistent provider/rulebook registry slice, the bounded URL/JSON rulebook
+import slice and SD-JWT VC structural validation with dimension-aware evidence.
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -69,6 +69,12 @@ bun run docs:check   # Phase 0 documentation consistency, plain Node
 - `src/import/` — bounded `https`/JSON rulebook import with SSRF prevention, address
   pinning, redirect, time, size and JSON limits, catalog preview, conformance and compatibility
   reporting, provenance, and authenticated draft import; see [`docs/import.md`](docs/import.md);
+- `src/validation/` — real SD-JWT VC parsing with `@sd-jwt/core`, Type Metadata and JSON
+  Schema 2020-12 attribute checks, pinned-version/digest evidence, dimension statuses and a
+  timeout/memory-bounded schema-evaluation sandbox; see
+  [`docs/validation.md`](docs/validation.md);
+- `src/app.validation.test.ts` — the typed `POST /api/credentials/validate` contract,
+  400/404/413/503 cases and non-disclosure of credential material;
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
   the Phase 0 verification gate for the persistence decision (D-7).
 
@@ -87,9 +93,43 @@ historical versions are immutable in the service and in SQLite triggers. Version
 retrieved by `(rulebookId, version)` or by content digest. Re-import conflict handling, the
 HTTP API and the version-history UI come in later issues.
 
-The HTTP API is not wired to the registry yet (issue #34). The service contract, stable
-identifier rules, standards-metadata boundary, authorization model and version lifecycle are
-documented in [`docs/registry.md`](docs/registry.md).
+The server opens the registry database and applies migrations at startup, so credential
+validation can read rulebooks from the same process. The wider versioned API, OpenAPI
+contracts and write routes remain issues #34/#35. The service contract, stable identifier
+rules, standards-metadata boundary, authorization model and version lifecycle are documented
+in [`docs/registry.md`](docs/registry.md).
+
+## Credential validation
+
+`POST /api/credentials/validate` validates a real SD-JWT VC artifact against one immutable
+rulebook version and returns the pinned version/digest, per-dimension statuses, structured
+violations with JSON Pointer paths and the reference `#integrity` result. The request selects
+`rulebookId`, `rulebookVersion`, `attestationType` and the `credential`, and may carry the
+exact schema document text for the pinned schema references:
+
+```json
+{
+  "rulebookId": "<rulebook-id>",
+  "rulebookVersion": "1.0",
+  "attestationType": "PID",
+  "credential": "<compact SD-JWT VC>",
+  "schemaDocuments": [
+    { "uri": "https://example.org/vct/pid", "content": "{\"vct\":\"https://example.org/vct/pid\"}" }
+  ]
+}
+```
+
+The structural dimensions (`credential_parsing`, `format_recognition`,
+`schema_validation`, `attestation_constraints`) can pass; `cryptographic_verification` and
+`issuer_trust` are returned `NOT_TESTED` and protocol/interoperability `NOT_APPLICABLE`, so a
+structurally valid credential is never reported as fully valid or interoperable. Unsupported
+formats are recognised and reported `NOT_TESTED` rather than mocked; JSON Schema keywords that
+need unbounded regex/format evaluation (`format`, `pattern`, `patternProperties`,
+`uniqueItems`, the legacy `dependencies` applicator, `$ref` and its variants) are reported
+`NOT_TESTED` instead of executed; ambiguous `vct`/JSON Schema documents, unpinned references
+and unresolved Type Metadata `extends` are not treated as validated.
+Credential contents and claim values are never logged or returned. See [`docs/validation.md`](docs/validation.md) for
+the contract, statuses, limits and non-claims.
 
 ## Safe URL and JSON import
 
@@ -111,12 +151,13 @@ limitations.
 ## Build and run
 
 ```bash
-bun run build   # bundles src/server.ts into dist/server.js
+bun run build   # bundles src/server.ts and the schema worker into dist/
 bun run start   # serves the built bundle from dist/server.js
 ```
 
-The bundle is self-contained for the current dependency set; the runtime image therefore
-needs only Bun and `dist/`. Use `bun run dev` for source watching during development.
+The bundle is self-contained for the current dependency set; `bun run build` emits
+`dist/server.js` and the sandbox child at `dist/validation/schema-sandbox-entry.js`, so the runtime
+image needs only Bun and `dist/`. Use `bun run dev` for source watching during development.
 
 ## Docker
 
@@ -132,17 +173,21 @@ docker compose up --build --wait
 ```
 
 The image is multi-stage, runs as the non-root `bun` user and defines a `HEALTHCHECK` against
-`/health`. It bakes in no secrets. The registry persistence layer is implemented and tested
-but not yet opened by the HTTP server; issue #34 wires the API to it and adds the migration
-entrypoint. CI builds the image, starts a container and verifies the `/health` and
-unknown-route API round-trip, so the image is exercised on every pull request.
+`/health`. It bakes in no secrets. The server opens the SQLite database and applies migrations
+at startup; the image stores it at `/data/attestbook.sqlite` and Compose mounts a named volume
+there. CI builds the image, starts a container and verifies the `/health` and unknown-route API
+round-trip, so the image is exercised on every pull request.
 
 ## Configuration
 
-| Variable | Default     | Meaning                                       |
-| -------- | ----------- | --------------------------------------------- |
-| `PORT`   | `3000`      | Listener port; an integer between 1 and 65535 |
-| `HOST`   | `127.0.0.1` | Listener hostname or address                  |
+| Variable                     | Default             | Meaning                                                             |
+| ---------------------------- | ------------------- | ------------------------------------------------------------------- |
+| `PORT`                       | `3000`              | Listener port; an integer between 1 and 65535                       |
+| `HOST`                       | `127.0.0.1`         | Listener hostname or address                                        |
+| `DATABASE_PATH`              | `attestbook.sqlite` | SQLite file opened at startup; `:memory:` is accepted for local use |
+| `SCHEMA_SANDBOX_TIMEOUT_MS`  | `2000`              | Hard wall-clock limit for one schema-evaluation child               |
+| `SCHEMA_SANDBOX_MAX_RSS_MB`  | `256`               | RSS limit for one schema-evaluation child                           |
+| `SCHEMA_SANDBOX_CONCURRENCY` | `2`                 | Maximum concurrent schema-evaluation children                       |
 
 Local development binds loopback only. The Docker image and `compose.yaml` set
 `HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup
@@ -160,6 +205,10 @@ validation behaviour. The Phase 0 audit probe remains reproducible from
 [`research/owf-audit/`](research/owf-audit/README.md); the `owf-compat` CI job re-runs it on
 Node.js 22 and Bun 1.3.1. Any upgrade must repeat the audit described in
 [`docs/standards.md`](docs/standards.md).
+
+The validation engine uses the pinned `@sd-jwt/core` 0.24.1 and `@sd-jwt/sd-jwt-vc` 0.24.1
+parsers directly, plus Ajv 8.20.0 for JSON Schema 2020-12 instance validation. All three are
+exact dependencies in `package.json` and `bun.lock`.
 
 `skipLibCheck` is enabled in `tsconfig.json` only because the pinned
 `@sd-jwt/sd-jwt-vc` 0.24.1 declarations conflict with `exactOptionalPropertyTypes`.
@@ -184,9 +233,9 @@ No job deploys, publishes an image or needs a secret or a live external service.
 ## Repository layout
 
 ```text
-src/                application code and Bun tests (including the registry module)
+src/                application code and Bun tests (registry and validation modules)
 migrations/         ordered SQL schema migrations
-docs/               specification, architecture, registry and Phase 0 documents
+docs/               specification, architecture, registry, validation and Phase 0 documents
 research/owf-audit/ reproducible audit probe for the pinned OWF package
 scripts/            dependency-free documentation checker
 Dockerfile          multi-stage runtime image

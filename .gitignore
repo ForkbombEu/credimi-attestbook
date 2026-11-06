@@ -6,6 +6,9 @@ coverage/
 # Local configuration and secrets
 .env
 .env.*
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 
 # Tooling and operating-system noise
 .DS_Store
