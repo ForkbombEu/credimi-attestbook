@@ -6,6 +6,8 @@
 // credential, key or personal data is involved.
 
 import { afterEach, describe, expect, test } from 'bun:test'
+import { fileURLToPath } from 'node:url'
+
 import Ajv2020 from 'ajv/dist/2020.js'
 
 import { provisionProvider } from '../registry/bootstrap'
@@ -478,17 +480,11 @@ describe('IssuerFixtureGenerator', () => {
     )
   })
 
-  test('stops a hostile nested enumeration schema at the sandbox time limit', async () => {
-    const setupFixture = setup({
-      sandbox: { timeoutMs: 500 },
-      documents: [
-        {
-          format: 'dc+sd-jwt',
-          uri: OTHER_SCHEMA_URI,
-          content: JSON.stringify(nestedEnumSchema(3)),
-        },
-      ],
-    })
+  test('stops a fixture sandbox that reaches its time limit', async () => {
+    const slowEntry = fileURLToPath(
+      new URL('../validation/test-fixtures/slow-entry.ts', import.meta.url),
+    )
+    const setupFixture = setup({ sandbox: { entry: slowEntry, timeoutMs: 500 } })
     const started = Date.now()
     let error: unknown
     try {
@@ -579,12 +575,3 @@ describe('IssuerFixtureGenerator', () => {
     expect(result.payloadValidation.status).toBe('PASS')
   })
 })
-
-function nestedEnumSchema(depth: number): Record<string, unknown> {
-  const values = Array.from({ length: 1_500 }, (_, index) => `v${index}`)
-  let leaf: unknown = { allOf: [{ enum: values }, { enum: values }] }
-  for (let index = 0; index < depth; index += 1) {
-    leaf = { type: 'array', minItems: 8, maxItems: 8, items: leaf }
-  }
-  return { type: 'object', required: ['a'], properties: { a: leaf } }
-}
