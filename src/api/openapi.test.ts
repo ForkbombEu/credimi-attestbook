@@ -45,7 +45,9 @@ describe('generated OpenAPI document', () => {
   test('documented operations exactly match the routes Hono registered', () => {
     const app = createApp()
     const registered = app.routes
-      .filter((route) => route.method === 'GET' || route.method === 'POST')
+      .filter(
+        (route) => route.method === 'GET' || route.method === 'POST' || route.method === 'PUT',
+      )
       .map((route) => `${route.method} ${route.path}`)
       .sort()
     const documented = API_ROUTES.map(

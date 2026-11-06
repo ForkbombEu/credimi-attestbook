@@ -8,10 +8,13 @@
 import type {
   Attestation,
   CredentialValidationResult,
+  DraftRulebook,
+  DraftValidationReport,
   Provider,
   Rulebook,
   RulebookPage,
   RulebookVersion,
+  SaveDraftRequest,
   SchemaReference,
   ValidateCredentialRequest,
 } from './types'
@@ -21,6 +24,9 @@ export const CATALOG_PAGE_LIMIT = 100
 
 /** The product-API path that runs structural credential validation. */
 export const CREDENTIAL_VALIDATION_PATH = '/api/v1/credentials/validate'
+
+/** The public path that runs live validation of an unsaved draft document. */
+export const DRAFT_VALIDATION_PATH = '/api/v1/rulebooks/validate-draft'
 
 export interface CatalogApi {
   listProviders(signal?: AbortSignal): Promise<readonly Provider[]>
@@ -32,6 +38,27 @@ export interface CatalogApi {
     signal?: AbortSignal,
   ): Promise<readonly SchemaReference[]>
   listVersions(rulebookId: string, signal?: AbortSignal): Promise<readonly RulebookVersion[]>
+}
+
+/**
+ * The editor writes with a provider bearer token. It is a separate interface so
+ * the read-only catalog views never depend on the mutating paths, and tests can
+ * provide a fake editor without faking catalog reads.
+ */
+export interface EditorApi {
+  getDraft(rulebookId: string, signal?: AbortSignal): Promise<DraftRulebook>
+  replaceDraft(
+    rulebookId: string,
+    request: SaveDraftRequest,
+    token: string,
+    signal?: AbortSignal,
+  ): Promise<DraftRulebook>
+  createDraft(request: SaveDraftRequest, token: string, signal?: AbortSignal): Promise<Rulebook>
+  validateDraft(request: SaveDraftRequest, signal?: AbortSignal): Promise<DraftValidationReport>
+}
+
+export function rulebookDraftPath(rulebookId: string): string {
+  return `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/draft`
 }
 
 /**
@@ -165,6 +192,81 @@ export function createHttpValidationApi(
         throw new CatalogApiError('The validation returned an unexpected response.', 0)
       }
       return singleData<CredentialValidationResult>(body, 'validation')
+    },
+  }
+}
+
+/**
+ * Builds the HTTP client for the draft editor. The bearer token is sent only in
+ * the `Authorization` header of a write; validation is public and read-only.
+ */
+export function createHttpEditorApi(
+  fetchImpl: FetchLike = (input, init) => fetch(input, init),
+): EditorApi {
+  async function readData<T>(response: Response, label: string): Promise<T> {
+    if (!response.ok) {
+      throw new CatalogApiError(await readErrorMessage(response, label), response.status)
+    }
+    let body: unknown
+    try {
+      body = await response.json()
+    } catch {
+      throw new CatalogApiError(`The ${label} returned an unexpected response.`, 0)
+    }
+    return singleData<T>(body, label)
+  }
+
+  async function postJson<T>(
+    path: string,
+    request: SaveDraftRequest,
+    token: string | undefined,
+    method: 'POST' | 'PUT',
+    signal: AbortSignal | undefined,
+    label: string,
+  ): Promise<T> {
+    const response = await fetchImpl(path, {
+      method,
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/json',
+        ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+      },
+      body: JSON.stringify(request),
+      ...(signal === undefined ? {} : { signal }),
+    })
+    return readData<T>(response, label)
+  }
+
+  return {
+    async getDraft(rulebookId, signal) {
+      const response = await fetchImpl(rulebookDraftPath(rulebookId), {
+        headers: { accept: 'application/json' },
+        ...(signal === undefined ? {} : { signal }),
+      })
+      return readData<DraftRulebook>(response, 'draft')
+    },
+    replaceDraft(rulebookId, request, token, signal) {
+      return postJson<DraftRulebook>(
+        rulebookDraftPath(rulebookId),
+        request,
+        token,
+        'PUT',
+        signal,
+        'draft save',
+      )
+    },
+    createDraft(request, token, signal) {
+      return postJson<Rulebook>('/api/v1/rulebooks', request, token, 'POST', signal, 'draft create')
+    },
+    validateDraft(request, signal) {
+      return postJson<DraftValidationReport>(
+        DRAFT_VALIDATION_PATH,
+        request,
+        undefined,
+        'POST',
+        signal,
+        'draft validation',
+      )
     },
   }
 }

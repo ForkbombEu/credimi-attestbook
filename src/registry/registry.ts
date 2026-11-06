@@ -33,11 +33,14 @@ import type {
   AuthTokenRecord,
   CreateAttestationInput,
   CreateRulebookInput,
+  CreateRulebookSchemaReferenceInput,
   CreateRulebookVersionInput,
   CreateSchemaReferenceInput,
   CreateAttestationSchemaReferenceInput,
+  DraftContent,
   IssuedToken,
   Provider,
+  ReplaceDraftContentInput,
   Rulebook,
   RulebookFilter,
   RulebookVersion,
@@ -309,6 +312,237 @@ export class Registry {
   normalizeRulebookInput(accessToken: string, input: CreateRulebookInput): PreparedRulebook {
     const actor = this.authenticate(accessToken)
     return this.prepareRulebook(actor, input, this.now())
+  }
+
+  // ------------------------------------------------------- draft working copy
+
+  /**
+   * Reads one rulebook's draft working copy as a single editable document
+   * (#40). This is a public projection of the same rows the per-resource reads
+   * expose; it adds no new data and needs no bearer token.
+   */
+  getDraftContent(rulebookId: string): DraftContent {
+    const rulebook = this.requireRulebook(rulebookId)
+    return {
+      rulebook,
+      attestations: this.store.listAttestations(rulebook.id),
+      schemaReferences: this.store.listSchemaReferences(rulebook.id),
+    }
+  }
+
+  /**
+   * Replaces a draft rulebook's working copy in one transaction (#40).
+   *
+   * Only a rulebook whose working-copy status is `draft` can be changed, so a
+   * published or historical rulebook answers `immutable`. Already-frozen
+   * version snapshots and their content-addressed artifacts are never touched:
+   * a later publish of a stale draft version still fails until it is refreshed
+   * (#41), and the editor cannot mutate released bytes.
+   *
+   * The full content is validated and built before the transaction, so an
+   * invalid document leaves the previous working copy intact.
+   */
+  replaceDraftContent(
+    accessToken: string,
+    rulebookId: string,
+    input: ReplaceDraftContentInput,
+  ): DraftContent {
+    const actor = this.authenticate(accessToken)
+    assertObject(input, 'rulebook')
+    const existing = this.requireOwnedDraft(actor, rulebookId)
+    const at = this.now()
+
+    const name = requireText(input.name, 'name', MAX_NAME_LENGTH)
+    const description =
+      input.description === undefined ? '' : requireDescription(input.description, 'description')
+    const sourceUrl =
+      input.sourceUrl === undefined || input.sourceUrl === null
+        ? null
+        : requireAbsoluteHttpUrl(input.sourceUrl, 'sourceUrl')
+    const applicableSpec = requireText(input.applicableSpec, 'applicableSpec', MAX_SPEC_LENGTH)
+
+    const previousAttestations = this.store.listAttestations(existing.id)
+    const previousReferences = this.store.listSchemaReferences(existing.id)
+    const previousAttestationsByName = new Map(
+      previousAttestations.map((attestation) => [attestation.name, attestation]),
+    )
+    const referenceKey = (attestationId: string | null, formatIdentifier: string, uri: string) =>
+      `${attestationId ?? ''}\u0000${formatIdentifier}\u0000${uri}`
+    const previousReferencesByKey = new Map(
+      previousReferences.map((reference) => [
+        referenceKey(reference.attestationId, reference.formatIdentifier, reference.uri),
+        reference,
+      ]),
+    )
+
+    const attestationInputs = input.attestations ?? []
+    assertArray(attestationInputs, 'attestations', MAX_ATTESTATIONS_PER_RULEBOOK)
+    const previousAttestationIds: Array<string | undefined> = []
+    const attestations = attestationInputs.map((attestationInput, index) => {
+      const built = this.buildAttestation(existing.id, attestationInput, index, at)
+      const previous = previousAttestationsByName.get(built.name)
+      previousAttestationIds[index] = previous?.id
+      if (previous === undefined || attestationInput.metadata !== undefined) {
+        return built
+      }
+      // Internal metadata is not part of the editable document, so an unchanged
+      // save must keep the row's metadata (and identity) instead of resetting it.
+      // The importer stores the source profile/conformance and OWF meta here.
+      return {
+        ...built,
+        id: previous.id,
+        metadata: previous.metadata,
+        createdAt: previous.createdAt,
+      }
+    })
+
+    const names = new Set<string>()
+    for (const attestation of attestations) {
+      if (names.has(attestation.name)) {
+        throw invalidInput(`attestations must not repeat the name "${attestation.name}"`)
+      }
+      names.add(attestation.name)
+    }
+
+    const schemaReferences: SchemaReference[] = []
+    attestationInputs.forEach((attestationInput, index) => {
+      const attestation = attestations[index]
+      if (attestation === undefined) {
+        return
+      }
+      const referenceInputs = attestationInput.schemaReferences ?? []
+      assertArray(
+        referenceInputs,
+        `attestations[${index}].schemaReferences`,
+        MAX_SCHEMA_REFERENCES_PER_ATTESTATION,
+      )
+      const formats = new Set<string>()
+      referenceInputs.forEach((referenceInput, referenceIndex) => {
+        const built = this.buildAttestationSchemaReference(
+          attestation,
+          referenceInput,
+          at,
+          `attestations[${index}].schemaReferences[${referenceIndex}]`,
+        )
+        if (formats.has(built.formatIdentifier)) {
+          throw invalidInput(
+            `attestations[${index}].schemaReferences must not repeat the formatIdentifier "${built.formatIdentifier}"`,
+          )
+        }
+        formats.add(built.formatIdentifier)
+        // A renamed attestation keeps matching its own references because the
+        // previous row is looked up through the previous attestation id.
+        const previousAttestationId = previousAttestationIds[index] ?? attestation.id
+        const previous = previousReferencesByKey.get(
+          referenceKey(previousAttestationId, built.formatIdentifier, built.uri),
+        )
+        schemaReferences.push(
+          previous === undefined || referenceInput.metadata !== undefined
+            ? built
+            : {
+                ...built,
+                id: previous.id,
+                metadata: previous.metadata,
+                createdAt: previous.createdAt,
+              },
+        )
+      })
+    })
+
+    const rulebookReferenceInputs = input.schemaReferences ?? []
+    assertArray(rulebookReferenceInputs, 'schemaReferences', MAX_SCHEMA_REFERENCES_PER_ATTESTATION)
+    const rulebookLevelFormats = new Set<string>()
+    rulebookReferenceInputs.forEach((referenceInput, index) => {
+      const path = `schemaReferences[${index}]`
+      const built = this.buildRulebookSchemaReference(existing.id, referenceInput, at, path)
+      if (rulebookLevelFormats.has(built.formatIdentifier)) {
+        throw invalidInput(
+          `schemaReferences must not repeat the formatIdentifier "${built.formatIdentifier}"`,
+        )
+      }
+      rulebookLevelFormats.add(built.formatIdentifier)
+      const previous = previousReferencesByKey.get(
+        referenceKey(null, built.formatIdentifier, built.uri),
+      )
+      schemaReferences.push(
+        previous === undefined || referenceInput.metadata !== undefined
+          ? built
+          : {
+              ...built,
+              id: previous.id,
+              metadata: previous.metadata,
+              createdAt: previous.createdAt,
+            },
+      )
+    })
+
+    const candidate: Rulebook = {
+      ...existing,
+      name,
+      description,
+      sourceUrl,
+      applicableSpec,
+    }
+    const changed = changedFields(existing, candidate)
+    const updated: Rulebook = { ...candidate, updatedAt: at }
+
+    this.transaction(() => {
+      for (const reference of previousReferences) {
+        this.deleteSchemaReferenceWithAudit(actor, reference, at, 'explicit')
+      }
+      for (const attestation of previousAttestations) {
+        this.store.deleteAttestation(attestation.id)
+        this.store.insertAudit({
+          at,
+          actorProviderId: actor.providerId,
+          action: 'attestation.delete',
+          entityType: 'attestation',
+          entityId: attestation.id,
+          detail: { rulebookId: existing.id, name: attestation.name, reason: 'draft.replace' },
+        })
+      }
+
+      this.store.updateRulebook(updated)
+      if (changed.length > 0) {
+        this.store.insertAudit({
+          at,
+          actorProviderId: actor.providerId,
+          action: 'rulebook.update',
+          entityType: 'rulebook',
+          entityId: updated.id,
+          detail: { fields: changed },
+        })
+      }
+      for (const attestation of attestations) {
+        this.store.insertAttestation(attestation)
+        this.store.insertAudit({
+          at,
+          actorProviderId: actor.providerId,
+          action: 'attestation.create',
+          entityType: 'attestation',
+          entityId: attestation.id,
+          detail: { rulebookId: updated.id, name: attestation.name, reason: 'draft.replace' },
+        })
+      }
+      for (const reference of schemaReferences) {
+        this.store.insertSchemaReference(reference)
+        this.store.insertAudit({
+          at,
+          actorProviderId: actor.providerId,
+          action: 'schema_ref.create',
+          entityType: 'schema_ref',
+          entityId: reference.id,
+          detail: {
+            rulebookId: updated.id,
+            attestationId: reference.attestationId,
+            formatIdentifier: reference.formatIdentifier,
+            reason: 'draft.replace',
+          },
+        })
+      }
+    })()
+
+    return { rulebook: updated, attestations, schemaReferences }
   }
 
   listAttestations(rulebookId: string): readonly AttestationType[] {
@@ -948,7 +1182,9 @@ export class Registry {
     const description =
       input.description === undefined ? '' : requireDescription(input.description, 'description')
     const sourceUrl =
-      input.sourceUrl === undefined ? null : requireAbsoluteHttpUrl(input.sourceUrl, 'sourceUrl')
+      input.sourceUrl === undefined || input.sourceUrl === null
+        ? null
+        : requireAbsoluteHttpUrl(input.sourceUrl, 'sourceUrl')
     const provenance =
       input.provenance === undefined ? {} : requireJsonObject(input.provenance, 'provenance')
     const applicableSpec = requireText(input.applicableSpec, 'applicableSpec', MAX_SPEC_LENGTH)
@@ -1003,6 +1239,28 @@ export class Registry {
         formats.add(reference.formatIdentifier)
         schemaReferences.push(reference)
       })
+    })
+
+    // Rulebook-level references (#40) are owned by no attestation type and are
+    // validated before any write, like every other create input.
+    const rulebookReferenceInputs = input.schemaReferences ?? []
+    assertArray(rulebookReferenceInputs, 'schemaReferences', MAX_SCHEMA_REFERENCES_PER_ATTESTATION)
+    const rulebookLevelFormats = new Set<string>()
+    rulebookReferenceInputs.forEach((referenceInput, index) => {
+      const path = `schemaReferences[${index}]`
+      const reference = this.buildRulebookSchemaReference(
+        rulebookId,
+        referenceInput,
+        createdAt,
+        path,
+      )
+      if (rulebookLevelFormats.has(reference.formatIdentifier)) {
+        throw invalidInput(
+          `schemaReferences must not repeat the formatIdentifier "${reference.formatIdentifier}"`,
+        )
+      }
+      rulebookLevelFormats.add(reference.formatIdentifier)
+      schemaReferences.push(reference)
     })
 
     const rulebook: Rulebook = {
@@ -1210,6 +1468,34 @@ export class Registry {
       integrity:
         input.integrity === undefined ? null : requireIntegrity(input.integrity, 'integrity'),
       metadata: input.metadata === undefined ? {} : requireJsonObject(input.metadata, 'metadata'),
+      createdAt,
+    }
+  }
+
+  /** Builds a rulebook-level schema reference (owned by no attestation type). */
+  private buildRulebookSchemaReference(
+    rulebookId: string,
+    input: CreateRulebookSchemaReferenceInput,
+    createdAt: string,
+    path: string,
+  ): SchemaReference {
+    assertObject(input, path)
+    return {
+      id: this.generateId(),
+      rulebookId,
+      attestationId: null,
+      formatIdentifier: requireText(
+        input.formatIdentifier,
+        `${path}.formatIdentifier`,
+        MAX_NAME_LENGTH,
+      ),
+      uri: requireAbsoluteHttpUrl(input.uri, `${path}.uri`),
+      integrity:
+        input.integrity === undefined
+          ? null
+          : requireIntegrity(input.integrity, `${path}.integrity`),
+      metadata:
+        input.metadata === undefined ? {} : requireJsonObject(input.metadata, `${path}.metadata`),
       createdAt,
     }
   }

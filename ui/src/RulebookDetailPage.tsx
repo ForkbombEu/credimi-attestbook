@@ -16,7 +16,7 @@ import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import type { RulebookDetailSnapshot } from './detail'
 import { loadRulebookDetail } from './detail'
-import { AppLink, CATALOG_PATH } from './router'
+import { AppLink, CATALOG_PATH, rulebookEditorPath } from './router'
 
 interface RulebookDetailPageProps {
   readonly api: CatalogApi
@@ -125,7 +125,9 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
             />
           ) : null}
 
-          {state.status === 'ready' ? <DetailContent snapshot={state.snapshot} /> : null}
+          {state.status === 'ready' ? (
+            <DetailContent snapshot={state.snapshot} onNavigate={onNavigate} />
+          ) : null}
         </div>
       </main>
 
@@ -134,7 +136,13 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
   )
 }
 
-function DetailContent({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
+function DetailContent({
+  snapshot,
+  onNavigate,
+}: {
+  readonly snapshot: RulebookDetailSnapshot
+  readonly onNavigate: (path: string) => void
+}) {
   const { rulebook, versions } = snapshot
   return (
     <>
@@ -155,6 +163,15 @@ function DetailContent({ snapshot }: { readonly snapshot: RulebookDetailSnapshot
         </p>
         <div className="detail-actions">
           <VersionSummary snapshot={snapshot} />
+          {rulebook.publicationStatus === 'draft' ? (
+            <AppLink
+              className="button button--ghost"
+              href={rulebookEditorPath(rulebook.id)}
+              onNavigate={onNavigate}
+            >
+              Edit draft
+            </AppLink>
+          ) : null}
         </div>
       </header>
 

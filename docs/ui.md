@@ -2,14 +2,16 @@
 
 **Status:** Phase 1 implementation of
 [issue #36](https://github.com/ForkbombEu/credimi-attestbook/issues/36) (UI-001),
-[issue #37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (UI-002) and
-[issue #38](https://github.com/ForkbombEu/credimi-attestbook/issues/38) (UI-005). It
-delivers a responsive, searchable catalog of rulebooks, a rulebook detail view with
-attestation types, schema references, provenance, standards-compatibility disclosure and
-version history, and a credential validation playground that calls the real
-`POST /api/v1/credentials/validate` API. All three views are clients of the public
-AttestBook API. The slice does not add the editor, import UI or publication controls; those
-remain #40–#42 and later follow-ups.
+[issue #37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (UI-002),
+[issue #38](https://github.com/ForkbombEu/credimi-attestbook/issues/38) (UI-005) and the
+draft-editor slice of [issue #40](https://github.com/ForkbombEu/credimi-attestbook/issues/40)
+(UI-003). It delivers a responsive, searchable catalog of rulebooks, a rulebook detail view
+with attestation types, schema references, provenance, standards-compatibility disclosure
+and version history, a credential validation playground that calls the real
+`POST /api/v1/credentials/validate` API, and a draft editor for rulebook creation, metadata
+editing, JSON/schema editing and live validation. All views are clients of the public
+AttestBook API. The slice does not add the import UI, draft lifecycle transitions,
+publication controls or version diff; those remain #41, #42 and later follow-ups.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) §14 (UI-001/UI-002/UI-005)
 and §2.2 (independent standalone UI).
@@ -61,7 +63,25 @@ Implemented by these slices:
 - the public `GET /api/v1/providers` read the catalog needs to show provider names, plus the
   existing public rulebook, attestation, schema-reference and version reads. These are
   additive `v1` public projections; publication authority, internal metadata, provenance
-  and tokens are never returned.
+  and tokens are never returned;
+- a draft editor at `/rulebooks/new` and `/rulebooks/<id>/edit` (#40):
+  - metadata editing for name, description, source URL and applicable specification;
+  - a developer-facing JSON editor for attestation types and per-attestation or
+    rulebook-level schema references, with an immediate JSON syntax message;
+  - live validation of the unsaved document against the real server: structural findings
+    that block a save are shown separately from standards findings, and the validation
+    boundaries are listed explicitly;
+  - an explicit provider bearer-token field for the write. The token is held in the app's
+    React memory for the current page session only, sent only in the `Authorization` header,
+    and never written to browser storage, the URL or the rendered document;
+  - creation of a new draft (one authenticated `POST /api/v1/rulebooks`) and full replacement
+    of an existing draft (one authenticated `PUT /api/v1/rulebooks/<id>/draft`), followed by
+    a persisted reload;
+  - a read-only state for a published or historical rulebook, which the server also refuses
+    to mutate. Editing never changes a frozen version snapshot or its content-addressed
+    artifact;
+  - an entry action on the catalog (`New rulebook`) and on the draft detail page
+    (`Edit draft`).
 
 Deliberately **not** in these slices:
 
@@ -69,9 +89,10 @@ Deliberately **not** in these slices:
   for the pinned references, but UI-005 does not require an editor for them, so schema
   validation is reported **not tested** unless a schema document is supplied through the
   API directly;
-- editor, import UI, draft management, publication controls and version diff (UI-003/UI-004,
-  #40–#42 and a later import-UI issue). The detail view and playground are read-only and
-  claim no Phase 2 authoring functionality;
+- draft lifecycle transitions (freeze/refresh/publish), version comparison/diff, publication
+  controls, signing and export (UI-003/UI-004, #41–#42 and a later import-UI issue). The
+  editor edits the working copy only; the detail view and playground stay read-only and
+  claim no lifecycle or publication functionality;
 - catalogue- or rulebook-level validation/compatibility evaluation. The catalog reports
   **Not tested** for every rulebook and the detail view repeats that result, because
   structural validation is a per-credential operation against a pinned rulebook version and
@@ -117,7 +138,13 @@ The browser is a client of the public API only:
 7. on `/playground`: `GET /api/v1/rulebooks?limit=100&offset=0` for the rulebook select, then
    `GET /api/v1/rulebooks/{id}/versions` and `GET /api/v1/rulebooks/{id}/attestations` for
    the dependent selects, one `POST /api/v1/credentials/validate` per run, and a client-side
-   JSON download for the result.
+   JSON download for the result;
+8. on `/rulebooks/new`: no read is required; the editor validates the unsaved document with
+   `POST /api/v1/rulebooks/validate-draft`, and `Create draft` performs one authenticated
+   `POST /api/v1/rulebooks`;
+9. on `/rulebooks/{id}/edit`: `GET /api/v1/rulebooks/{id}/draft` reads the editable document,
+   live validation uses `POST /api/v1/rulebooks/validate-draft`, and `Save draft` performs one
+   authenticated `PUT /api/v1/rulebooks/{id}/draft`.
 
 The client router uses real paths with the History API. The Bun server serves the built
 entry document for `/`, `/rulebooks/*` and `/playground`; `/api/*` stays separate and unknown
@@ -211,6 +238,44 @@ Retrying re-sends the entered request; editing the form clears a stale result so
 cannot be mistaken for the new input. The page makes no validity claim beyond the returned
 dimensions.
 
+### 3.4 Rulebook draft editor
+
+`/rulebooks/new` and `/rulebooks/<id>/edit` are the UI-003 authoring view for the #40 slice:
+
+- the rulebook metadata form edits name, description, source URL and applicable
+  specification. The JSON editor edits one document containing the `attestations` array (with
+  each type's level of assurance, binding type, supported formats and schema references) and
+  the rulebook-level `schemaReferences` array. An empty document is offered for a new draft
+  and the current working copy is loaded for an existing one;
+- the JSON is parsed locally on every change so a syntax error is shown immediately and
+  prevents a save. All deeper checks are server-side: a 350 ms debounced
+  `POST /api/v1/rulebooks/validate-draft` runs the registry's structural bounds and projects
+  each attestation type into a TS11 v1.0.1 `SchemaMeta` document validated by the real
+  standards adapter. Findings show severity, draft path, message and stable code, and the
+  report's limitations are listed so the view never presents live validation as a
+  conformance claim;
+- `saveable` separates structural failures, which disable the save button, from
+  standards-level findings, which are displayed but do not block persisting a work-in-progress
+  draft (the registry stores profile enumerations as extensible text, decision D-5). An
+  unknown `applicableSpec` reports that no standards checks ran instead of validating it
+  against the wrong baseline;
+- the provider bearer token is entered in a password field. It is held only in the app's
+  React memory for this page session, so navigating to another view and back keeps it but a
+  reload clears it. It is sent only as the `Authorization` header of the write request. A
+  missing token, a foreign provider's token and a published rulebook's mutation each produce
+  the API's safe error message; nothing is saved on failure;
+- a published or historical rulebook opens read-only with an explanation, and the server
+  independently answers `409 immutable`, so the UI cannot bypass the guarantee. A successful
+  save reports that frozen and published versions were not changed; the test suite verifies
+  the exact published snapshot bytes and digest are identical before and after a working-copy
+  edit;
+- the page reuses the catalog/detail shell, a skip link, labelled fields with
+  `aria-describedby`, an error summary with `role="alert"`, a live `role="status"` validation
+  summary and table semantics for the findings. It is covered by component tests and a
+  Playwright spec that runs against the real server, including a full axe-core scan and a
+  390 px viewport check. Draft lifecycle transitions, version diff, publication and export
+  are deliberately not exposed here.
+
 ## 4. Build, serve and develop
 
 ```bash
@@ -257,10 +322,16 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   limitations, individual violations, safe API error display without the credential, retry,
   file upload and oversized-file rejection, export of the typed JSON without the credential,
   clear-form behaviour and axe-core checks for the form and result;
-- the router: path parsing (including `/playground`), encoded ids, malformed paths, history
-  navigation and modified clicks keeping native anchor behaviour;
-- an end-to-end component navigation test from the catalog to a detail page and back, plus a
-  direct deep-link render;
+- the draft editor: JSON parse/serialize/request helpers; loaded working-copy population;
+  debounced live validation with structural errors disabling save and standards warnings
+  keeping it available; immediate JSON-syntax feedback; authorized save with the token;
+  missing-token handling without a write; create-and-navigate; read-only published state;
+  the memory-only token field; axe-core checks for the editor page;
+- the router: path parsing (including `/playground`, `/rulebooks/new` and
+  `/rulebooks/<id>/edit`), encoded ids, malformed paths, history navigation and modified
+  clicks keeping native anchor behaviour;
+- an end-to-end component navigation test from the catalog to a detail page and back, from
+  the catalog to the new-rulebook editor, and a direct deep-link render of both editors;
 - axe-core accessibility checks for the catalog results/error states and the detail page and
   not-found state (colour contrast is disabled in jsdom because it cannot compute painted
   colours; the browser tests run the full rule set).
@@ -284,11 +355,42 @@ Playwright + Chromium):
   `503` error surfaced without leaking the credential and a successful retry, an incomplete
   request rejected in the browser with no API call, file upload validation and the exported
   report;
-- full axe-core scans and 390 px viewport checks for the catalog, detail and playground views.
+- the draft editor against the real server: live TS11 adapter findings as the JSON changes,
+  immediate invalid-JSON feedback and a disabled save, an authorized save that persists the
+  working copy, an unchanged published snapshot's exact bytes and `Content-Digest` after a
+  working-copy edit, the API's `409 immutable` for a published rulebook, the read-only UI
+  state, and an unchanged catalog total when the new-rulebook page renders;
+- an authorized `Create draft` with the Source URL left empty, which must navigate to the new
+  draft's editor and persist a `null` source URL; because this spec creates a rulebook in the
+  one shared in-memory registry, the Playwright suite runs with one worker and catalog specs
+  run before it;
+- full axe-core scans and 390 px viewport checks for the catalog, detail, playground and
+  editor views.
 
 CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test:e2e`. The
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves
 the catalog HTML.
+
+The pull request for the draft-editor slice carries the required before/after captures at
+1280 px and the same light theme. The baseline is `c35e160` (`main` before the slice):
+
+- [before: `editor-before-catalog.png`](ui/editor-before-catalog.png) — the catalog has no
+  authoring action;
+- [before: `editor-before-detail.png`](ui/editor-before-detail.png) — the draft detail page
+  has no edit action;
+- [after: `editor-after-catalog.png`](ui/editor-after-catalog.png) — the catalog's
+  `New rulebook` action;
+- [after: `editor-after-detail.png`](ui/editor-after-detail.png) — the draft detail page's
+  `Edit draft` action next to the version export;
+- [after: `editor-after-new.png`](ui/editor-after-new.png) — the new-rulebook editor with
+  metadata fields, the JSON editor, the token field and validation boundaries;
+- [after: `editor-after-edit.png`](ui/editor-after-edit.png) — an existing draft loaded into
+  the editor with a real live-validation warning;
+- [after: `editor-after-validation.png`](ui/editor-after-validation.png) — real TS11 adapter
+  findings with severity, draft path, message and stable code, kept separate from the
+  save-able warning;
+- [after, narrow viewport: `editor-after-mobile.png`](ui/editor-after-mobile.png) — the same
+  editor at 390 px.
 
 The pull request for the detail slice carries the required before/after captures at the same
 viewport width (1280 px) and the same light theme:
@@ -349,8 +451,10 @@ The catalog and detail slices' captures remain in the same directory
 - Provenance is the public projection only (source URL and registry timestamps). The public
   API deliberately does not expose registry-internal import provenance, so the detail view
   says so rather than inventing it.
-- The detail view is read-only. Draft management, publication, editing, version diff and
-  import remain Phase 2 or later UI slices; no Phase 2 editor functionality is claimed.
+- The detail view stays a read-only projection and only links to the draft editor. Draft
+  lifecycle transitions (freeze/refresh/publish), version diff, publication, signing and
+  export remain #41/#42 or later slices; no lifecycle or publication functionality is
+  claimed by this slice.
 - UI responses set `X-Content-Type-Options: nosniff` and Vite assets are immutable-cached;
   a content security policy and the rest of the HTTP hardening remain
   [issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35).
@@ -359,13 +463,25 @@ The catalog and detail slices' captures remain in the same directory
   a later slice.
 - The rulebook selector is the Phase 1 API page (maximum 100 entries); a truncation notice
   names the loaded and total counts, and there is no pagination control yet.
-- The attestation-type select comes from the public working-copy attestation read. Phase 1 has
-  no working-copy mutation API, so the working copy and every pinned version currently carry
-  the same types. A later editor slice must add a version-scoped attestation read so a draft
-  cannot offer a type that an older pinned version lacks.
+- The attestation-type select comes from the public working-copy attestation read. The
+  editor can now change the working copy after a version is frozen, so the types a draft
+  offers may differ from those of an older pinned version. A version-scoped attestation read
+  is still needed before the playground can restrict a pinned version to the types that
+  snapshot actually contains.
 - Validation runs are not persisted. The exported JSON is the per-run result the API returned;
   there is no run history, comparison or saved-result list.
 - The format hint covers the pinned TS11 format vocabulary, but only `dc+sd-jwt` has a
   structural parser; other formats are recognised or reported and never mocked as parsed.
-- No dark theme or offline cache; routing covers the three Phase 1 views, and any other path
-  falls back to the catalog.
+- The draft editor's standards checks implement the TS11 v1.0.1 baseline only. An
+  `applicableSpec` outside it is checked structurally with an explicit "no standards checks
+  ran" warning instead of being validated against the wrong profile. The projection uses the
+  source URL as the rulebook URI and a fixed placeholder when none is set; trusted
+  authorities, the draft version label and the schema bodies are not edited or fetched. A
+  saved draft is not a conformance result.
+- The editor holds the provider bearer token in React memory only, so a full page reload
+  clears it; it is never written to browser storage. There is no login or session endpoint.
+  The save is a last-write-wins full replacement with no optimistic-concurrency token, so two
+  open editor tabs can overwrite each other's working copy; lifecycle and conflict handling
+  remain #41.
+- No dark theme or offline cache; routing covers the catalog, detail, playground, new-draft
+  and edit-draft views, and any other path falls back to the catalog.

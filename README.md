@@ -6,8 +6,8 @@ currently contains the Phase 0 research and architecture documents, the Phase 1 
 scaffold, the persistent provider/rulebook registry slice, the bounded URL/JSON rulebook
 import slice, SD-JWT VC structural validation with dimension-aware evidence, the
 versioned REST/OpenAPI contract over those services and the standalone UI: a searchable
-rulebook catalog, rulebook detail/version history and a credential validation playground
-(UI-001/UI-002/UI-005).
+rulebook catalog, rulebook detail/version history, a credential validation playground and a
+rulebook draft editor (UI-001/UI-002/UI-005 and the working-copy slice of UI-003).
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -37,7 +37,8 @@ bun run dev
 ```
 
 `bun run dev` rebuilds on change and listens on `http://localhost:3000`, serving the built
-UI at `/`, `/rulebooks/<id>` and `/playground`, with the versioned API under `/api/v1`. Run
+UI at `/`, `/rulebooks/<id>`, `/rulebooks/new`, `/rulebooks/<id>/edit` and `/playground`, with
+the versioned API under `/api/v1`. Run
 `bun run build:ui` after UI changes, or use `bun run dev:ui` for Vite hot reload on port 5173
 with `/api` proxied to the Bun server. The health check is:
 
@@ -113,7 +114,12 @@ mutation enforces provider ownership. Migrations live in `migrations/` and are a
 runner in `src/db/migrations.ts`; editing an already-applied migration is rejected by its
 checksum.
 
-A rulebook's content can be frozen as a draft version, then published. Each version stores the
+A rulebook's draft working copy (metadata, attestation types and schema references) can be
+read and replaced as one document through `GET`/`PUT /api/v1/rulebooks/{id}/draft`; the
+editor also validates an unsaved document through `POST /api/v1/rulebooks/validate-draft`.
+Only a draft working copy can change, and a full replacement never mutates a frozen or
+published version snapshot. A rulebook's content can be frozen as a draft version, then
+published. Each version stores the
 SHA-256 digest of its exact snapshot bytes in a content-addressed artifact, and published and
 historical versions are immutable in the service and in SQLite triggers. Versions can be
 retrieved by `(rulebookId, version)` or by content digest. Re-import conflict handling is

@@ -258,6 +258,20 @@ describe('catalog rendering details', () => {
   })
 })
 
+const DRAFT_RULEBOOK = {
+  id: 'rulebook-pid',
+  providerId: 'provider-example',
+  name: 'PID Rulebook',
+  description: 'Person identification data.',
+  sourceUrl: null,
+  applicableSpec: 'ts11@1.0.1',
+  publicationStatus: 'draft',
+  attestations: [],
+  schemaReferences: [],
+  createdAt: '2026-01-01T00:00:00.000Z',
+  updatedAt: '2026-01-01T00:00:00.000Z',
+}
+
 describe('app catalog and detail navigation', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
@@ -294,6 +308,20 @@ describe('app catalog and detail navigation', () => {
       }
       if (input === '/api/v1/rulebooks/rulebook-pid/versions') {
         return json({ data: SAMPLE_DATASET.versions['rulebook-pid'] })
+      }
+      if (input === '/api/v1/rulebooks/rulebook-pid/draft') {
+        return json({ data: DRAFT_RULEBOOK })
+      }
+      if (input === '/api/v1/rulebooks/validate-draft') {
+        return json({
+          data: {
+            valid: true,
+            saveable: true,
+            profile: 'ts11@1.0.1',
+            diagnostics: [],
+            limitations: [],
+          },
+        })
       }
       return Promise.resolve(
         new Response(
@@ -336,6 +364,29 @@ describe('app catalog and detail navigation', () => {
       await screen.findByRole('heading', { name: 'Credential playground' }),
     ).toBeInTheDocument()
     expect(await screen.findByLabelText('Rulebook')).toBeInTheDocument()
+  })
+
+  test('opens the new-rulebook editor from the catalog', async () => {
+    const user = userEvent.setup()
+    installFetch()
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('link', { name: 'New rulebook' }))
+    expect(window.location.pathname).toBe('/rulebooks/new')
+    expect(await screen.findByRole('heading', { name: 'New rulebook draft' })).toBeInTheDocument()
+  })
+
+  test('renders a deep-linked draft editor path directly', async () => {
+    installFetch()
+    window.history.replaceState({}, '', '/rulebooks/rulebook-pid/edit')
+
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' }),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText('Name')).toHaveValue('PID Rulebook')
   })
 
   test('renders a deep-linked detail path directly', async () => {

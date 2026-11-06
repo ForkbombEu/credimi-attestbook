@@ -208,10 +208,18 @@ export interface UpdateSchemaReferenceInput {
   readonly metadata?: JsonObject
 }
 
+export interface CreateRulebookSchemaReferenceInput {
+  readonly formatIdentifier: string
+  readonly uri: string
+  readonly integrity?: string
+  readonly metadata?: JsonObject
+}
+
 export interface CreateRulebookInput {
   readonly name: string
   readonly description?: string
-  readonly sourceUrl?: string
+  /** `null` behaves like an omitted value, matching the draft-replace contract. */
+  readonly sourceUrl?: string | null
   /**
    * Server-computed identity of the external import entry (#31). Re-import uses
    * it to find the rulebook instead of creating a duplicate; local creates omit
@@ -222,6 +230,8 @@ export interface CreateRulebookInput {
   readonly applicableSpec: string
   readonly metadata?: JsonObject
   readonly attestations?: readonly CreateAttestationInput[]
+  /** Rulebook-level schema references, outside any attestation type (#40). */
+  readonly schemaReferences?: readonly CreateRulebookSchemaReferenceInput[]
 }
 
 export interface UpdateRulebookInput {
@@ -237,6 +247,47 @@ export interface UpdateRulebookInput {
 export interface UpdateProviderInput {
   readonly name?: string
   readonly metadata?: JsonObject
+}
+
+/** A schema reference supplied when replacing a draft working copy (#40). */
+export interface DraftSchemaReferenceInput {
+  readonly formatIdentifier: string
+  readonly uri: string
+  readonly integrity?: string
+  readonly metadata?: JsonObject
+}
+
+/** An attestation type supplied when replacing a draft working copy (#40). */
+export interface DraftAttestationInput {
+  readonly name: string
+  readonly attestationLoS: string
+  readonly bindingType: string
+  readonly supportedFormats?: readonly string[]
+  readonly schemaReferences?: readonly DraftSchemaReferenceInput[]
+  readonly metadata?: JsonObject
+}
+
+/**
+ * Full replacement of one rulebook's draft working copy (#40). Publication
+ * state, provenance, provider ownership, import identity and internal metadata
+ * are never part of the input: they stay on the existing rulebook.
+ */
+export interface ReplaceDraftContentInput {
+  readonly name: string
+  readonly description?: string
+  /** `null` clears the source URL; omitted behaves like `null` for a replace. */
+  readonly sourceUrl?: string | null
+  readonly applicableSpec: string
+  readonly attestations?: readonly DraftAttestationInput[]
+  /** Rulebook-level schema references, outside any attestation type. */
+  readonly schemaReferences?: readonly DraftSchemaReferenceInput[]
+}
+
+/** The draft working copy as one editable document (#40). */
+export interface DraftContent {
+  readonly rulebook: Rulebook
+  readonly attestations: readonly AttestationType[]
+  readonly schemaReferences: readonly SchemaReference[]
 }
 
 export interface RulebookFilter {
