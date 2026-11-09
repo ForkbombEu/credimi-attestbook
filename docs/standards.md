@@ -429,7 +429,7 @@ provides no relevant capability.
 | FR-019 Correlation and traceability | none | None | Stable identifiers across rulebook/capture/validation/test execution |
 | FR-020 Credimi test orchestration | none | None | API-driven list/select/pin/validate/report integration |
 | FR-021 Headless Wallet testing | none | None | External wallet workflow and evidence correlation |
-| FR-022 Continuous conformance | deterministic metadata validation; signing uses wall clock | Partial | Machine-readable evidence, stable classification, version references, reproducible signing |
+| FR-022 Continuous conformance | deterministic metadata validation; signing uses wall clock | Partial | Implemented in #51 for machine-readable structural evidence, stable failure classification, explicit version references and a content-addressed result reference (`src/conformance/`); reproducible *signing* of results remains unimplemented because the pinned OWF package does not provide the TS11 catalogue-response JWS, so a conformance result is not signed |
 | UI-001..UI-006 | none | None | All web UI |
 | Public REST/OpenAPI | none | None | API contracts, authn/authz, idempotency, OpenAPI |
 | Security controls (spec §15) | SRI verification, strict nested schemas | Partial | SSRF-safe fetch, timeouts, size/JSON limits, reference controls, secret redaction, audit logging |

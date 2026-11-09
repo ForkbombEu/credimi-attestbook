@@ -22,6 +22,7 @@ import type {
   CaptureExplorerSummary,
 } from '../capture'
 import type { HeadlessWalletComparisonReport } from '../comparison'
+import type { ConformanceResult } from '../conformance'
 import type { IssuerDiscoveryResult } from '../discovery'
 import type { IssuerFixtureResult } from '../fixtures'
 import { isJsonObject, isJsonValue } from '../fixtures/sandbox'
@@ -44,6 +45,7 @@ import {
   captureExplorerDetailSchema,
   captureExplorerPageSchema,
   captureExplorerSummarySchema,
+  conformanceResultSchema,
   credentialValidationResultSchema,
   draftRulebookSchema,
   headlessWalletComparisonSchema,
@@ -378,6 +380,15 @@ export function toImportResultResource(result: ImportResult) {
  */
 export function toCredentialValidationResource(result: CredentialValidationResult) {
   return credentialValidationResultSchema.parse(result)
+}
+
+/**
+ * Projects a reproducible conformance result and validates it against the
+ * published response schema, so a drift between the builder and the OpenAPI
+ * contract becomes a server error instead of a silently different shape.
+ */
+export function toConformanceResultResource(result: ConformanceResult) {
+  return conformanceResultSchema.parse(result)
 }
 
 /**

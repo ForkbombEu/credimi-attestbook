@@ -20,10 +20,17 @@ import {
   TEST_WALLET_ID,
 } from '../../comparison/test/fixtures'
 
-import { headlessWalletComparisonSchema } from '../../api/schemas'
+import { conformanceResultSchema, headlessWalletComparisonSchema } from '../../api/schemas'
+import {
+  conformanceResult,
+  TEST_CREDENTIAL,
+  TEST_SCHEMA_CONTENT,
+  TEST_SCHEMA_URI,
+} from '../../conformance/test/fixtures'
 
 import {
   assertPinnedComparison,
+  assertPinnedConformance,
   assertPinnedCorrelation,
   assertPinnedValidation,
   CredimiAdapter,
@@ -32,6 +39,7 @@ import {
   isCredimiAdapterError,
   RULEBOOK_PIN_KIND,
   type CredimiAdapterOptions,
+  type CredimiConformanceResult,
   type CredimiEvidenceCorrelation,
   type CredimiExternalWalletObservation,
   type CredimiHeadlessWalletComparison,
@@ -721,6 +729,94 @@ describe('headless-wallet comparison request', () => {
     const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
 
     const error = await rejection(client.compareCapture({ captureId: 'capture-1', pin: PIN }))
+    expect(error.code).toBe('invalid_response')
+  })
+})
+
+function pinnedConformanceResult(
+  overrides: {
+    readonly credential?: string
+    readonly contentDigest?: string
+    readonly specVersion?: string
+    readonly attestationType?: string
+  } = {},
+): CredimiConformanceResult {
+  return conformanceResultSchema.parse(
+    conformanceResult({
+      rulebookId: PIN.rulebookId,
+      rulebookVersion: PIN.version,
+      rulebookDigest: overrides.contentDigest ?? PIN.contentDigest,
+      specVersion: overrides.specVersion ?? PIN.specVersion,
+      attestationType: overrides.attestationType ?? PIN.attestationType,
+      credential: overrides.credential ?? TEST_CREDENTIAL,
+      schemaDocuments: [{ uri: TEST_SCHEMA_URI, content: TEST_SCHEMA_CONTENT }],
+    }),
+  )
+}
+
+describe('reproducible conformance run request', () => {
+  test('posts the pinned request and returns the verified stable reference', async () => {
+    const result = pinnedConformanceResult()
+    const { fetch, calls } = fakeFetch(() => jsonResponse({ data: result }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const returned = await client.runConformance({
+      pin: PIN,
+      credential: TEST_CREDENTIAL,
+      schemaDocuments: [{ uri: TEST_SCHEMA_URI, content: TEST_SCHEMA_CONTENT }],
+    })
+
+    expect(returned.resultReference).toBe(result.resultReference)
+    expect(returned.input.inputDigest).toBe(result.input.inputDigest)
+    const call = firstCall(calls)
+    expect(call.init.method).toBe('POST')
+    expect(requestUrl(call).pathname).toBe('/api/v1/conformance/runs')
+    expect(requestBody(call)).toEqual({
+      rulebookId: PIN.rulebookId,
+      rulebookVersion: PIN.version,
+      attestationType: PIN.attestationType,
+      credential: TEST_CREDENTIAL,
+      schemaDocuments: [{ uri: TEST_SCHEMA_URI, content: TEST_SCHEMA_CONTENT }],
+    })
+  })
+
+  test('accepts a result pinned exactly and rejects a different snapshot digest', () => {
+    expect(() => assertPinnedConformance(PIN, pinnedConformanceResult())).not.toThrow()
+
+    try {
+      assertPinnedConformance(PIN, pinnedConformanceResult({ contentDigest: 'd'.repeat(64) }))
+      throw new Error('expected a pin mismatch')
+    } catch (error) {
+      expect((error as CredimiAdapterError).code).toBe('pin_mismatch')
+    }
+  })
+
+  test('rejects a result for a different specification version', async () => {
+    const result = pinnedConformanceResult({ specVersion: 'ts12@1.0.0' })
+    const { fetch } = fakeFetch(() => jsonResponse({ data: result }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const error = await rejection(client.runConformance({ pin: PIN, credential: TEST_CREDENTIAL }))
+
+    expect(error.code).toBe('pin_mismatch')
+  })
+
+  test('rejects a result whose input digest names another credential', async () => {
+    const result = pinnedConformanceResult({ credential: 'a-different-credential' })
+    const { fetch } = fakeFetch(() => jsonResponse({ data: result }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const error = await rejection(client.runConformance({ pin: PIN, credential: TEST_CREDENTIAL }))
+
+    expect(error.code).toBe('invalid_response')
+  })
+
+  test('rejects a malformed conformance response', async () => {
+    const { fetch } = fakeFetch(() => jsonResponse({ data: { kind: 'not-a-conformance-result' } }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const error = await rejection(client.runConformance({ pin: PIN, credential: TEST_CREDENTIAL }))
+
     expect(error.code).toBe('invalid_response')
   })
 })

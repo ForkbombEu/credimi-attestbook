@@ -15,12 +15,15 @@
 
 import type { ZodType } from 'zod'
 
+import { sha256Hex } from '../../registry/digest'
+
 import {
   attestationListResponseSchema,
   captureCorrelationResponseSchema,
   captureExplorerDetailResponseSchema,
   captureExplorerPageSchema,
   compareCaptureRequestSchema,
+  conformanceRunResponseSchema,
   correlateCaptureRequestSchema,
   credentialValidationResponseSchema,
   headlessWalletComparisonResponseSchema,
@@ -33,6 +36,7 @@ import {
 
 import {
   assertPinnedComparison,
+  assertPinnedConformance,
   assertPinnedCorrelation,
   assertPinnedValidation,
   credimiRulebookPinSchema,
@@ -42,6 +46,8 @@ import {
   type CredimiCapturePage,
   type CredimiCaptureQuery,
   type CredimiComparisonInput,
+  type CredimiConformanceInput,
+  type CredimiConformanceResult,
   type CredimiCorrelationInput,
   type CredimiEvidenceCorrelation,
   type CredimiHeadlessWalletComparison,
@@ -524,6 +530,81 @@ export class CredimiAdapter {
     })
     assertPinnedValidation(pin, response.data)
     return response.data
+  }
+
+  /**
+   * Runs one reproducible structural conformance check against the pinned
+   * rulebook version. The result is rejected with `pin_mismatch` unless it
+   * names exactly the pinned rulebook/version/digest/specification/attestation
+   * type, and with `invalid_response` unless its input digests name exactly the
+   * credential and schema documents this request supplied.
+   *
+   * Repeating the same call with the same pinned inputs returns the same
+   * `resultReference`; the caller stores it to detect a later drift. AttestBook
+   * starts no execution and schedules no recurrence.
+   */
+  async runConformance(input: CredimiConformanceInput): Promise<CredimiConformanceResult> {
+    const pin = this.requirePin(input.pin)
+    const credential =
+      typeof input.credential === 'string' ? input.credential : input.credential.value
+    if (typeof credential !== 'string' || credential.trim() === '') {
+      throw invalidRequest('credential must not be empty.')
+    }
+    const body = parseRequest(
+      validateCredentialRequestSchema,
+      {
+        rulebookId: pin.rulebookId,
+        rulebookVersion: pin.version,
+        attestationType: pin.attestationType,
+        credential: input.credential,
+        ...(input.schemaDocuments === undefined
+          ? {}
+          : { schemaDocuments: [...input.schemaDocuments] }),
+      },
+      'conformance run',
+    )
+    const response = await this.requestJson({
+      operation: 'conformance run',
+      method: 'POST',
+      path: `${API_PREFIX}/conformance/runs`,
+      body,
+      schema: conformanceRunResponseSchema,
+      retryable: false,
+    })
+    assertPinnedConformance(pin, response.data)
+    this.assertConformanceInput(input, response.data)
+    return response.data
+  }
+
+  /** Verifies that the result's input identity is exactly what was sent. */
+  private assertConformanceInput(
+    input: CredimiConformanceInput,
+    result: CredimiConformanceResult,
+  ): void {
+    const credential =
+      typeof input.credential === 'string' ? input.credential : input.credential.value
+    const expectedCredentialDigest = sha256Hex(new TextEncoder().encode(credential))
+    if (result.input.credentialDigest !== expectedCredentialDigest) {
+      throw invalidResponse('conformance run', 'the result names a different credential digest')
+    }
+    const expectedFormatHint =
+      typeof input.credential === 'string' ? null : (input.credential.format ?? null)
+    if (result.input.credentialFormatHint !== expectedFormatHint) {
+      throw invalidResponse(
+        'conformance run',
+        'the result names a different credential format hint',
+      )
+    }
+    const expectedSchemaDocuments = (input.schemaDocuments ?? []).map((document) => ({
+      uri: document.uri,
+      contentDigest: sha256Hex(new TextEncoder().encode(document.content)),
+    }))
+    if (JSON.stringify(result.input.schemaDocuments) !== JSON.stringify(expectedSchemaDocuments)) {
+      throw invalidResponse(
+        'conformance run',
+        'the result names different supplied schema documents',
+      )
+    }
   }
 
   /** Lists capture evidence, newest first, with explicit evidence gaps. */

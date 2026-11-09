@@ -94,10 +94,15 @@ the two without a current migrated issue are marked explicitly.
   caller-supplied external wallet observation separated into schema, protocol,
   interoperability and trust groups, explicit unsupported comparison dimensions, and the
   adapter's `compareCapture`, without any wallet orchestration
-  ([`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md), FR-021). Still open:
-  [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51) (reproducible continuous
-  conformance results); AttestBook remains a validation service, not a second orchestration
-  platform.
+  ([`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md), FR-021). #51
+  shipped reproducible continuous-conformance results: a deterministic
+  `attestbook.conformance-result@1` with a canonical-JSON `inputDigest` and stable
+  `resultReference`, stable failure classes, exact version/digest/specification references
+  and explicit non-orchestration/non-conformance claims, exposed by
+  `POST /api/v1/conformance/runs` and the adapter's `runConformance`
+  ([`docs/conformance.md`](conformance.md), FR-022). AttestBook remains a validation
+  service, not a second orchestration platform: external orchestration owns recurrence and
+  run history.
 - Security hardening, performance/caching and ETSI migration or external interoperability
   checks — Phase 6, issues
   [#52](https://github.com/ForkbombEu/credimi-attestbook/issues/52),

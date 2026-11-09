@@ -8,8 +8,9 @@ import slice, SD-JWT VC structural validation with dimension-aware evidence, the
 versioned REST/OpenAPI contract over those services and the standalone UI: a searchable
 rulebook catalog, rulebook detail/version history, a credential validation playground, a
 rulebook draft editor (UI-001/UI-002/UI-005 and the working-copy slice of UI-003), a
-mock-backed capture explorer with pinned-rulebook correlation (UI-006, FR-019) and a
-read-only headless-wallet comparison evidence report (FR-021).
+mock-backed capture explorer with pinned-rulebook correlation (UI-006, FR-019), a
+read-only headless-wallet comparison evidence report (FR-021) and reproducible
+continuous-conformance results with stable result references (FR-022).
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -105,15 +106,20 @@ bun run docs:check    # documentation consistency, plain Node
   mock-backed explorer read model that correlates a captured issued credential with a pinned
   rulebook version; see [`docs/capture.md`](capture.md) §9;
 - `src/integration/credimi/` — the standalone Credimi adapter: rulebook selection,
-  exact-version pinning, version-pinned validation evidence, capture correlation and
-  headless-wallet comparison over the public `/api/v1` API, with typed error codes, bounded
-  timeouts/retries and real-server round-trip tests; see
+  exact-version pinning, version-pinned validation evidence, capture correlation,
+  headless-wallet comparison and reproducible conformance runs over the public `/api/v1`
+  API, with typed error codes, bounded timeouts/retries and real-server round-trip tests; see
   [`docs/credimi-integration.md`](credimi-integration.md);
 - `src/comparison/` — the read-only headless-wallet comparison evidence: a versioned
   `attestbook.headless-wallet-comparison@1` report that links a correlated capture to its
   exact pinned rulebook version/digest, separates the AttestBook schema results from a
   caller-supplied external wallet observation and lists every unsupported dimension
   explicitly; see [`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md);
+- `src/conformance/` — reproducible continuous-conformance results: a deterministic
+  `attestbook.conformance-result@1` with a canonical-JSON `inputDigest`, a content-addressed
+  `resultReference`, stable failure classes and explicit version references, exposed by
+  `POST /api/v1/conformance/runs` without scheduling or persisting a run; see
+  [`docs/conformance.md`](docs/conformance.md);
 - `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
   the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
   routes Hono registered, success/error contract tests for every exposed resource, and
@@ -309,6 +315,20 @@ dimension AttestBook does not execute or cannot establish is explicit in
 wallet is started or observed and no Credimi execution is orchestrated. The contract, bounds
 and non-claims are documented in
 [`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md).
+
+## Reproducible continuous-conformance results
+
+`src/conformance/` and `POST /api/v1/conformance/runs` provide the FR-022 result for
+recurring rulebook checks driven by external orchestration. A run executes the real
+structural engine against one exact pinned rulebook version and returns an
+`attestbook.conformance-result@1`: a canonical-JSON `inputDigest` over the pin, credential
+and supplied schema documents; a content-addressed `resultReference` over that input and the
+structural evidence; stable failure classes; the exact version/digest/specification
+references; and explicit non-claims. Repeating the same pinned run reproduces both digests,
+while a changed credential, schema document, snapshot or evidence changes them. AttestBook
+schedules no recurrence and persists no run, so external orchestration owns the run history.
+See [`docs/conformance.md`](conformance.md) and
+[`docs/credimi-integration.md`](credimi-integration.md) §3.5.
 
 ## Safe URL and JSON import
 

@@ -14,6 +14,7 @@ D-6 (exact-byte digest), D-8 (conservative aggregation), D-9 (vocabulary, not is
 enforcement), D-14 (SD-JWT VC + Ajv) and D-17 (structural scope only).
 **Evidence model:** [`docs/traceability.md`](traceability.md). **Pinned version reads:**
 [`docs/registry.md`](registry.md). **Real libraries:** [`docs/standards-adapter.md`](standards-adapter.md).
+**Reproducible recurring results:** [`docs/conformance.md`](conformance.md) (FR-022).
 
 ## 1. What the engine executes
 

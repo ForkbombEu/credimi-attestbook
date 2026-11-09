@@ -21,6 +21,7 @@ import {
   parseCompareCaptureInput,
   type ComparisonEvidenceSource,
 } from '../comparison'
+import { buildConformanceResult } from '../conformance'
 import { IssuerDiscovery, type IssuerDiscoveryService } from '../discovery'
 import { validateDraftContent } from '../editor'
 import {
@@ -43,7 +44,11 @@ import type {
   RulebookVersionContent,
 } from '../registry/types'
 import { parseRulebookVersionDocument, type RulebookVersionDocument } from '../registry/versioning'
-import { CREDENTIAL_VALIDATION_PATH, type CredentialValidationService } from '../validation'
+import {
+  CREDENTIAL_VALIDATION_PATH,
+  parseValidateCredentialInput,
+  type CredentialValidationService,
+} from '../validation'
 import {
   VERIFIER_CONSTRAINTS_PATH,
   VerifierPolicyResolver,
@@ -58,6 +63,7 @@ import {
   toCaptureCorrelationResource,
   toCaptureExplorerDetailResource,
   toCaptureExplorerPageResource,
+  toConformanceResultResource,
   toDraftRulebookResource,
   toHeadlessWalletComparisonResource,
   toProviderResource,
@@ -108,6 +114,7 @@ export type ApiOperationId =
   | 'discoverIssuer'
   | 'generateIssuerFixture'
   | 'validateCredential'
+  | 'runConformanceCheck'
   | 'listCaptures'
   | 'getCapture'
   | 'validateCapture'
@@ -154,6 +161,7 @@ export interface ApiRouteSpec {
     | 'imports'
     | 'issuers'
     | 'credentials'
+    | 'conformance'
     | 'captures'
     | 'verifiers'
   /** `true` marks a bearer-authenticated write operation. */
@@ -784,6 +792,31 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         status: 200,
         description: 'The dimension-aware validation result.',
         schema: 'CredentialValidationResponse',
+      },
+      ...errors(400, 404, 413, 500, 503),
+    ],
+  },
+  {
+    operationId: 'runConformanceCheck',
+    method: 'post',
+    path: '/api/v1/conformance/runs',
+    summary: 'Run one reproducible structural conformance check',
+    description:
+      'Runs the same pinned structural validation as POST /api/v1/credentials/validate and returns a deterministic attestbook.conformance-result@1: an input digest, a content-addressed result reference, stable failure classes and the exact pinned version/digest the evidence was produced against. Repeating the same pinned inputs produces the same reference; validation identifiers, timestamps and mutable lifecycle metadata are excluded. AttestBook does not schedule, start or observe recurring executions, and a structural outcome is never a standards, cryptographic, trust, protocol or interoperability verdict.',
+    tag: 'conformance',
+    security: false,
+    request: {
+      schema: 'ConformanceRunRequest',
+      mediaType: 'application/json',
+      required: true,
+      description:
+        'Credential, exact pinned rulebook version, attestation type and optional schema documents.',
+    },
+    responses: [
+      {
+        status: 200,
+        description: 'The reproducible conformance result and its stable reference.',
+        schema: 'ConformanceRunResponse',
       },
       ...errors(400, 404, 413, 500, 503),
     ],
@@ -1693,6 +1726,22 @@ function validateCredentialHandler(dependencies: ApiDependencies): ApiHandler {
   }
 }
 
+/**
+ * Runs one structural validation and turns its evidence into a reproducible
+ * conformance result. The operation is read-only: it persists nothing, starts
+ * no execution and schedules no recurrence.
+ */
+function runConformanceCheckHandler(dependencies: ApiDependencies): ApiHandler {
+  return async (context) => {
+    const validation = requireValidation(dependencies)
+    const body = await readJsonBody(context)
+    const request = parseValidateCredentialInput(body)
+    const result = await validation.validate(request)
+    const conformance = buildConformanceResult({ validation: result, request })
+    return context.json({ data: toConformanceResultResource(conformance) }, 200)
+  }
+}
+
 function listCapturesHandler(explorer: CaptureExplorer | undefined): ApiHandler {
   return async (context) => {
     const captures = requireCaptures(explorer)
@@ -1852,6 +1901,7 @@ export function createApiHandlers(
     discoverIssuer: discoverIssuerHandler(issuerDiscovery),
     generateIssuerFixture: generateIssuerFixtureHandler(issuerFixtures),
     validateCredential: validateCredentialHandler(dependencies),
+    runConformanceCheck: runConformanceCheckHandler(dependencies),
     listCaptures: listCapturesHandler(captures),
     getCapture: getCaptureHandler(captures),
     validateCapture: validateCaptureHandler(captures),

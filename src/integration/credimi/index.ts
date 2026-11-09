@@ -26,6 +26,7 @@ export {
 
 export {
   assertPinnedComparison,
+  assertPinnedConformance,
   assertPinnedCorrelation,
   assertPinnedValidation,
   CREDIMI_ADAPTER_CONTRACT_VERSION,
@@ -37,6 +38,8 @@ export {
   type CredimiCaptureQuery,
   type CredimiCaptureSummary,
   type CredimiComparisonInput,
+  type CredimiConformanceInput,
+  type CredimiConformanceResult,
   type CredimiCorrelationInput,
   type CredimiCredentialInput,
   type CredimiEvidenceCorrelation,

@@ -2,10 +2,12 @@
 
 **Status:** Phase 5 implementation for
 [issue #49](https://github.com/ForkbombEu/credimi-attestbook/issues/49) (specification
-FR-020, acceptance criterion AC-15) and [issue #50](https://github.com/ForkbombEu/credimi-attestbook/issues/50)
-(FR-021). It exposes a standalone client and stable contracts for Credimi to select a
-rulebook, pin one exact version, request credential validation, correlate capture evidence
-and compare a headless-wallet capture with an external wallet observation. It adds no Credimi
+FR-020, acceptance criterion AC-15), [issue #50](https://github.com/ForkbombEu/credimi-attestbook/issues/50)
+(FR-021) and [issue #51](https://github.com/ForkbombEu/credimi-attestbook/issues/51) (FR-022).
+It exposes a standalone client and stable contracts for Credimi to select a
+rulebook, pin one exact version, request credential validation, correlate capture evidence,
+compare a headless-wallet capture with an external wallet observation, and run a
+reproducible conformance check with a stable result reference. It adds no Credimi
 runtime dependency, reads no AttestBook database and makes no orchestration, protocol or
 interoperability claim.
 
@@ -16,8 +18,9 @@ interoperability claim.
 [`docs/traceability.md`](traceability.md).
 **Capture evidence:** [`docs/capture.md`](capture.md) §9.
 **Comparison evidence:** [`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md).
-**Related issues:** #51 (reproducible continuous conformance) builds on this slice and is not
-implemented here.
+**Conformance evidence:** [`docs/conformance.md`](conformance.md).
+**Related issues:** #49, #50 and #51 are implemented in this slice's module; no further
+Phase 5 feature is open in this adapter.
 
 ## 1. Purpose and boundaries
 
@@ -29,11 +32,12 @@ Credimi is AttestBook's primary external consumer (spec §12). It must be able t
 4. request credential validation;
 5. retrieve structured results;
 6. associate results with a test execution;
-7. display rulebook conformance evidence; and
-8. keep protocol and interoperability observations separate.
+7. display rulebook conformance evidence;
+8. keep protocol and interoperability observations separate; and
+9. run the same pinned structural check again and compare a stable result reference.
 
-This slice delivers 1–6 through the public HTTP API plus a reference client; displaying the
-evidence (7) remains Credimi's UI, fed by the structured responses. AttestBook does **not**
+This slice delivers 1–6 and 9 through the public HTTP API plus a reference client; displaying
+the evidence (7) remains Credimi's UI, fed by the structured responses. AttestBook does **not**
 become a second orchestration platform:
 
 - AttestBook never queries Credimi, never starts a test execution and never mints a
@@ -114,6 +118,7 @@ JSON; there is no polling, queue or callback.
 | `getCapture(captureId)` | `GET /api/v1/captures/{captureId}` | no | One capture, its redacted projection and linked validation. |
 | `correlateCapture(input)` | `POST /api/v1/captures/{captureId}/validate` | yes | Binds a captured credential to the pinned version and records the result. |
 | `compareCapture(input)` | `POST /api/v1/captures/{captureId}/compare` | no | Read-only headless-wallet comparison evidence: pinned structural results plus an optional external wallet observation. |
+| `runConformance(input)` | `POST /api/v1/conformance/runs` | no | Run the pinned structural validation again and return a reproducible result with a stable reference and failure classification. |
 
 `GET /api/v1/rulebooks` also accepts `status=draft|published|historical`; the other pages are
 bounded by `limit` (1–100, default 50) and `offset` (≥ 0). Successful responses are JSON; the
@@ -255,6 +260,36 @@ correlated, `404` an unknown capture, `400` a malformed observation and `503` an
 capture explorer. The full contract is in
 [`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md).
 
+### 3.5 Running a reproducible conformance check
+
+`POST /api/v1/conformance/runs` takes the same pinned body as credential validation and
+returns an `attestbook.conformance-result@1`:
+
+```json
+{
+  "rulebookId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+  "rulebookVersion": "1.0",
+  "attestationType": "PID",
+  "credential": "<compact SD-JWT VC>",
+  "schemaDocuments": [{ "uri": "https://example.org/schemas/pid.json", "content": "{ ... }" }]
+}
+```
+
+The response carries the exact `pin` (`rulebookId`, `version`, `contentDigest`,
+`specVersion`, `attestationType`, `digestVerified`), the `inputDigest`/`resultReference`
+pair, an `outcome` (`structural_pass`, `structural_fail`, `inconclusive`,
+`evidence_incomplete`, `not_applicable`), stable `failureClasses`, the structural `evidence`
+and explicit non-claims. The raw credential and schema documents are never returned.
+
+The reference is content-addressed over the pinned input and the structural evidence, so a
+later run with the same credential, schema documents and pinned snapshot returns the same
+`resultReference`; a changed credential, schema document, snapshot or evidence returns a
+different one. Credimi stores the reference next to its own run and compares later values
+instead of asking AttestBook for a stored run history. The operation schedules nothing and
+persists nothing. `400` is a malformed body, `404` an unknown pinned selection and `503` an
+unwired validation service. The full determinism scope, failure-class table and non-claims
+are in [`docs/conformance.md`](conformance.md).
+
 ## 4. Failure and timeout handling
 
 The client maps every failure to a stable `CredimiAdapterError.code`; `status` and
@@ -358,12 +393,13 @@ bun run check                     # formatting, lint, typecheck and all tests
 `src/integration/credimi/client.test.ts` exercises the transport boundary with an injected
 `fetch`: configuration bounds, query/path construction, bearer handling, HTTP status mapping,
 non-JSON error bodies, malformed success bodies, the response-size bound, retry bounds and
-the timeout abort, plus direct pin-evidence and comparison verification.
+the timeout abort, plus direct pin-evidence, comparison and conformance verification.
 `src/integration/credimi/server.test.ts` runs the client against the real Hono application
 over a loopback socket and a real migrated SQLite registry, covering the complete selection →
-pin → validation → capture-correlation → headless-wallet-comparison flow, stale-pin
-rejection, an unknown attestation type, a rejected bearer token, a real-socket timeout and an
-unreachable server. No test contacts a live capture component or Credimi.
+pin → validation → capture-correlation → headless-wallet-comparison flow, a repeated
+reproducible conformance run, stale-pin rejection, an unknown attestation type, a rejected
+bearer token, a real-socket timeout and an unreachable server. No test contacts a live
+capture component or Credimi.
 
 ## 7. Limitations and non-claims
 
@@ -385,9 +421,13 @@ unreachable server. No test contacts a live capture component or Credimi.
   read-only projection over a recorded capture correlation and an optional, unverified
   caller-supplied external wallet observation. AttestBook does not start a wallet, observe
   Wallet A or verify the observation, and the report has no interoperability verdict.
-  Reproducible recurring conformance evidence and stable run history remain issue
-  [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51)
-  ([`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md) §8).
+  Reproducible continuous-conformance results are delivered by
+  [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51) as a deterministic,
+  content-addressed result ([`docs/conformance.md`](conformance.md)); AttestBook still does
+  not schedule or persist recurring runs.
+- **No conformance-run store.** `runConformance` recomputes the result on every call and
+  returns a stable reference; Credimi owns the run history and stores the reference next to
+  its own execution.
 - **No pin store.** AttestBook does not persist pins; Credimi owns the pin and its retention.
 - **No live Credimi adapter in this repository.** Credimi's Go integration must implement the
   documented HTTP contract; this repository provides the contract and the tested reference
