@@ -42,6 +42,16 @@ export {
 export { CREDENTIAL_VALIDATION_PATH, type CredentialValidationService } from './service'
 
 export {
+  DEFAULT_SNAPSHOT_CACHE_MAX_BYTES,
+  DEFAULT_SNAPSHOT_CACHE_MAX_ENTRIES,
+  isImmutableRulebookVersion,
+  RulebookSnapshotCache,
+  type CachedRulebookSnapshot,
+  type RulebookSnapshotCacheStats,
+  type SnapshotCacheLimits,
+} from './snapshot-cache'
+
+export {
   VALIDATION_DIMENSIONS,
   VALIDATION_SEVERITIES,
   VALIDATION_STATUSES,

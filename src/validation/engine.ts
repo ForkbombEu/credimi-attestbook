@@ -12,11 +12,7 @@ import { randomUUID } from 'node:crypto'
 import { sha256Hex } from '../registry/digest'
 import { invalidInput, notFound } from '../registry/errors'
 import type { RulebookVersion } from '../registry/types'
-import {
-  RULEBOOK_VERSION_FORMAT,
-  type RulebookVersionDocument,
-  type RulebookVersionSchemaReference,
-} from '../registry/versioning'
+import type { RulebookVersionSchemaReference } from '../registry/versioning'
 import { TS11_ATTESTATION_LOS_VALUES, TS11_BINDING_TYPE_VALUES } from '../standards/profiles'
 
 import { createDimension, dimensionDefinition, limitationsFromDimensions } from './dimensions'
@@ -25,6 +21,16 @@ import { parseValidateCredentialInput } from './request'
 import type { SchemaValidationOutcome } from './schema'
 import { validateSchemaDocuments, type SchemaSandboxLimits } from './schema-sandbox'
 import { parseSdJwtVc, MAX_DISCLOSURES, type ParsedSdJwtVc } from './sd-jwt'
+import {
+  isImmutableRulebookVersion,
+  RulebookSnapshotCache,
+  type CachedRulebookSnapshot,
+} from './snapshot-cache'
+import {
+  parseRulebookSnapshot,
+  type ParsedRulebookSnapshot,
+  type SnapshotAttestation,
+} from './snapshot'
 import { aggregateStatus } from './status'
 import type {
   AttestationEvidence,
@@ -48,89 +54,34 @@ export interface CredentialValidatorOptions {
   readonly generateId?: () => string
   /** Optional sandbox limits; production passes the configured values. */
   readonly sandbox?: SchemaSandboxLimits
-}
-
-interface SnapshotAttestation {
-  readonly name: string
-  readonly attestationLoS: string
-  readonly bindingType: string
-  readonly supportedFormats: readonly string[]
-  readonly schemaReferences: readonly RulebookVersionSchemaReference[]
-}
-
-interface ParsedSnapshot {
-  readonly attestations: readonly SnapshotAttestation[]
+  /**
+   * Bounded cache for immutable (published/historical) parsed snapshots.
+   * Defaults to a cache with the documented limits; pass `false` to disable
+   * caching for a validator instance.
+   */
+  readonly snapshotCache?: RulebookSnapshotCache | false
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((entry) => typeof entry === 'string')
-}
-
-function parseSnapshotReference(value: unknown): RulebookVersionSchemaReference {
-  if (
-    !isRecord(value) ||
-    typeof value.formatIdentifier !== 'string' ||
-    typeof value.uri !== 'string' ||
-    !(value.integrity === null || typeof value.integrity === 'string')
-  ) {
-    throw new Error('the stored rulebook version snapshot has a malformed schema reference')
-  }
-  return {
-    formatIdentifier: value.formatIdentifier,
-    uri: value.uri,
-    integrity: value.integrity,
-  }
-}
-
-function parseSnapshotAttestation(value: unknown): SnapshotAttestation {
-  if (
-    !isRecord(value) ||
-    typeof value.name !== 'string' ||
-    typeof value.attestationLoS !== 'string' ||
-    typeof value.bindingType !== 'string' ||
-    !isStringArray(value.supportedFormats) ||
-    !Array.isArray(value.schemaReferences)
-  ) {
-    throw new Error('the stored rulebook version snapshot has a malformed attestation type')
-  }
-  return {
-    name: value.name,
-    attestationLoS: value.attestationLoS,
-    bindingType: value.bindingType,
-    supportedFormats: value.supportedFormats,
-    schemaReferences: value.schemaReferences.map(parseSnapshotReference),
-  }
-}
-
 /**
- * Parses and checks the stored snapshot bytes against the version metadata.
- * A mismatch means the registry is inconsistent, not that the caller's
- * credential is invalid, so these failures are internal errors.
+ * Proves a cached parsed snapshot still belongs to the version row it is used
+ * for. The digest already identifies the exact bytes; this second check keeps
+ * the version identity explicit for a cache that outlives the registry read.
  */
-function parseSnapshot(bytes: Uint8Array, version: RulebookVersion): ParsedSnapshot {
-  let document: unknown
-  try {
-    document = JSON.parse(Buffer.from(bytes).toString('utf8'))
-  } catch {
-    throw new Error('the stored rulebook version snapshot is not valid JSON')
-  }
-  const candidate = document as Partial<RulebookVersionDocument>
+function assertSnapshotMatchesVersion(
+  cached: CachedRulebookSnapshot,
+  version: RulebookVersion,
+): void {
+  const snapshot = cached.snapshot
   if (
-    !isRecord(document) ||
-    candidate.format !== RULEBOOK_VERSION_FORMAT ||
-    candidate.rulebookId !== version.rulebookId ||
-    candidate.version !== version.version ||
-    candidate.specVersion !== version.specVersion ||
-    !Array.isArray(candidate.attestations)
+    snapshot.rulebookId !== version.rulebookId ||
+    snapshot.version !== version.version ||
+    snapshot.specVersion !== version.specVersion
   ) {
     throw new Error('the stored rulebook version snapshot does not match its version metadata')
-  }
-  return {
-    attestations: candidate.attestations.map(parseSnapshotAttestation),
   }
 }
 
@@ -281,12 +232,17 @@ export class CredentialValidator {
   private readonly now: () => string
   private readonly generateId: () => string
   private readonly sandbox: SchemaSandboxLimits
+  private readonly snapshotCache: RulebookSnapshotCache | null
 
   constructor(options: CredentialValidatorOptions) {
     this.source = options.source
     this.now = options.now ?? (() => new Date().toISOString())
     this.generateId = options.generateId ?? (() => randomUUID())
     this.sandbox = options.sandbox ?? {}
+    this.snapshotCache =
+      options.snapshotCache === false
+        ? null
+        : (options.snapshotCache ?? new RulebookSnapshotCache())
   }
 
   /**
@@ -305,19 +261,34 @@ export class CredentialValidator {
     if (version === null) {
       throw notFound('The rulebook version does not exist.')
     }
-    const content = this.source.getRulebookVersionContent(
-      request.rulebookId,
-      request.rulebookVersion,
-    )
-    if (content === null) {
-      throw notFound('The rulebook version content does not exist.')
+    const cacheable = isImmutableRulebookVersion(version.status)
+    const cached = cacheable ? this.snapshotCache?.get(version.contentDigest) : undefined
+    let snapshot: ParsedRulebookSnapshot
+    if (cached !== undefined) {
+      // Re-verify the cached copy on every run: caching may skip the database
+      // read, never the integrity check or the version-identity check.
+      if (sha256Hex(cached.bytes) !== version.contentDigest) {
+        throw new Error('the stored rulebook version content does not match its recorded digest')
+      }
+      assertSnapshotMatchesVersion(cached, version)
+      snapshot = cached.snapshot
+    } else {
+      const content = this.source.getRulebookVersionContent(
+        request.rulebookId,
+        request.rulebookVersion,
+      )
+      if (content === null) {
+        throw notFound('The rulebook version content does not exist.')
+      }
+      const digest = sha256Hex(content.bytes)
+      if (digest !== version.contentDigest) {
+        throw new Error('the stored rulebook version content does not match its recorded digest')
+      }
+      snapshot = parseRulebookSnapshot(content.bytes, version)
+      if (cacheable) {
+        this.snapshotCache?.set(version.contentDigest, content.bytes, snapshot)
+      }
     }
-    const digest = sha256Hex(content.bytes)
-    if (digest !== version.contentDigest) {
-      throw new Error('the stored rulebook version content does not match its recorded digest')
-    }
-
-    const snapshot = parseSnapshot(content.bytes, version)
     const attestation = snapshot.attestations.find(
       (candidate) => candidate.name === request.attestationType,
     )
@@ -714,7 +685,7 @@ export class CredentialValidator {
         id: rulebook.id,
         name: rulebook.name,
         version: version.version,
-        digest,
+        digest: version.contentDigest,
         digestVerified: true,
         specVersion: version.specVersion,
         status: version.status,

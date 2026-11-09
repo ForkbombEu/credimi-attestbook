@@ -9,6 +9,10 @@ export interface AppConfig {
   readonly schemaSandboxMaxRssMb: number
   /** Maximum number of concurrent schema-evaluation sandbox children. */
   readonly schemaSandboxConcurrency: number
+  /** Maximum number of parsed immutable rulebook snapshots cached in-process. */
+  readonly validationCacheMaxEntries: number
+  /** Maximum total snapshot bytes cached in-process (MiB). */
+  readonly validationCacheMaxMb: number
 }
 
 export const DEFAULT_HOSTNAME = '127.0.0.1'
@@ -17,6 +21,8 @@ export const DEFAULT_DATABASE_PATH = 'attestbook.sqlite'
 export const DEFAULT_SCHEMA_SANDBOX_TIMEOUT_MS = 2_000
 export const DEFAULT_SCHEMA_SANDBOX_MAX_RSS_MB = 256
 export const DEFAULT_SCHEMA_SANDBOX_CONCURRENCY = 2
+export const DEFAULT_VALIDATION_CACHE_MAX_ENTRIES = 64
+export const DEFAULT_VALIDATION_CACHE_MAX_MB = 16
 
 const PORT_PATTERN = /^[1-9]\d*$/
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/
@@ -77,6 +83,16 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): A
       env,
       'SCHEMA_SANDBOX_CONCURRENCY',
       DEFAULT_SCHEMA_SANDBOX_CONCURRENCY,
+    ),
+    validationCacheMaxEntries: positiveInteger(
+      env,
+      'VALIDATION_CACHE_MAX_ENTRIES',
+      DEFAULT_VALIDATION_CACHE_MAX_ENTRIES,
+    ),
+    validationCacheMaxMb: positiveInteger(
+      env,
+      'VALIDATION_CACHE_MAX_MB',
+      DEFAULT_VALIDATION_CACHE_MAX_MB,
     ),
   }
 }

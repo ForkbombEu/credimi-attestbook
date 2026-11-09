@@ -402,14 +402,16 @@ exercised on every pull request.
 
 ## Configuration
 
-| Variable                     | Default             | Meaning                                                             |
-| ---------------------------- | ------------------- | ------------------------------------------------------------------- |
-| `PORT`                       | `3000`              | Listener port; an integer between 1 and 65535                       |
-| `HOST`                       | `127.0.0.1`         | Listener hostname or address                                        |
-| `DATABASE_PATH`              | `attestbook.sqlite` | SQLite file opened at startup; `:memory:` is accepted for local use |
-| `SCHEMA_SANDBOX_TIMEOUT_MS`  | `2000`              | Hard wall-clock limit for one schema-evaluation child               |
-| `SCHEMA_SANDBOX_MAX_RSS_MB`  | `256`               | RSS limit for one schema-evaluation child                           |
-| `SCHEMA_SANDBOX_CONCURRENCY` | `2`                 | Maximum concurrent schema-evaluation children                       |
+| Variable                       | Default             | Meaning                                                             |
+| ------------------------------ | ------------------- | ------------------------------------------------------------------- |
+| `PORT`                         | `3000`              | Listener port; an integer between 1 and 65535                       |
+| `HOST`                         | `127.0.0.1`         | Listener hostname or address                                        |
+| `DATABASE_PATH`                | `attestbook.sqlite` | SQLite file opened at startup; `:memory:` is accepted for local use |
+| `SCHEMA_SANDBOX_TIMEOUT_MS`    | `2000`              | Hard wall-clock limit for one schema-evaluation child               |
+| `SCHEMA_SANDBOX_MAX_RSS_MB`    | `256`               | RSS limit for one schema-evaluation child                           |
+| `SCHEMA_SANDBOX_CONCURRENCY`   | `2`                 | Maximum concurrent schema-evaluation children                       |
+| `VALIDATION_CACHE_MAX_ENTRIES` | `64`                | Maximum parsed immutable rulebook snapshots cached in-process       |
+| `VALIDATION_CACHE_MAX_MB`      | `16`                | Maximum snapshot bytes cached in-process                            |
 
 Local development binds loopback only. The Docker image and `compose.yaml` set
 `HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup
