@@ -26,6 +26,7 @@ export {
 export {
   hashCaptureCredential,
   isCaptureCredentialHash,
+  MAX_CAPTURE_CREDENTIAL_LENGTH,
   verifyCaptureCredential,
   verifyCaptureCredentialHash,
 } from './credentials'
@@ -34,6 +35,7 @@ export { mockCaptureEnvelopes } from './fixtures'
 
 export {
   CAPTURE_MOCK_FAULTS,
+  DEFAULT_MAX_ACCEPTED_CAPTURES,
   DEFAULT_MOCK_BATCH_SIZE,
   MockCaptureSource,
   type CaptureMockFault,

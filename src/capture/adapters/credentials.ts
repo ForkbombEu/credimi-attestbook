@@ -11,6 +11,9 @@ import { timingSafeEqual } from 'node:crypto'
 
 import { SHA256_HEX_PATTERN, sha256Hex } from '../../registry/digest'
 
+/** Maximum accepted length of a presented bearer credential, in characters. */
+export const MAX_CAPTURE_CREDENTIAL_LENGTH = 4_096
+
 /** Returns the lowercase hexadecimal SHA-256 of a presented credential. */
 export function hashCaptureCredential(secret: string): string {
   return sha256Hex(new TextEncoder().encode(secret))
@@ -55,7 +58,12 @@ export function verifyCaptureCredential(
   presented: unknown,
   acceptedHashes: readonly string[],
 ): boolean {
-  if (typeof presented !== 'string' || presented === '' || acceptedHashes.length === 0) {
+  if (
+    typeof presented !== 'string' ||
+    presented === '' ||
+    presented.length > MAX_CAPTURE_CREDENTIAL_LENGTH ||
+    acceptedHashes.length === 0
+  ) {
     return false
   }
   return verifyCaptureCredentialHash(hashCaptureCredential(presented), acceptedHashes)

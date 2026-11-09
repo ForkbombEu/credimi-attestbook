@@ -62,7 +62,10 @@ export interface CapturePushSubmission {
 export interface CapturePushResult {
   readonly source: CaptureSource
   readonly normalized: NormalizedCaptureArtifact
-  /** True when the same `captureId` and artifact bytes were already accepted. */
+  /**
+   * True when the same `captureId` was already accepted with byte-identical
+   * submission bytes.
+   */
   readonly duplicate: boolean
   /** AttestBook receipt time of this push, RFC 3339 UTC. */
   readonly receivedAt: string

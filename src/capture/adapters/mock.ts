@@ -12,12 +12,14 @@
 // `faults`/`simulateFault` exists only to exercise transport-error handling
 // deterministically.
 
+import { sha256Hex } from '../../registry/digest'
 import { resolveCaptureLimits, type CaptureLimitOverrides, type CaptureLimits } from '../limits'
 import { CaptureNormalizer } from '../normalize'
 import type { CaptureSourceComponent } from '../types'
 import {
   hashCaptureCredential,
   isCaptureCredentialHash,
+  MAX_CAPTURE_CREDENTIAL_LENGTH,
   verifyCaptureCredential,
   verifyCaptureCredentialHash,
 } from './credentials'
@@ -35,6 +37,9 @@ import type {
 
 /** Default page size when a pull request does not name one. */
 export const DEFAULT_MOCK_BATCH_SIZE = 10
+
+/** Default bound on the in-memory idempotency store of one mock source. */
+export const DEFAULT_MAX_ACCEPTED_CAPTURES = 1_024
 
 /**
  * Disturbances the mock transport can simulate. They exist so transport-error
@@ -81,6 +86,8 @@ export interface MockCaptureSourceOptions {
   readonly envelopes?: readonly unknown[]
   /** Maximum page size a pull may request; defaults to 10. */
   readonly maxBatchSize?: number
+  /** Bound on the in-memory idempotency store; defaults to 1024 entries. */
+  readonly maxAcceptedCaptures?: number
   readonly limits?: CaptureLimitOverrides
   /** Clock for `receivedAt` and normalization provenance; injectable for tests. */
   readonly now?: () => Date
@@ -160,8 +167,9 @@ export class MockCaptureSource implements CapturePullAdapter, CapturePushAdapter
   private readonly acceptedCredentialHashes: readonly string[]
   private readonly pullCredentialHash: string | null
   private readonly maxBatchSize: number
+  private readonly maxAcceptedCaptures: number
   private readonly faults: CaptureMockFault[]
-  /** Idempotency state: capture id to the accepted artifact digest. */
+  /** Idempotency state: capture id to the SHA-256 of the accepted submission bytes. */
   private readonly acceptedCaptures = new Map<string, string>()
   private faultIndex = 0
 
@@ -176,16 +184,29 @@ export class MockCaptureSource implements CapturePullAdapter, CapturePushAdapter
     if (!Number.isSafeInteger(maxBatchSize) || maxBatchSize < 1) {
       throw new RangeError('the mock batch size must be an integer >= 1')
     }
+    const maxAcceptedCaptures = options.maxAcceptedCaptures ?? DEFAULT_MAX_ACCEPTED_CAPTURES
+    if (!Number.isSafeInteger(maxAcceptedCaptures) || maxAcceptedCaptures < 1) {
+      throw new RangeError('the mock accepted-capture limit must be an integer >= 1')
+    }
     const limits: CaptureLimits = resolveCaptureLimits(options.limits)
     this.now = options.now ?? (() => new Date())
     this.normalizer = new CaptureNormalizer({ limits, now: this.now })
-    this.envelopes = [...(options.envelopes ?? mockCaptureEnvelopes(options.component))]
+    // Clone the caller's fixtures so a later mutation cannot invalidate the
+    // construction-time check or change what this source serves.
+    this.envelopes = structuredClone(options.envelopes ?? mockCaptureEnvelopes(options.component))
     // Fail fast when a configured fixture does not normalize: the mock must
     // never serve evidence the real pipeline would reject.
     for (const envelope of this.envelopes) {
       this.normalizer.normalize(envelope)
     }
     this.acceptedCredentialHashes = [...acceptedCredentialHashes]
+    if (
+      options.pullCredential !== undefined &&
+      options.pullCredential !== null &&
+      options.pullCredential.length > MAX_CAPTURE_CREDENTIAL_LENGTH
+    ) {
+      throw new RangeError('the pull credential is longer than the supported maximum')
+    }
     this.pullCredentialHash =
       options.pullCredential === undefined ||
       options.pullCredential === null ||
@@ -193,6 +214,7 @@ export class MockCaptureSource implements CapturePullAdapter, CapturePushAdapter
         ? null
         : hashCaptureCredential(options.pullCredential)
     this.maxBatchSize = maxBatchSize
+    this.maxAcceptedCaptures = maxAcceptedCaptures
     const faults = options.faults ?? []
     for (const fault of faults) {
       if (!CAPTURE_MOCK_FAULTS.includes(fault)) {
@@ -259,18 +281,28 @@ export class MockCaptureSource implements CapturePullAdapter, CapturePushAdapter
       )
     }
     const captureId = normalized.envelope.captureId
-    const digest = normalized.envelope.integrity.digest
+    // Idempotency is over the exact submitted bytes, not just the artifact
+    // digest: a changed correlation field or reference is a different capture
+    // submission under the same identifier and must conflict.
+    const fingerprint = sha256Hex(submission.bytes)
     const previous = this.acceptedCaptures.get(captureId)
-    if (previous !== undefined && previous !== digest) {
+    if (previous !== undefined && previous !== fingerprint) {
       throw captureAdapterError(
         'duplicate_conflict',
-        'the capture identifier was already accepted with a different artifact digest',
+        'the capture identifier was already accepted with different submission bytes',
       )
     }
     const duplicate = previous !== undefined
     if (!duplicate) {
-      // Only the idempotency key is retained; raw artifact bytes are not.
-      this.acceptedCaptures.set(captureId, digest)
+      if (this.acceptedCaptures.size >= this.maxAcceptedCaptures) {
+        throw captureAdapterError(
+          'capture_store_full',
+          'the capture source accepted-capture store is full',
+        )
+      }
+      // Only the idempotency key and the submission hash are retained; raw
+      // submission and artifact bytes are not.
+      this.acceptedCaptures.set(captureId, fingerprint)
     }
     return {
       source: this.source,

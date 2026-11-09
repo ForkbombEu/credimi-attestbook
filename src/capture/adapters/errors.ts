@@ -17,6 +17,7 @@ export type CaptureAdapterErrorCode =
   | 'response_too_large'
   | 'cursor_expired'
   | 'duplicate_conflict'
+  | 'capture_store_full'
 
 /** A safe capture transport, authorization or idempotency failure. */
 export class CaptureAdapterError extends Error {

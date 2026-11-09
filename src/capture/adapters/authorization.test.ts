@@ -11,6 +11,7 @@ import { isCaptureError } from '../errors'
 import {
   hashCaptureCredential,
   isCaptureCredentialHash,
+  MAX_CAPTURE_CREDENTIAL_LENGTH,
   verifyCaptureCredential,
   verifyCaptureCredentialHash,
 } from './credentials'
@@ -95,6 +96,21 @@ describe('credential primitives', () => {
     expect(verifyCaptureCredentialHash(ISSUER_TOKEN, [ISSUER_HASH])).toBe(false)
     expect(verifyCaptureCredentialHash(null, [ISSUER_HASH])).toBe(false)
     expect(verifyCaptureCredentialHash(ISSUER_HASH, [])).toBe(false)
+  })
+
+  test('bounds the presented credential length before hashing', () => {
+    const atLimit = 'a'.repeat(MAX_CAPTURE_CREDENTIAL_LENGTH)
+    const overLimit = 'a'.repeat(MAX_CAPTURE_CREDENTIAL_LENGTH + 1)
+    expect(verifyCaptureCredential(atLimit, [hashCaptureCredential(atLimit)])).toBe(true)
+    expect(verifyCaptureCredential(overLimit, [hashCaptureCredential(overLimit)])).toBe(false)
+    expect(
+      () =>
+        new MockCaptureSource({
+          component: 'capture-issuer',
+          acceptedCredentialHashes: [],
+          pullCredential: overLimit,
+        }),
+    ).toThrow(RangeError)
   })
 
   test('a raw credential is rejected as a configured hash', () => {

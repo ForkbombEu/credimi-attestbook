@@ -53,8 +53,8 @@ Implemented by #47 (section 7):
   time, failing closed, with missing and unknown credentials indistinguishable;
 - stable transport, authorization and idempotency failure codes, with simulated transport
   faults for deterministic tests;
-- pull pagination with opaque cursors and a bounded page size, and push idempotency by
-  `captureId` that retains only the accepted artifact digest.
+- pull pagination with opaque cursors and a bounded page size, and push idempotency over the
+  exact submitted bytes that retains only the accepted submission hash.
 
 Deliberately **not** implemented in #46 or #47:
 
@@ -240,18 +240,23 @@ Adapter behaviour:
   AttestBook holds for the source, whose hash the mock retains instead of the raw value. Both
   fail closed when no hash is configured, compare in constant time through the credential
   hash, and answer missing and unknown credentials with the same `unauthorized` code and
-  message, so there is no credential-validity oracle. An
-  authenticated push is additionally scoped to the adapter's capture component: an artifact
-  whose `sourceComponent` differs is rejected as `forbidden`; another source's credential is
-  simply `unauthorized`.
+  message, so there is no credential-validity oracle. A presented credential longer than
+  4,096 characters is rejected before hashing. An authenticated push is additionally scoped
+  to the adapter's capture component: an artifact whose `sourceComponent` differs is rejected
+  as `forbidden`; another source's credential is simply `unauthorized`.
 - **Pull paging.** `nextCursor` is opaque and only valid for the source that issued it.
   Invalid, stale or foreign cursors are `cursor_expired`. A request may ask for fewer
   artifacts, but never more than the configured `maxBatchSize`; a non-positive or
   non-integer `maxArtifacts` is `invalid_request`.
-- **Push idempotency.** Re-submitting the same `captureId` with the same artifact digest
-  returns the normalized result with `duplicate: true`. The same `captureId` with different
-  bytes is `duplicate_conflict`. The mock keeps only the capture id and digest in memory; raw
-  artifact bytes are not retained. A real adapter must persist idempotency keys.
+- **Push idempotency.** The fingerprint is the SHA-256 of the exact submitted bytes,
+  consistent with the repository's exact-bytes digest decision. Re-submitting the same
+  `captureId` with byte-identical bytes returns the normalized result with `duplicate: true`.
+  The same `captureId` with any byte difference — an envelope field such as `correlationId`,
+  `testExecutionRef` or `capturedAt`, an `artifactRef`, or the artifact itself — is
+  `duplicate_conflict`. The mock keeps only the capture id and that hash in memory, bounded by
+  `maxAcceptedCaptures` (default 1024); a full store rejects a new capture with
+  `capture_store_full` instead of growing without limit. Raw submission and artifact bytes
+  are not retained. A real adapter must persist idempotency keys.
 - **Transport errors.** `source_unavailable`, `source_timeout`, `invalid_source_response` and
   `response_too_large` are stable adapter codes. The mock reproduces each with a queued
   simulation fault (`faults` or `simulateFault`), which exists for deterministic tests and is

@@ -156,6 +156,77 @@ describe('mock capture push adapter', () => {
     expect(repeat.normalized.envelope.captureId).toBe(first.normalized.envelope.captureId)
   })
 
+  test('rejects a resubmission that changes only correlation fields', async () => {
+    const adapter = source('capture-issuer')
+    const envelope = mockCaptureEnvelopes('capture-issuer')[2]
+    if (envelope === undefined) {
+      throw new Error('expected the issued-credential fixture')
+    }
+    await adapter.push({
+      authorization: TOKEN,
+      mediaType: 'application/json',
+      bytes: envelopeBytes(envelope),
+    })
+
+    const correlationChanged = structuredClone(envelope)
+    correlationChanged.correlationId = 'mock-correlation-other'
+    await expectAdapterError(
+      () =>
+        adapter.push({
+          authorization: TOKEN,
+          mediaType: 'application/json',
+          bytes: envelopeBytes(correlationChanged),
+        }),
+      'duplicate_conflict',
+    )
+
+    const executionChanged = structuredClone(envelope)
+    executionChanged.testExecutionRef = 'mock-execution-other'
+    await expectAdapterError(
+      () =>
+        adapter.push({
+          authorization: TOKEN,
+          mediaType: 'application/json',
+          bytes: envelopeBytes(executionChanged),
+        }),
+      'duplicate_conflict',
+    )
+
+    // A rejected conflict must not overwrite the accepted submission.
+    const repeat = await adapter.push({
+      authorization: TOKEN,
+      mediaType: 'application/json',
+      bytes: envelopeBytes(envelope),
+    })
+    expect(repeat.duplicate).toBe(true)
+  })
+
+  test('rejects a resubmission that changes only an external reference', async () => {
+    const adapter = source('capture-issuer')
+    const envelope = mockCaptureEnvelopes('capture-issuer')[0]
+    if (envelope === undefined) {
+      throw new Error('expected the issuer-metadata fixture')
+    }
+    await adapter.push({
+      authorization: TOKEN,
+      mediaType: 'application/json',
+      bytes: envelopeBytes(envelope),
+    })
+
+    const referenceChanged = structuredClone(envelope)
+    const reference = referenceChanged.artifactRef as Record<string, unknown>
+    reference.uri = 'https://artifacts.example.test/mock/other.json'
+    await expectAdapterError(
+      () =>
+        adapter.push({
+          authorization: TOKEN,
+          mediaType: 'application/json',
+          bytes: envelopeBytes(referenceChanged),
+        }),
+      'duplicate_conflict',
+    )
+  })
+
   test('rejects a resubmission of the same captureId with different bytes', async () => {
     const adapter = source('capture-issuer')
     const envelope = mockCaptureEnvelopes('capture-issuer')[2]
@@ -220,6 +291,49 @@ describe('mock capture push adapter', () => {
       return
     }
     throw new Error('expected the malformed submission to be rejected')
+  })
+
+  test('bounds the in-memory idempotency store without losing stored captures', async () => {
+    const adapter = source('capture-issuer', { maxAcceptedCaptures: 1 })
+    const first = mockCaptureEnvelopes('capture-issuer')[0]
+    const second = mockCaptureEnvelopes('capture-issuer')[1]
+    if (first === undefined || second === undefined) {
+      throw new Error('expected the issuer-metadata and credential-offer fixtures')
+    }
+    await adapter.push({
+      authorization: TOKEN,
+      mediaType: 'application/json',
+      bytes: envelopeBytes(first),
+    })
+    await expectAdapterError(
+      () =>
+        adapter.push({
+          authorization: TOKEN,
+          mediaType: 'application/json',
+          bytes: envelopeBytes(second),
+        }),
+      'capture_store_full',
+    )
+    const repeat = await adapter.push({
+      authorization: TOKEN,
+      mediaType: 'application/json',
+      bytes: envelopeBytes(first),
+    })
+    expect(repeat.duplicate).toBe(true)
+  })
+
+  test('clones configured fixtures so later caller mutations do not change them', async () => {
+    const envelopes = mockCaptureEnvelopes('capture-issuer')
+    const adapter = source('capture-issuer', { envelopes })
+    const original = envelopes[0]
+    if (original === undefined) {
+      throw new Error('expected the issuer-metadata fixture')
+    }
+    const originalCaptureId = String(original.captureId)
+    original.captureId = 'mutated-after-construction'
+
+    const { artifacts } = await adapter.pull({ maxArtifacts: 10 })
+    expect(artifacts[0]?.envelope.captureId).toBe(originalCaptureId)
   })
 
   test('rejects an invalid configured fixture at construction', () => {
