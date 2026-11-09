@@ -178,6 +178,11 @@ export interface ConformanceResult {
     readonly digestAlgorithm: typeof CONFORMANCE_DIGEST_ALGORITHM
     readonly referenceScope: typeof CONFORMANCE_REFERENCE_SCOPE
     readonly statusTaxonomy: 'FR-012'
+    /** Build identities, outside the reference payload, for drift triage. */
+    readonly engine: {
+      readonly attestbook: string
+      readonly owfSchema: string
+    }
   }
   /** Explicit non-claims of the report. */
   readonly nonClaims: {

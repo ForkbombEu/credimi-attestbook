@@ -123,6 +123,15 @@ function invalidRequest(message: string): CredimiAdapterError {
   return new CredimiAdapterError('invalid_request', message)
 }
 
+/**
+ * Locale-independent UTF-16 code-unit order. It must match the server's
+ * `compareCodeUnits` in `src/import/identity.ts`, which orders the schema
+ * documents in the conformance input identity.
+ */
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
 function invalidResponse(operation: string, message: string): CredimiAdapterError {
   return new CredimiAdapterError(
     'invalid_response',
@@ -603,7 +612,7 @@ export class CredimiAdapter {
         uri: document.uri.trim(),
         contentDigest: sha256Hex(new TextEncoder().encode(document.content)),
       }))
-      .sort((left, right) => left.uri.localeCompare(right.uri))
+      .sort((left, right) => compareCodeUnits(left.uri, right.uri))
     const actualSchemaDocuments = result.input.schemaDocuments
     if (actualSchemaDocuments.length !== expectedSchemaDocuments.length) {
       throw invalidResponse(

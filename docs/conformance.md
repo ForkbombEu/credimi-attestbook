@@ -80,11 +80,11 @@ The response is `{ "data": <attestbook.conformance-result@1> }`:
 | `deterministic` | `true` only when no runtime condition cut the run short; otherwise `false`, and the result must be retried before it is compared with an earlier run. |
 | `environmentConditions` | Distinct sorted finding codes that show a runtime condition cut the run short, for example `schema_sandbox_busy`, `schema_sandbox_unavailable`, `schema_evaluation_timeout`, `schema_evaluation_memory_exceeded`, `schema_evaluation_output_exceeded` or `schema_evaluation_failed`. Empty for a deterministic run. |
 | `pin` | `rulebookId`, `version`, `contentDigest`, `specVersion`, `attestationType` and `digestVerified: true`. |
-| `input` | `credentialDigest`, the optional `credentialFormatHint`, the supplied `schemaDocuments` (`uri` + `contentDigest`, sorted by URI) and an `inputDigest`. No raw credential or schema document is returned. |
+| `input` | `credentialDigest`, the optional `credentialFormatHint`, the supplied `schemaDocuments` (`uri` + `contentDigest`, sorted by URI in UTF-16 code-unit order, locale-independent) and an `inputDigest`. No raw credential or schema document is returned. |
 | `outcome` | One of `structural_pass`, `structural_fail`, `inconclusive`, `evidence_incomplete`, `not_applicable`. A run with an environment condition is `structural_fail` when the structural aggregate is `FAIL`, otherwise `inconclusive`. |
 | `failureClasses` | Stable failure classes for failed dimensions, each with its dimension and distinct `error` finding codes (sorted). |
 | `evidence` | `overallStatus`, the non-sensitive credential facts, the attestation evidence, schema references, the eight `dimensions` with their findings and evidence, flattened `violations` and explicit `limitations`. |
-| `references` | Canonicalization (`attestbook.stable-json@1`), digest algorithm (`sha256`), reference scope and the FR-012 status taxonomy. |
+| `references` | Canonicalization (`attestbook.stable-json@1`), digest algorithm (`sha256`), reference scope, the FR-012 status taxonomy and the `engine` build versions (AttestBook package and the pinned OWF schema package), which are outside the reference payload. |
 | `nonClaims` | Explicit `false` values for cryptographic verification, issuer trust, protocol conformance, interoperability, standards conformance and scheduled recurrence. |
 | `limitations` | Static limitations of the result. |
 
@@ -104,9 +104,12 @@ evidence.
   schemaDocuments: [{ uri, contentDigest }] }
 ```
 
-The supplied `schemaDocuments` are sorted by URI before digesting, because the engine matches
-them by URI and rejects duplicate URIs; a different request order therefore does not change
-the input identity.
+The supplied `schemaDocuments` are sorted by URI in UTF-16 code-unit order
+(locale-independent) before digesting, because the engine matches them by URI and rejects
+duplicate URIs; a different request order therefore does not change the input identity. The
+ordering uses the same comparator as the canonical object-key ordering, never
+`localeCompare`, so a server or verifier under a different locale/ICU build computes the same
+digest.
 
 `resultReference` is SHA-256 over the canonical JSON of:
 
@@ -208,10 +211,12 @@ access.
 
 - `src/conformance/result.test.ts` — identical results across repeated runs and across
   validation identifiers/timestamps/lifecycle metadata; reference changes on credential,
-  schema-document or evidence changes; schema-document order independence; every outcome
-  mapping; every failure class; a sandbox runtime condition reported as non-deterministic;
-  explicit pin, references and non-claims; no credential or schema-document text in the
-  result; refusal of evidence that does not name the requested pin.
+  schema-document or evidence changes; code-unit schema-document order independence; the
+  documented input-digest and result-reference formulas recomputed from a result; every
+  outcome mapping; every failure class; a sandbox runtime condition reported as
+  non-deterministic; explicit pin, references/engine versions and non-claims; no credential or
+  schema-document text in the result; refusal of evidence that does not name the requested
+  pin.
 - `src/api/conformance.test.ts` — the real Hono application, a real migrated SQLite registry
   and the real structural engine with a genuinely signed SD-JWT VC: two byte-identical runs,
   changed-input references, a real `FAIL` classification (`missing_key_binding`), a
@@ -238,7 +243,9 @@ access.
   conformance and interoperability are not executed and are never inferred.
 - A changed validation engine or data set can change the evidence and therefore the result
   reference for the same input; this is intentional and is why the reference is
-  content-addressed over the evidence.
+  content-addressed over the evidence. `references.engine` names the AttestBook package
+  version and the pinned OWF schema package version outside the reference payload, so an
+  orchestrator can tell an engine upgrade from input drift.
 - Capture evidence remains mock-backed and in memory for the server process; continuous
   conformance runs against captured artifacts are not persisted and no live capture
   component is integrated.

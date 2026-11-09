@@ -12,7 +12,10 @@
 // the same digest and reference. The module performs no I/O, starts no
 // execution, schedules nothing and contacts no external orchestration platform.
 
-import { stableJson } from '../import/identity'
+import owfSchemaPackage from '@owf/eudi-attestation-schema/package.json'
+
+import applicationPackage from '../../package.json'
+import { compareCodeUnits, stableJson } from '../import/identity'
 import { sha256Hex } from '../registry/digest'
 import type {
   CredentialValidationResult,
@@ -168,7 +171,7 @@ function buildInput(pin: ConformancePin, request: ValidateCredentialInput): Conf
       uri: document.uri,
       contentDigest: sha256Text(document.content),
     }))
-    .sort((left, right) => left.uri.localeCompare(right.uri))
+    .sort((left, right) => compareCodeUnits(left.uri, right.uri))
   const credentialDigest = sha256Text(conformanceCredentialText(request))
   const credentialFormatHint = conformanceCredentialFormatHint(request)
   const inputDigest = sha256Text(
@@ -264,6 +267,10 @@ export function buildConformanceResult(input: BuildConformanceResultInput): Conf
       digestAlgorithm: CONFORMANCE_DIGEST_ALGORITHM,
       referenceScope: CONFORMANCE_REFERENCE_SCOPE,
       statusTaxonomy: 'FR-012',
+      engine: {
+        attestbook: applicationPackage.version,
+        owfSchema: owfSchemaPackage.version,
+      },
     },
     nonClaims: {
       cryptographicVerification: false,

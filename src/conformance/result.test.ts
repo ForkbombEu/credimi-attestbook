@@ -8,12 +8,15 @@
 
 import { describe, expect, test } from 'bun:test'
 
+import applicationPackage from '../../package.json'
+import { stableJson } from '../import/identity'
 import type { ValidationFinding } from '../validation'
 
 import {
   buildConformanceResult,
   conformanceOutcome,
   CONFORMANCE_RESULT_LIMITATIONS,
+  sha256Text,
 } from './result'
 import {
   conformanceRequest,
@@ -76,22 +79,54 @@ describe('reproducible conformance result', () => {
     const first = conformanceResult({
       schemaDocuments: [
         { uri: 'https://example.org/schemas/a.json', content: '{"type":"object"}' },
-        { uri: 'https://example.org/schemas/b.json', content: '{"type":"object"}' },
+        { uri: 'https://example.org/schemas/B.json', content: '{"type":"object"}' },
       ],
     })
     const second = conformanceResult({
       schemaDocuments: [
-        { uri: 'https://example.org/schemas/b.json', content: '{"type":"object"}' },
+        { uri: 'https://example.org/schemas/B.json', content: '{"type":"object"}' },
         { uri: 'https://example.org/schemas/a.json', content: '{"type":"object"}' },
       ],
     })
 
+    // UTF-16 code-unit order: uppercase 'B' sorts before lowercase 'a'.
     expect(first.input.schemaDocuments.map((document) => document.uri)).toEqual([
+      'https://example.org/schemas/B.json',
       'https://example.org/schemas/a.json',
-      'https://example.org/schemas/b.json',
     ])
     expect(second.input.inputDigest).toBe(first.input.inputDigest)
     expect(second.resultReference).toBe(first.resultReference)
+  })
+
+  test('recomputes the documented input digest and result reference', () => {
+    const result = conformanceResult()
+    const inputPayload = {
+      format: 'attestbook.conformance-input@1',
+      pin: {
+        rulebookId: result.pin.rulebookId,
+        version: result.pin.version,
+        contentDigest: result.pin.contentDigest,
+        specVersion: result.pin.specVersion,
+        attestationType: result.pin.attestationType,
+      },
+      credentialDigest: result.input.credentialDigest,
+      credentialFormatHint: result.input.credentialFormatHint,
+      schemaDocuments: result.input.schemaDocuments,
+    }
+    expect(sha256Text(stableJson(inputPayload))).toBe(result.input.inputDigest)
+
+    const referencePayload = {
+      format: 'attestbook.conformance-reference@1',
+      contractVersion: 1,
+      pin: result.pin,
+      input: result.input,
+      deterministic: result.deterministic,
+      environmentConditions: result.environmentConditions,
+      outcome: result.outcome,
+      evidence: result.evidence,
+      failureClasses: result.failureClasses,
+    }
+    expect(sha256Text(stableJson(referencePayload))).toBe(result.resultReference)
   })
 
   test('changes the reference when the same input produces different evidence', () => {
@@ -197,6 +232,10 @@ describe('reproducible conformance result', () => {
       digestAlgorithm: 'sha256',
       referenceScope: 'pin+input+evidence+failure-classification',
       statusTaxonomy: 'FR-012',
+      engine: {
+        attestbook: applicationPackage.version,
+        owfSchema: '0.5.4',
+      },
     })
     expect(result.nonClaims).toEqual({
       cryptographicVerification: false,

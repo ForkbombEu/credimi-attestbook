@@ -92,6 +92,16 @@ export function stableJson(value: unknown): string {
   return JSON.stringify(canonicalize(value))
 }
 
+/**
+ * Locale-independent UTF-16 code-unit order, the same order `canonicalize`
+ * uses for object keys. A digest or reference that depends on text ordering
+ * must use this comparator, never `localeCompare`, which depends on the
+ * runtime's default locale and ICU build.
+ */
+export function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
+}
+
 /** The stable source identity used to key imported entries. */
 export function importSourceIdentity(source: ImportSourceInfo): string {
   if (source.adapter === 'json') {

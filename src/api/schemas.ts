@@ -832,6 +832,10 @@ export const conformanceResultSchema = z.object({
     digestAlgorithm: z.literal(CONFORMANCE_DIGEST_ALGORITHM),
     referenceScope: z.literal(CONFORMANCE_REFERENCE_SCOPE),
     statusTaxonomy: z.literal('FR-012'),
+    engine: z.object({
+      attestbook: z.string(),
+      owfSchema: z.string(),
+    }),
   }),
   nonClaims: z.object({
     cryptographicVerification: z.literal(false),

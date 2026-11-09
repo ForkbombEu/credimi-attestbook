@@ -287,7 +287,8 @@ later run with the same credential, schema documents and pinned snapshot returns
 `resultReference`; a changed credential, schema document, snapshot or evidence returns a
 different one. The adapter trims an explicit format hint and schema URIs like the server and
 compares the input identity by URI and digest rather than request order. Supplied schema
-documents are sorted by URI in the identity. A run cut short by a runtime condition carries
+documents are sorted by URI in UTF-16 code-unit order (locale-independent) in the identity.
+A run cut short by a runtime condition carries
 `deterministic: false` and an `environmentConditions` entry (for example
 `schema_sandbox_busy`); retry it and do not compare its reference as drift. Credimi stores the
 reference next to its own run and compares later values instead of asking AttestBook for a

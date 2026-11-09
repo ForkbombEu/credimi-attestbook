@@ -632,7 +632,8 @@ schema documents. It runs the same structural engine and returns
     "canonicalization": "attestbook.stable-json@1",
     "digestAlgorithm": "sha256",
     "referenceScope": "pin+input+evidence+failure-classification",
-    "statusTaxonomy": "FR-012"
+    "statusTaxonomy": "FR-012",
+    "engine": { "attestbook": "0.1.0", "owfSchema": "0.5.4" }
   },
   "nonClaims": {
     "cryptographicVerification": false,
@@ -649,7 +650,8 @@ schema documents. It runs the same structural engine and returns
 `resultReference` and `inputDigest` are content-addressed over canonical JSON. Repeating the
 same pinned request returns the same values when the run completed deterministically; a
 changed credential, schema document, pinned snapshot or structural evidence changes the
-relevant digest. Supplied schema documents are sorted by URI in the input identity. Validation
+relevant digest. Supplied schema documents are sorted by URI in UTF-16 code-unit order
+(locale-independent) in the input identity. Validation
 identifiers, timestamps and mutable rulebook lifecycle metadata are excluded and the raw
 credential and schema documents are never echoed.
 

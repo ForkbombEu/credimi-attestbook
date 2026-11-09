@@ -800,6 +800,27 @@ describe('reproducible conformance run request', () => {
     expect(returned.input.schemaDocuments[0]?.uri).toBe(TEST_SCHEMA_URI)
   })
 
+  test('accepts schema documents in the shared code-unit URI order', async () => {
+    const schemaDocuments = [
+      { uri: 'https://example.org/schemas/a.json', content: '{"a":1}' },
+      { uri: 'https://example.org/schemas/B.json', content: '{"b":1}' },
+    ]
+    const result = pinnedConformanceResult({ schemaDocuments })
+    const { fetch } = fakeFetch(() => jsonResponse({ data: result }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const returned = await client.runConformance({
+      pin: PIN,
+      credential: TEST_CREDENTIAL,
+      schemaDocuments,
+    })
+
+    expect(returned.input.schemaDocuments.map((document) => document.uri)).toEqual([
+      'https://example.org/schemas/B.json',
+      'https://example.org/schemas/a.json',
+    ])
+  })
+
   test('rejects a result whose format hint differs from the sent request', async () => {
     const result = pinnedConformanceResult({ credentialFormatHint: 'dc+sd-jwt' })
     const { fetch } = fakeFetch(() => jsonResponse({ data: result }))
