@@ -20,8 +20,10 @@ import {
   captureCorrelationResponseSchema,
   captureExplorerDetailResponseSchema,
   captureExplorerPageSchema,
+  compareCaptureRequestSchema,
   correlateCaptureRequestSchema,
   credentialValidationResponseSchema,
+  headlessWalletComparisonResponseSchema,
   rulebookPageSchema,
   rulebookResponseSchema,
   rulebookVersionListResponseSchema,
@@ -30,6 +32,7 @@ import {
 } from '../../api/schemas'
 
 import {
+  assertPinnedComparison,
   assertPinnedCorrelation,
   assertPinnedValidation,
   credimiRulebookPinSchema,
@@ -38,8 +41,10 @@ import {
   type CredimiCaptureDetail,
   type CredimiCapturePage,
   type CredimiCaptureQuery,
+  type CredimiComparisonInput,
   type CredimiCorrelationInput,
   type CredimiEvidenceCorrelation,
+  type CredimiHeadlessWalletComparison,
   type CredimiRulebook,
   type CredimiRulebookPage,
   type CredimiRulebookPin,
@@ -591,6 +596,42 @@ export class CredimiAdapter {
       retryable: false,
     })
     assertPinnedCorrelation(pin, response.data)
+    return response.data
+  }
+
+  /**
+   * Builds the headless-wallet comparison evidence for one correlated capture.
+   * The caller supplies the external wallet observation, if any; AttestBook
+   * provides the structural/schema side from the recorded correlation. The
+   * returned report is rejected with `pin_mismatch` unless it names exactly the
+   * pinned rulebook, version, digest and attestation type.
+   *
+   * The operation is read-only but is a `POST` because it carries the external
+   * observation. It starts no wallet and contacts no Credimi endpoint.
+   */
+  async compareCapture(input: CredimiComparisonInput): Promise<CredimiHeadlessWalletComparison> {
+    const pin = this.requirePin(input.pin)
+    const captureId = requireNonEmptyString(input.captureId, 'captureId')
+    const body = parseRequest(
+      compareCaptureRequestSchema,
+      input.externalWallet === undefined ? {} : { externalWallet: input.externalWallet },
+      'headless-wallet comparison',
+    )
+    const response = await this.requestJson({
+      operation: 'headless-wallet comparison',
+      method: 'POST',
+      path: `${API_PREFIX}/captures/${encodeURIComponent(captureId)}/compare`,
+      body,
+      schema: headlessWalletComparisonResponseSchema,
+      retryable: false,
+    })
+    if (response.data.capture.captureId !== captureId) {
+      throw invalidResponse(
+        'headless-wallet comparison',
+        'the report names a different capture identifier',
+      )
+    }
+    assertPinnedComparison(pin, response.data)
     return response.data
   }
 

@@ -8,6 +8,22 @@
 import { describe, expect, test } from 'bun:test'
 
 import {
+  buildHeadlessWalletComparison,
+  type ComparisonEvidenceSource,
+  type ExternalWalletObservation,
+} from '../../comparison'
+import {
+  comparisonSource,
+  externalWalletObservation,
+  TEST_CAPTURE_ID,
+  TEST_COMPARED_AT,
+  TEST_WALLET_ID,
+} from '../../comparison/test/fixtures'
+
+import { headlessWalletComparisonSchema } from '../../api/schemas'
+
+import {
+  assertPinnedComparison,
   assertPinnedCorrelation,
   assertPinnedValidation,
   CredimiAdapter,
@@ -17,6 +33,7 @@ import {
   RULEBOOK_PIN_KIND,
   type CredimiAdapterOptions,
   type CredimiEvidenceCorrelation,
+  type CredimiHeadlessWalletComparison,
   type CredimiRulebook,
   type CredimiRulebookPage,
   type CredimiRulebookPin,
@@ -572,5 +589,121 @@ describe('pin verification', () => {
     } catch (error) {
       expect((error as CredimiAdapterError).code).toBe('pin_mismatch')
     }
+  })
+
+  test('accepts a comparison report that names exactly the pinned selection', () => {
+    expect(() => assertPinnedComparison(PIN, comparisonReport())).not.toThrow()
+
+    const mismatch = {
+      ...comparisonReport(),
+      rulebook: { ...comparisonReport().rulebook, contentDigest: 'c'.repeat(64) },
+    }
+    try {
+      assertPinnedComparison(PIN, mismatch)
+      throw new Error('expected a pin mismatch')
+    } catch (error) {
+      expect((error as CredimiAdapterError).code).toBe('pin_mismatch')
+    }
+  })
+})
+
+function pinnedComparisonSource(): ComparisonEvidenceSource {
+  const source = comparisonSource()
+  return {
+    ...source,
+    rulebook: {
+      ...source.rulebook,
+      rulebookId: PIN.rulebookId,
+      version: PIN.version,
+      contentDigest: PIN.contentDigest,
+      attestationType: PIN.attestationType,
+    },
+    validation: {
+      ...source.validation,
+      rulebook: {
+        ...source.validation.rulebook,
+        id: PIN.rulebookId,
+        version: PIN.version,
+        digest: PIN.contentDigest,
+      },
+    },
+  }
+}
+
+function comparisonReport(
+  externalWallet: ExternalWalletObservation | null = externalWalletObservation(),
+  captureId = TEST_CAPTURE_ID,
+): CredimiHeadlessWalletComparison {
+  const report = headlessWalletComparisonSchema.parse(
+    buildHeadlessWalletComparison({
+      source: pinnedComparisonSource(),
+      externalWallet,
+      now: () => TEST_COMPARED_AT,
+    }),
+  )
+  return { ...report, capture: { ...report.capture, captureId } }
+}
+
+describe('headless-wallet comparison request', () => {
+  test('posts the external observation and verifies the returned pin', async () => {
+    const report = comparisonReport(externalWalletObservation(), 'capture 1')
+    if (report.externalWallet === null) {
+      throw new Error('expected the fixture report to carry an external observation')
+    }
+    const { fetch, calls } = fakeFetch(() => jsonResponse({ data: report }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const result = await client.compareCapture({
+      captureId: 'capture 1',
+      pin: PIN,
+      externalWallet: report.externalWallet,
+    })
+
+    expect(result.rulebook.contentDigest).toBe(PIN.contentDigest)
+    expect(result.externalWallet?.walletId).toBe(TEST_WALLET_ID)
+    const call = firstCall(calls)
+    expect(call.init.method).toBe('POST')
+    expect(requestUrl(call).pathname).toBe('/api/v1/captures/capture%201/compare')
+    const body = requestBody(call) as {
+      readonly externalWallet: { readonly walletId: string }
+    }
+    expect(body.externalWallet.walletId).toBe(TEST_WALLET_ID)
+  })
+
+  test('sends an empty body when no external observation is supplied', async () => {
+    const report = comparisonReport(null, 'capture-1')
+    const { fetch, calls } = fakeFetch(() => jsonResponse({ data: report }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const result = await client.compareCapture({ captureId: 'capture-1', pin: PIN })
+
+    expect(result.externalWallet).toBeNull()
+    expect(requestBody(firstCall(calls))).toEqual({})
+  })
+
+  test('rejects a report that names a different pin', async () => {
+    const report = comparisonReport(externalWalletObservation(), 'capture-1')
+    const mismatched = {
+      ...report,
+      rulebook: { ...report.rulebook, contentDigest: 'd'.repeat(64) },
+    }
+    const { fetch } = fakeFetch(() => jsonResponse({ data: mismatched }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const error = await rejection(client.compareCapture({ captureId: 'capture-1', pin: PIN }))
+    expect(error.code).toBe('pin_mismatch')
+  })
+
+  test('rejects a report for a different capture identifier', async () => {
+    const report = comparisonReport(undefined, 'another-capture')
+    const mismatched = {
+      ...report,
+      capture: { ...report.capture, captureId: 'another-capture' },
+    }
+    const { fetch } = fakeFetch(() => jsonResponse({ data: mismatched }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const error = await rejection(client.compareCapture({ captureId: 'capture-1', pin: PIN }))
+    expect(error.code).toBe('invalid_response')
   })
 })

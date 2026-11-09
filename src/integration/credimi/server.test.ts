@@ -10,7 +10,9 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
 import { createApp } from '../../app'
+import { externalWalletObservationSchema } from '../../api/schemas'
 import { createMockCaptureExplorer } from '../../capture'
+import { externalWalletObservation, TEST_WALLET_ID } from '../../comparison/test/fixtures'
 import { sha256Hex } from '../../registry/digest'
 import { createRegistryFixture, type RegistryFixture } from '../../registry/test-support'
 import { CredentialValidator } from '../../validation'
@@ -270,6 +272,62 @@ describe('capture evidence correlation', () => {
     )
 
     expect(error).toMatchObject({ code: 'unauthorized', status: 401 })
+  })
+})
+
+describe('headless-wallet comparison evidence', () => {
+  test('compares a correlated capture with an external wallet observation', async () => {
+    const { client, seeded } = await setup({ token: true })
+    const pin = await client.pinRulebook({
+      rulebookId: seeded.rulebookId,
+      version: seeded.version,
+      attestationType: seeded.attestationName,
+    })
+    await client.correlateCapture({ captureId: CAPTURE_ID, pin })
+
+    const comparison = await client.compareCapture({
+      captureId: CAPTURE_ID,
+      pin,
+      externalWallet: externalWalletObservationSchema.parse(externalWalletObservation()),
+    })
+
+    expect(comparison.rulebook).toMatchObject({
+      rulebookId: seeded.rulebookId,
+      version: seeded.version,
+      contentDigest: seeded.digest,
+      digestVerified: true,
+      attestationType: seeded.attestationName,
+    })
+    expect(comparison.capture.captureId).toBe(CAPTURE_ID)
+    expect(comparison.externalWallet?.walletId).toBe(TEST_WALLET_ID)
+    expect(comparison.comparison.schema.map((entry) => entry.dimension)).toEqual([
+      'credential_parsing',
+      'format_recognition',
+      'schema_validation',
+      'attestation_constraints',
+    ])
+    expect(comparison.comparison.protocol[0]?.external?.status).toBe('PASS')
+    expect(comparison.comparison.interoperability[0]?.external?.status).toBe('FAIL')
+    expect(
+      comparison.comparison.unsupported.some(
+        (entry) =>
+          entry.dimension === 'protocol_conformance' &&
+          entry.code === 'attestbook_does_not_execute',
+      ),
+    ).toBe(true)
+  })
+
+  test('refuses to compare without a recorded correlation', async () => {
+    const { client, seeded } = await setup({ token: true })
+    const pin = await client.pinRulebook({
+      rulebookId: seeded.rulebookId,
+      version: seeded.version,
+      attestationType: seeded.attestationName,
+    })
+
+    const error = await rejection(client.compareCapture({ captureId: CAPTURE_ID, pin }))
+
+    expect(error).toMatchObject({ code: 'conflict', status: 409 })
   })
 })
 

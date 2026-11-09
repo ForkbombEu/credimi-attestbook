@@ -11,6 +11,13 @@ import { z } from 'zod'
 
 import { ISSUER_FIXTURE_KIND, ISSUER_FIXTURE_NEGATIVE_CATEGORIES } from '../fixtures/types'
 import {
+  COMPARISON_RESULTS,
+  EXTERNAL_WALLET_INTERACTIONS,
+  HEADLESS_WALLET_COMPARISON_KIND,
+  HEADLESS_WALLET_COMPARISON_VERSION,
+  UNSUPPORTED_COMPARISON_CODES,
+} from '../comparison/types'
+import {
   VERIFIER_CONSTRAINTS_KIND,
   VERIFIER_GROUNDING_STATUSES,
   VERIFIER_MAPPING_SCOPES,
@@ -932,6 +939,117 @@ export const captureCorrelationResponseSchema = z.object({
   data: captureCorrelationResultSchema,
 })
 
+// ------------------------------------- headless-wallet comparison (#50)
+
+export const EXTERNAL_WALLET_INTERACTION_SCHEMA = z.enum(EXTERNAL_WALLET_INTERACTIONS)
+export const COMPARISON_RESULT_SCHEMA = z.enum(COMPARISON_RESULTS)
+export const UNSUPPORTED_COMPARISON_CODE_SCHEMA = z.enum(UNSUPPORTED_COMPARISON_CODES)
+
+export const externalDimensionObservationSchema = z.object({
+  dimension: VALIDATION_DIMENSION_ID_SCHEMA,
+  status: VALIDATION_STATUS_SCHEMA,
+  code: nullableString,
+  detail: nullableString,
+})
+
+export const externalWalletObservationSchema = z.object({
+  walletId: z.string(),
+  observedAt: z.string(),
+  interaction: EXTERNAL_WALLET_INTERACTION_SCHEMA,
+  observations: z.array(externalDimensionObservationSchema),
+})
+
+export const compareCaptureRequestSchema = z.object({
+  /**
+   * Optional caller-supplied external wallet observation. When absent, the
+   * report carries the AttestBook structural evidence and explicit gaps.
+   */
+  externalWallet: externalWalletObservationSchema.optional(),
+})
+
+export const comparisonDimensionEntrySchema = z.object({
+  dimension: VALIDATION_DIMENSION_ID_SCHEMA,
+  attestbook: z
+    .object({
+      status: VALIDATION_STATUS_SCHEMA,
+      applicable: z.boolean(),
+      executed: z.boolean(),
+    })
+    .nullable(),
+  external: z
+    .object({
+      status: VALIDATION_STATUS_SCHEMA,
+      code: nullableString,
+      detail: nullableString,
+    })
+    .nullable(),
+  result: COMPARISON_RESULT_SCHEMA,
+})
+
+export const unsupportedComparisonSchema = z.object({
+  dimension: VALIDATION_DIMENSION_ID_SCHEMA,
+  code: UNSUPPORTED_COMPARISON_CODE_SCHEMA,
+  attestbookStatus: VALIDATION_STATUS_SCHEMA.nullable(),
+  reason: z.string(),
+})
+
+export const headlessWalletComparisonSchema = z.object({
+  kind: z.literal(HEADLESS_WALLET_COMPARISON_KIND),
+  contractVersion: z.literal(HEADLESS_WALLET_COMPARISON_VERSION),
+  comparedAt: z.string(),
+  rulebook: captureRulebookBindingSchema,
+  capture: z.object({
+    captureId: z.string(),
+    correlationId: z.string(),
+    testExecutionRef: nullableString,
+    sourceComponent: CAPTURE_SOURCE_COMPONENT_SCHEMA,
+    protocol: CAPTURE_PROTOCOL_SCHEMA,
+    credentialFormat: CAPTURE_CREDENTIAL_FORMAT_SCHEMA,
+  }),
+  attestbook: z.object({
+    validationId: z.string(),
+    validatedAt: z.string(),
+    overallStatus: VALIDATION_STATUS_SCHEMA,
+    credential: z.object({
+      format: nullableString,
+      vct: nullableString,
+      disclosureCount: z.number().int().nonnegative(),
+      keyBindingPresent: z.boolean(),
+    }),
+    schemaReferences: z.array(
+      z.object({
+        formatIdentifier: z.string(),
+        uri: z.string(),
+        integrity: nullableString,
+        kind: z.enum(['type_metadata', 'json_schema']).nullable(),
+        applied: z.boolean(),
+      }),
+    ),
+    violations: z.array(validationFindingSchema),
+    limitations: z.array(validationLimitationSchema),
+  }),
+  externalWallet: externalWalletObservationSchema.nullable(),
+  comparison: z.object({
+    schema: z.array(comparisonDimensionEntrySchema),
+    protocol: z.array(comparisonDimensionEntrySchema),
+    interoperability: z.array(comparisonDimensionEntrySchema),
+    trust: z.array(comparisonDimensionEntrySchema),
+    unsupported: z.array(unsupportedComparisonSchema),
+  }),
+  nonClaims: z.object({
+    externalObservationVerified: z.literal(false),
+    cryptographicVerification: z.literal(false),
+    issuerTrust: z.literal(false),
+    protocolConformance: z.literal(false),
+    interoperability: z.literal(false),
+  }),
+  limitations: z.array(z.string()),
+})
+
+export const headlessWalletComparisonResponseSchema = z.object({
+  data: headlessWalletComparisonSchema,
+})
+
 // ---------------------------------------------------------- issuer fixtures
 
 export const generateIssuerFixtureRequestSchema = z.object({
@@ -1210,6 +1328,9 @@ export const OPENAPI_COMPONENTS = {
   CaptureExplorerDetailResponse: captureExplorerDetailResponseSchema,
   CorrelateCaptureRequest: correlateCaptureRequestSchema,
   CaptureCorrelationResponse: captureCorrelationResponseSchema,
+  CompareCaptureRequest: compareCaptureRequestSchema,
+  HeadlessWalletComparison: headlessWalletComparisonSchema,
+  HeadlessWalletComparisonResponse: headlessWalletComparisonResponseSchema,
   GenerateIssuerFixtureRequest: generateIssuerFixtureRequestSchema,
   IssuerFixture: issuerFixtureSchema,
   IssuerFixtureResponse: issuerFixtureResponseSchema,
@@ -1234,6 +1355,7 @@ const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
   'DiscoverIssuerRequest',
   'ValidateCredentialRequest',
   'CorrelateCaptureRequest',
+  'CompareCaptureRequest',
   'GenerateIssuerFixtureRequest',
   'ResolveVerifierConstraintsRequest',
 ])
@@ -1280,6 +1402,9 @@ export type CaptureExplorerSummaryResource = z.infer<typeof captureExplorerSumma
 export type CaptureExplorerDetailResource = z.infer<typeof captureExplorerDetailSchema>
 export type CaptureExplorerPageResource = z.infer<typeof captureExplorerPageSchema>
 export type CaptureCorrelationResource = z.infer<typeof captureCorrelationResultSchema>
+export type CompareCaptureRequestResource = z.infer<typeof compareCaptureRequestSchema>
+export type HeadlessWalletComparisonResource = z.infer<typeof headlessWalletComparisonSchema>
+export type ExternalWalletObservationResource = z.infer<typeof externalWalletObservationSchema>
 export type VerifierConstraintsResource = z.infer<typeof verifierConstraintsResultSchema>
 export type ResolveVerifierConstraintsRequestResource = z.infer<
   typeof resolveVerifierConstraintsRequestSchema

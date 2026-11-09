@@ -250,7 +250,11 @@ remote schema/import fetch that will replace caller-supplied documents; issue #3
 versioned REST/OpenAPI surface and validation persistence. FR-010 allows external adapters or
 test orchestration to supply other dimensions, but this slice accepts no external dimension
 evidence: caller-supplied dimension results are ignored, so an untested dimension cannot be
-made to PASS. Validation options (FR-009) are not accepted yet, draft versions are publicly
+made to PASS. The FR-021 comparison slice ([`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md))
+accepts a caller-supplied external wallet observation in a *separate* report; it never feeds
+that observation into this engine, never changes an AttestBook dimension status and never
+derives an overall validation PASS from it. Validation options (FR-009) are not accepted yet,
+draft versions are publicly
 readable by design (writes are authenticated and provider-scoped; see
 [`docs/security.md`](security.md)), and a supplied schema document that
 belongs to the attestation but not to the credential's format is ignored rather than reported.
