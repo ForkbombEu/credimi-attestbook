@@ -4,7 +4,9 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 
 import {
   AppLink,
+  CAPTURES_PATH,
   NEW_RULEBOOK_PATH,
+  capturePath,
   parseRoute,
   rulebookEditorPath,
   rulebookPath,
@@ -49,6 +51,19 @@ describe('parseRoute', () => {
   test('builds encoded detail paths', () => {
     expect(rulebookPath('rulebook-pid')).toBe('/rulebooks/rulebook-pid')
     expect(rulebookPath('rulebook/with space')).toBe('/rulebooks/rulebook%2Fwith%20space')
+  })
+
+  test('maps the capture explorer paths', () => {
+    expect(parseRoute('/captures')).toEqual({ name: 'captures' })
+    expect(parseRoute('/captures/')).toEqual({ name: 'captures' })
+    expect(parseRoute('/captures/mock-capture%2Fwith%20space')).toEqual({
+      name: 'capture',
+      captureId: 'mock-capture/with space',
+    })
+    expect(parseRoute('/captures/%E0%A4%A')).toEqual({ name: 'captures' })
+    expect(parseRoute('/captures/a/b')).toEqual({ name: 'catalog' })
+    expect(CAPTURES_PATH).toBe('/captures')
+    expect(capturePath('capture/with space')).toBe('/captures/capture%2Fwith%20space')
   })
 
   test('maps the new-rulebook and edit-draft paths', () => {

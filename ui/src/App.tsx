@@ -1,6 +1,13 @@
 import { useEffect, useState } from 'react'
 
-import { createHttpCatalogApi, createHttpEditorApi, createHttpValidationApi } from './api'
+import {
+  createHttpCaptureApi,
+  createHttpCatalogApi,
+  createHttpEditorApi,
+  createHttpValidationApi,
+} from './api'
+import { CaptureDetailPage } from './CaptureDetailPage'
+import { CapturesPage } from './CapturesPage'
 import { CatalogPage } from './CatalogPage'
 import { PlaygroundPage } from './PlaygroundPage'
 import { RulebookDetailPage } from './RulebookDetailPage'
@@ -10,6 +17,7 @@ import { useRoute } from './router'
 const defaultApi = createHttpCatalogApi()
 const defaultValidator = createHttpValidationApi()
 const defaultEditor = createHttpEditorApi()
+const defaultCaptures = createHttpCaptureApi()
 
 export function App() {
   const { route, navigate } = useRoute()
@@ -29,6 +37,19 @@ export function App() {
 
   if (route.name === 'playground') {
     return <PlaygroundPage api={defaultApi} validator={defaultValidator} onNavigate={navigate} />
+  }
+  if (route.name === 'captures') {
+    return <CapturesPage api={defaultCaptures} onNavigate={navigate} />
+  }
+  if (route.name === 'capture') {
+    return (
+      <CaptureDetailPage
+        api={defaultCaptures}
+        catalogApi={defaultApi}
+        captureId={route.captureId}
+        onNavigate={navigate}
+      />
+    )
   }
   if (route.name === 'editor-new') {
     return (

@@ -9,6 +9,12 @@
 import type { Context, Hono } from 'hono'
 
 import packageJson from '../../package.json'
+import {
+  createMockCaptureExplorer,
+  DEFAULT_CAPTURE_PAGE_LIMIT,
+  MAX_CAPTURE_PAGE_LIMIT,
+  type CaptureExplorer,
+} from '../capture'
 import { IssuerDiscovery, type IssuerDiscoveryService } from '../discovery'
 import { validateDraftContent } from '../editor'
 import {
@@ -43,6 +49,9 @@ import type { OpenApiComponentName } from './schemas'
 import {
   assertVersionDocument,
   toAttestationResource,
+  toCaptureCorrelationResource,
+  toCaptureExplorerDetailResource,
+  toCaptureExplorerPageResource,
   toDraftRulebookResource,
   toProviderResource,
   toCredentialValidationResource,
@@ -92,6 +101,9 @@ export type ApiOperationId =
   | 'discoverIssuer'
   | 'generateIssuerFixture'
   | 'validateCredential'
+  | 'listCaptures'
+  | 'getCapture'
+  | 'validateCapture'
   | 'resolveVerifierConstraints'
 
 export interface ApiParameterSpec {
@@ -134,6 +146,7 @@ export interface ApiRouteSpec {
     | 'imports'
     | 'issuers'
     | 'credentials'
+    | 'captures'
     | 'verifiers'
   /** `true` marks a bearer-authenticated write operation. */
   readonly security: boolean
@@ -186,6 +199,14 @@ const PATH_VERSION: ApiParameterSpec = {
   in: 'path',
   required: true,
   description: 'Rulebook version label (`MAJOR.MINOR` or `MAJOR.MINOR.PATCH`).',
+  schema: { type: 'string' },
+}
+
+const PATH_CAPTURE_ID: ApiParameterSpec = {
+  name: 'captureId',
+  in: 'path',
+  required: true,
+  description: 'Stable capture identifier carried by the normalized envelope.',
   schema: { type: 'string' },
 }
 
@@ -760,6 +781,84 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     ],
   },
   {
+    operationId: 'listCaptures',
+    method: 'get',
+    path: '/api/v1/captures',
+    summary: 'List normalized capture evidence',
+    description:
+      'Mock-backed capture explorer read. Every entry is labelled transport "mock": the deterministic local mock source serves the evidence and no live capture-issuer or capture-verifier endpoint is contacted. A summary carries the source, correlation identifiers, the opaque test-execution reference, the declared redaction, the linked rulebook binding and validation summary, and the explicit evidence gaps. The raw artifact is never returned.',
+    tag: 'captures',
+    security: false,
+    parameters: [
+      {
+        name: 'limit',
+        in: 'query',
+        required: false,
+        description: 'Page size (default 50, maximum 100).',
+        schema: { type: 'integer', minimum: 1, maximum: MAX_CAPTURE_PAGE_LIMIT },
+      },
+      {
+        name: 'offset',
+        in: 'query',
+        required: false,
+        description: 'Number of capture entries to skip (default 0).',
+        schema: { type: 'integer', minimum: 0 },
+      },
+    ],
+    responses: [
+      {
+        status: 200,
+        description: 'A page of normalized capture evidence.',
+        schema: 'CaptureExplorerListResponse',
+      },
+      ...errors(400, 500, 502, 503),
+    ],
+  },
+  {
+    operationId: 'getCapture',
+    method: 'get',
+    path: '/api/v1/captures/:captureId',
+    summary: 'Get one capture with its redacted evidence and correlation',
+    description:
+      'One mock-backed capture as a redacted default-policy projection, with its evidence timeline, the opaque test-execution reference, the declared redaction and explicit gaps for evidence that is absent. When a validation has been recorded, the detail carries the exact pinned rulebook version and digest and the structural findings. External references are not fetched and the segregated raw artifact is never returned.',
+    tag: 'captures',
+    security: false,
+    parameters: [PATH_CAPTURE_ID],
+    responses: [
+      {
+        status: 200,
+        description: 'The capture detail and its redacted evidence projection.',
+        schema: 'CaptureExplorerDetailResponse',
+      },
+      ...errors(400, 404, 500, 502, 503),
+    ],
+  },
+  {
+    operationId: 'validateCapture',
+    method: 'post',
+    path: '/api/v1/captures/:captureId/validate',
+    summary: 'Bind a captured credential to a pinned rulebook version',
+    description:
+      "Runs the structural credential engine on the capture's segregated inline artifact and records the correlation between the capture identifier, the opaque correlation and test-execution references, and the exact pinned rulebook version and digest. An external reference is not fetched, and source-redacted or non-credential evidence answers 409 instead of being validated. A structural status never implies cryptographic, issuer-trust, protocol or interoperability success.",
+    tag: 'captures',
+    security: false,
+    parameters: [PATH_CAPTURE_ID],
+    request: {
+      schema: 'CorrelateCaptureRequest',
+      mediaType: 'application/json',
+      required: true,
+      description: 'The rulebook identifier, version and attestation type to pin the capture to.',
+    },
+    responses: [
+      {
+        status: 200,
+        description: 'The recorded correlation and the structural validation result.',
+        schema: 'CaptureCorrelationResponse',
+      },
+      ...errors(400, 404, 409, 413, 500, 502, 503),
+    ],
+  },
+  {
     operationId: 'resolveVerifierConstraints',
     method: 'post',
     path: VERIFIER_CONSTRAINTS_PATH,
@@ -796,6 +895,8 @@ export interface ImportService {
 export interface ApiDependencies {
   readonly registry?: Registry
   readonly validation?: CredentialValidationService
+  /** Mock-backed capture explorer; seeded from the validation service when absent. */
+  readonly captures?: CaptureExplorer
   readonly importer?: ImportService
   readonly issuerDiscovery?: IssuerDiscoveryService
   readonly issuerFixtures?: IssuerFixtureService
@@ -824,6 +925,17 @@ function requireValidation(dependencies: ApiDependencies): CredentialValidationS
     )
   }
   return dependencies.validation
+}
+
+function requireCaptures(explorer: CaptureExplorer | undefined): CaptureExplorer {
+  if (explorer === undefined) {
+    throw apiError(
+      503,
+      'capture_unavailable',
+      'The capture explorer is not configured on this server.',
+    )
+  }
+  return explorer
 }
 
 function requireImporter(importer: ImportService | undefined): ImportService {
@@ -1545,6 +1657,42 @@ function validateCredentialHandler(dependencies: ApiDependencies): ApiHandler {
   }
 }
 
+function listCapturesHandler(explorer: CaptureExplorer | undefined): ApiHandler {
+  return async (context) => {
+    const captures = requireCaptures(explorer)
+    const limit = parsePositiveInteger(
+      context.req.query('limit'),
+      'limit',
+      DEFAULT_CAPTURE_PAGE_LIMIT,
+      1,
+      MAX_CAPTURE_PAGE_LIMIT,
+    )
+    const offset = parsePositiveInteger(context.req.query('offset'), 'offset', 0, 0)
+    const page = await captures.list({ limit, offset })
+    return context.json(toCaptureExplorerPageResource(page), 200)
+  }
+}
+
+function getCaptureHandler(explorer: CaptureExplorer | undefined): ApiHandler {
+  return async (context) => {
+    const captures = requireCaptures(explorer)
+    const detail = await captures.get(context.req.param('captureId') ?? '')
+    if (detail === null) {
+      throw apiError(404, 'not_found', 'The requested capture does not exist.')
+    }
+    return context.json({ data: toCaptureExplorerDetailResource(detail) }, 200)
+  }
+}
+
+function validateCaptureHandler(explorer: CaptureExplorer | undefined): ApiHandler {
+  return async (context) => {
+    const captures = requireCaptures(explorer)
+    const body = await readJsonBody(context)
+    const result = await captures.correlate(context.req.param('captureId') ?? '', body)
+    return context.json({ data: toCaptureCorrelationResource(result) }, 200)
+  }
+}
+
 /** Reads only the public issuer identifier; every other member is ignored. */
 function parseDiscoverIssuerInput(body: unknown): { readonly credentialIssuer: string } {
   const record = requireRecord(body, 'request body')
@@ -1591,6 +1739,13 @@ export function createApiHandlers(
     (dependencies.registry === undefined
       ? undefined
       : new VerifierPolicyResolver({ source: dependencies.registry }))
+  // The capture explorer is mock-backed by construction: it is seeded from the
+  // deterministic local mock source and every entry carries `transport: "mock"`.
+  const captures =
+    dependencies.captures ??
+    (dependencies.validation === undefined
+      ? undefined
+      : createMockCaptureExplorer({ validation: dependencies.validation }))
 
   return {
     getHealth: healthHandler(),
@@ -1618,6 +1773,9 @@ export function createApiHandlers(
     discoverIssuer: discoverIssuerHandler(issuerDiscovery),
     generateIssuerFixture: generateIssuerFixtureHandler(issuerFixtures),
     validateCredential: validateCredentialHandler(dependencies),
+    listCaptures: listCapturesHandler(captures),
+    getCapture: getCaptureHandler(captures),
+    validateCapture: validateCaptureHandler(captures),
     resolveVerifierConstraints: resolveVerifierConstraintsHandler(verifierPolicy),
   }
 }

@@ -7,6 +7,10 @@
 
 import type {
   Attestation,
+  CaptureCorrelationResult,
+  CaptureExplorerDetail,
+  CaptureExplorerPage,
+  CorrelateCaptureRequest,
   CredentialValidationResult,
   DraftRulebook,
   DraftValidationReport,
@@ -29,6 +33,12 @@ export const CREDENTIAL_VALIDATION_PATH = '/api/v1/credentials/validate'
 
 /** The public path that runs live validation of an unsaved draft document. */
 export const DRAFT_VALIDATION_PATH = '/api/v1/rulebooks/validate-draft'
+
+/** The mock-backed capture explorer list path (issue #48). */
+export const CAPTURES_PATH = '/api/v1/captures'
+
+/** Hard cap of the capture explorer API page size (`limit` maximum). */
+export const CAPTURE_PAGE_LIMIT = 100
 
 export interface CatalogApi {
   listProviders(signal?: AbortSignal): Promise<readonly Provider[]>
@@ -370,6 +380,73 @@ export function createHttpEditorApi(
         signal,
         'version publish',
       )
+    },
+  }
+}
+
+/** The public path of the capture explorer API for one capture. */
+export function capturePath(captureId: string): string {
+  return `${CAPTURES_PATH}/${encodeURIComponent(captureId)}`
+}
+
+/**
+ * Read interface of the mock-backed capture explorer. Every capture is served
+ * by the deterministic local mock source; correlation runs the structural
+ * credential engine and writes no registry data.
+ */
+export interface CaptureExplorerApi {
+  listCaptures(signal?: AbortSignal): Promise<CaptureExplorerPage>
+  getCapture(captureId: string, signal?: AbortSignal): Promise<CaptureExplorerDetail>
+  correlateCapture(
+    captureId: string,
+    request: CorrelateCaptureRequest,
+    signal?: AbortSignal,
+  ): Promise<CaptureCorrelationResult>
+}
+
+/** Builds the HTTP client for the capture explorer API. */
+export function createHttpCaptureApi(
+  fetchImpl: FetchLike = (input, init) => fetch(input, init),
+): CaptureExplorerApi {
+  async function readData<T>(response: Response, label: string): Promise<T> {
+    if (!response.ok) {
+      throw new CatalogApiError(await readErrorMessage(response, label), response.status)
+    }
+    let body: unknown
+    try {
+      body = await response.json()
+    } catch {
+      throw new CatalogApiError(`The ${label} returned an unexpected response.`, 0)
+    }
+    return singleData<T>(body, label)
+  }
+
+  return {
+    async listCaptures(signal) {
+      const response = await fetchImpl(`${CAPTURES_PATH}?limit=${CAPTURE_PAGE_LIMIT}&offset=0`, {
+        headers: { accept: 'application/json' },
+        ...(signal === undefined ? {} : { signal }),
+      })
+      if (!response.ok) {
+        throw new CatalogApiError(await readErrorMessage(response, 'capture'), response.status)
+      }
+      return (await response.json()) as CaptureExplorerPage
+    },
+    async getCapture(captureId, signal) {
+      const response = await fetchImpl(capturePath(captureId), {
+        headers: { accept: 'application/json' },
+        ...(signal === undefined ? {} : { signal }),
+      })
+      return readData<CaptureExplorerDetail>(response, 'capture')
+    },
+    async correlateCapture(captureId, request, signal) {
+      const response = await fetchImpl(`${capturePath(captureId)}/validate`, {
+        method: 'POST',
+        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        body: JSON.stringify(request),
+        ...(signal === undefined ? {} : { signal }),
+      })
+      return readData<CaptureCorrelationResult>(response, 'capture validation')
     },
   }
 }

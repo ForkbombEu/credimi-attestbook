@@ -152,6 +152,11 @@ the OpenAPI responses of every protected operation.
   untrusted envelope metadata are excluded (§15 personal-data minimisation).
 - Credential validation is synchronous and nothing is persisted; supplied credentials and
   schema documents are not logged or retained.
+- Capture artifacts are untrusted evidence. Normalization segregates an inline artifact out of
+  the metadata envelope, the capture explorer never returns those raw bytes (only the redacted
+  default-policy projection), and the correlation route refuses an external reference it has not
+  fetched as well as source-redacted or non-credential evidence. The mock explorer keeps
+  evidence and correlations in memory only, logs nothing and persists nothing.
 - Operator provisioning returns the raw token once to the provisioning call and stores only
   its hash; it is deployment tooling, not an API response, and no secret is committed to the
   repository or CI.
@@ -203,6 +208,13 @@ trail is not exposed over HTTP; it is read by operators from the database.
   the generated contract; `src/discovery/discover.test.ts` covers the SSRF, size,
   content-type, redirect and metadata-validation controls with an offline transport.
 - Run `bun run check` and `bun run openapi:check` from the repository root.
+
+- **Capture explorer and correlation.** `src/capture/explorer.test.ts` and
+  `src/api/captures.test.ts` cover the redacted-only projection, explicit evidence gaps, refusal
+  of external/source-redacted/non-credential evidence and a real structural-engine correlation
+  against a seeded pinned version; `ui/src/CapturesPage.test.tsx`,
+  `ui/src/CaptureDetailPage.test.tsx`, `ui/src/capture.test.ts` and `ui/e2e/captures.spec.ts`
+  cover the UI, the correlation flow, axe-core scans and the responsive layout.
 
 ## 10. References
 

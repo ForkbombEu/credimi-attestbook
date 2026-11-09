@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 
-import { AppLink, CATALOG_PATH, PLAYGROUND_PATH } from '../router'
+import { AppLink, CAPTURES_PATH, CATALOG_PATH, PLAYGROUND_PATH } from '../router'
 
 export function SkipLink({
   href,
@@ -52,6 +52,15 @@ export function SiteHeader({ section, onNavigate }: SiteHeaderProps) {
             {...(section === 'Credential playground' ? { 'aria-current': 'page' as const } : {})}
           >
             Validation playground
+          </AppLink>
+          <AppLink
+            href={CAPTURES_PATH}
+            onNavigate={onNavigate}
+            {...(section === 'Capture explorer' || section === 'Capture detail'
+              ? { 'aria-current': 'page' as const }
+              : {})}
+          >
+            Capture explorer
           </AppLink>
         </nav>
         <span className="site-header__section">{section}</span>

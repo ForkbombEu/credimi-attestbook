@@ -10,10 +10,12 @@
 import { writeFileSync } from 'node:fs'
 
 import { createApp } from '../../src/app'
+import { createMockCaptureExplorer } from '../../src/capture'
 import { openDatabase } from '../../src/db/database'
 import { applyMigrations } from '../../src/db/migrations'
 import { Registry } from '../../src/registry'
 import { provisionProvider } from '../../src/registry/bootstrap'
+import { sha256Hex } from '../../src/registry/digest'
 import type { CreateRulebookInput } from '../../src/registry/types'
 import { CredentialValidator } from '../../src/validation'
 import { issueTestCredential, seedPublishedRulebook } from '../../src/validation/test-support'
@@ -174,7 +176,47 @@ registry.createRulebook(lab.token.secret, {
 
 const validation = new CredentialValidator({ source: registry })
 
-const app = createApp({ registry, validation, uiRoot: './dist/ui' })
+/**
+ * A mock capture whose inline artifact is the real signed SD-JWT VC. It is
+ * opaque (non-JSON), so the explorer shows it only as a fully redacted
+ * projection, while the segregated original bytes let the capture correlation
+ * run the real structural validation engine against the playground rulebook.
+ */
+const captureCredentialBytes = new TextEncoder().encode(pidCredential)
+const realCredentialCapture = {
+  kind: 'attestbook.capture-artifact@1',
+  envelopeVersion: 1,
+  captureId: 'e2e-issued-credential-capture',
+  correlationId: 'credimi-e2e-correlation-48',
+  sourceComponent: 'capture-issuer',
+  sourceVersion: '0.0.0-mock',
+  capturedAt: '2026-11-05T09:48:23Z',
+  interactionType: 'issuance',
+  protocol: 'openid4vci',
+  credentialFormat: 'dc+sd-jwt',
+  artifactType: 'issued-credential',
+  artifact: {
+    mediaType: 'application/vc+sd-jwt',
+    encoding: 'utf8',
+    content: pidCredential,
+    byteLength: captureCredentialBytes.byteLength,
+  },
+  integrity: { algorithm: 'sha256', digest: sha256Hex(captureCredentialBytes) },
+  party: {
+    role: 'issuer',
+    identifier: 'https://issuer.example.test',
+    name: 'Example Issuer (mock)',
+  },
+  testExecutionRef: 'credimi-e2e-execution-48',
+  metadata: { environment: 'mock', synthetic: true },
+}
+
+const captures = createMockCaptureExplorer({
+  validation,
+  additionalIssuerEnvelopes: [realCredentialCapture],
+})
+
+const app = createApp({ registry, validation, captures, uiRoot: './dist/ui' })
 
 const server = Bun.serve({
   hostname: '127.0.0.1',

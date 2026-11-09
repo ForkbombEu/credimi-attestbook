@@ -64,7 +64,12 @@ async function errorJson(response: Response): Promise<ErrorEnvelope> {
 }
 
 function concretePath(route: ApiRouteSpec, rulebookId: string): string {
-  const path = route.path.replace(':rulebookId', rulebookId).replace(':version', '1.0')
+  const path = route.path
+    .replace(':rulebookId', rulebookId)
+    .replace(':version', '1.0')
+    // The capture explorer is seeded from the deterministic mock source, so a
+    // known capture id is the public read path.
+    .replace(':captureId', 'mock-capture-capture-issuer-1')
   // The comparison route requires its target version as a query parameter.
   return route.operationId === 'compareRulebookVersions' ? `${path}?to=1.0` : path
 }
@@ -116,7 +121,9 @@ describe('write operation security surface', () => {
     ])
 
     // Draft validation, fixture generation, verifier constraints and credential
-    // validation are read-only POSTs and stay public.
+    // validation are read-only POSTs and stay public. Capture correlation is a
+    // public POST that records an in-memory correlation over mock evidence; it
+    // writes no registry data.
     const publicPosts = API_ROUTES.filter(
       (route) => route.method === 'post' && !route.security,
     ).map((route) => route.operationId)
@@ -124,6 +131,7 @@ describe('write operation security surface', () => {
       'validateRulebookDraft',
       'generateIssuerFixture',
       'validateCredential',
+      'validateCapture',
       'resolveVerifierConstraints',
     ])
   })
