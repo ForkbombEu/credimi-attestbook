@@ -165,14 +165,17 @@ correlation identifier; minting convention remains a Credimi agreement (CD-5).
 `redactNormalizedCaptureArtifact` is the supported way to turn a normalized inline artifact
 into a loggable/exportable projection. It never touches the metadata envelope.
 
-- **Partial** (default policy `attestbook.default-capture-redaction@1`) replaces values under
-  sensitive member names — tokens, secrets, passwords, private keys, credential artifacts,
-  disclosures and common personal claims — with `[redacted]` and records each replaced
-  location as a JSON Pointer in `redaction.redactedPaths` (up to the configured limit; a
-  truncated list is reported by `redaction_paths_truncated`). A source-declared partial
-  redaction may omit the path list when it has no location evidence. Object keys and array
-  positions are preserved, so findings can still name an attribute path without exposing its
-  value.
+- **Partial** (default policy `attestbook.default-capture-redaction@1`) is an **allow-list**,
+  not a deny-list: it keeps a scalar only when its member name is one of the non-personal
+  protocol/structural names in `DEFAULT_PRESERVED_CAPTURE_KEYS` (issuer and endpoint
+  identifiers, format/type selectors, algorithm and key identifiers, request/response shape
+  and error codes). Every other scalar becomes `[redacted]` and its JSON Pointer is recorded
+  in `redaction.redactedPaths` (up to the configured limit; a truncated list is reported by
+  `redaction_paths_truncated`). Members known to contain tokens, credential artifacts,
+  disclosures or claims are replaced whole. A source-declared partial redaction may omit the
+  path list when it has no location evidence. Object keys and array positions are preserved,
+  so findings can still name an attribute path without exposing its value; callers can extend
+  the allow-list with `preservedKeys` or force-redact a name with `sensitiveKeys`.
 - **Full** replaces every scalar while preserving object keys and array lengths. This is the
   only safe mode for opaque (non-JSON) artifacts and for a JSON artifact whose content cannot
   be parsed; the result is labelled `full` and carries a `redaction_full_fallback`
@@ -218,10 +221,14 @@ The specification §16 capture matrix is covered by `src/capture/`:
   those are #47. No capture artifact in this slice comes from a live interaction.
 - An external reference's digest and the artifact behind it are not verified; a future
   fetcher must enforce SSRF-safe resolution, authentication and size limits.
-- Redaction is content-based (sensitivity by member name), not a semantic classifier. A
-  source that places personal data under an unexpected member name can still evade the
-  default policy; callers should add `sensitiveKeys` for their contract and prefer storing
-  sensitive evidence behind an authorized external reference.
+- Partial redaction is a member-name allow-list, not a semantic classifier. Unknown or
+  unlisted members are redacted, but personal data placed under a preserved member name (for
+  example an email address used as an `issuer` value) would be kept. Callers can add the name
+  to `sensitiveKeys` to force-redact it, extend `preservedKeys` for a custom non-personal
+  member, or prefer storing sensitive evidence behind an authorized external reference.
+- Full redaction preserves object keys and array positions so paths stay referenceable; a
+  member name that is itself personal data is not redacted. Capture sources must not derive
+  member names from personal data.
 - `metadata` is defined as non-sensitive scalar data. The normalizer enforces its shape but
   does not classify its values, so a source must never put credentials, tokens or personal
   attributes there; they belong in the artifact (inline, or preferably external behind an

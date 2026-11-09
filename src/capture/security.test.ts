@@ -33,6 +33,8 @@ describe('external artifact reference safety', () => {
     'https://user:password@artifacts.example.test/capture.json',
     'https://artifacts.example.test:8443/capture.json',
     'https://artifacts.example.test/capture.json#fragment',
+    'https://artifacts.example.test/capture.json#',
+    'https://metadata/capture.json',
     'https://localhost/capture.json',
     'https://localhost./capture.json',
     'https://api.local/capture.json',

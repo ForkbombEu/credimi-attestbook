@@ -305,6 +305,16 @@ describe('capture envelope schema rejection', () => {
     }
   })
 
+  test('rejects an unpaired UTF-16 surrogate in inline utf8 content', () => {
+    const artifact = {
+      mediaType: 'application/json',
+      encoding: 'utf8',
+      content: '{"a":"\ud800"}',
+    }
+    const error = captureErrorFrom(() => normalizeCaptureArtifact(issuerEnvelope({ artifact })))
+    expect(error.code).toBe('invalid_artifact_encoding')
+  })
+
   test('rejects an inline artifact above the configured limit', () => {
     const error = captureErrorFrom(() =>
       normalizeCaptureArtifact(issuerEnvelope(), { limits: { maxInlineArtifactBytes: 8 } }),

@@ -12,7 +12,7 @@
 
 import { sha256Hex } from '../registry/digest'
 
-import { captureError } from './errors'
+import { captureError, isCaptureError } from './errors'
 import { assertBoundedJsonValue, encodeCaptureText } from './json'
 import { DEFAULT_CAPTURE_LIMITS, type CaptureLimits } from './limits'
 import type {
@@ -48,7 +48,6 @@ export const DEFAULT_SENSITIVE_CAPTURE_KEYS: readonly string[] = Object.freeze([
   'secret',
   'private_key',
   'credential',
-  'credentials',
   'compact_credential',
   'disclosures',
   'disclosure',
@@ -69,6 +68,44 @@ export const DEFAULT_SENSITIVE_CAPTURE_KEYS: readonly string[] = Object.freeze([
   'sub',
 ])
 
+/**
+ * Member names whose scalar values partial redaction keeps by default. These
+ * are non-personal protocol and structural members (issuer/endpoints, format
+ * and type selectors, algorithm identifiers, request/response shape and error
+ * codes). Every scalar under any other member is redacted: an allow-list means
+ * an unknown credential claim or token is removed by default instead of being
+ * kept because its name was not predicted.
+ */
+export const DEFAULT_PRESERVED_CAPTURE_KEYS: readonly string[] = Object.freeze([
+  'issuer',
+  'credential_issuer',
+  'credential_configuration_ids',
+  'credential_configuration_id',
+  'authorization_servers',
+  'credential_endpoint',
+  'nonce_endpoint',
+  'deferred_credential_endpoint',
+  'notification_endpoint',
+  'format',
+  'credential_format',
+  'vct',
+  'doctype',
+  'scope',
+  'alg',
+  'typ',
+  'kid',
+  'cryptographic_binding_methods_supported',
+  'credential_signing_alg_values_supported',
+  'proof_types_supported',
+  'client_id',
+  'response_type',
+  'response_mode',
+  'id',
+  'path',
+  'intent_to_retain',
+  'error',
+])
+
 /** Key-name suffixes that are always sensitive (`vp_token`, `api_secret`, ...). */
 const SENSITIVE_KEY_SUFFIXES = ['token', 'secret', 'password', 'privatekey', 'apikey'] as const
 
@@ -83,6 +120,8 @@ export interface CaptureRedactionPolicy {
   readonly placeholder?: string
   /** Additional member names to redact, on top of the defaults. */
   readonly sensitiveKeys?: readonly string[]
+  /** Additional member names whose scalar values partial redaction keeps. */
+  readonly preservedKeys?: readonly string[]
 }
 
 /** A redacted JSON document and the evidence of what was replaced. */
@@ -133,6 +172,7 @@ function resolvePolicy(
   readonly policyRef: string
   readonly placeholder: string
   readonly sensitiveKeys: ReadonlySet<string>
+  readonly preservedKeys: ReadonlySet<string>
 } {
   if (policy.mode !== 'partial' && policy.mode !== 'full') {
     throw captureError('invalid_redaction', 'the redaction mode must be "partial" or "full"')
@@ -165,7 +205,31 @@ function resolvePolicy(
       keys.add(normalizeKeyName(key))
     }
   }
-  return { mode: policy.mode, policyRef, placeholder, sensitiveKeys: keys }
+  const preserved = new Set(DEFAULT_PRESERVED_CAPTURE_KEYS.map(normalizeKeyName))
+  if (policy.preservedKeys !== undefined) {
+    if (!Array.isArray(policy.preservedKeys) || policy.preservedKeys.length > 64) {
+      throw captureError(
+        'invalid_redaction',
+        'redaction preservedKeys must be an array of <= 64 names',
+      )
+    }
+    for (const key of policy.preservedKeys) {
+      if (typeof key !== 'string' || key === '' || key.length > 64) {
+        throw captureError(
+          'invalid_redaction',
+          'each redaction preserved key must be a non-empty string',
+        )
+      }
+      preserved.add(normalizeKeyName(key))
+    }
+  }
+  return {
+    mode: policy.mode,
+    policyRef,
+    placeholder,
+    sensitiveKeys: keys,
+    preservedKeys: preserved,
+  }
 }
 
 function isSensitiveKey(key: string, sensitiveKeys: ReadonlySet<string>): boolean {
@@ -198,13 +262,16 @@ function recordPath(state: RedactionState, pointer: string, limits: CaptureLimit
 function redactPartial(
   value: unknown,
   pointer: string,
+  parentKey: string | null,
   policy: ReturnType<typeof resolvePolicy>,
   state: RedactionState,
   limits: CaptureLimits,
 ): unknown {
   if (Array.isArray(value)) {
+    // Array items inherit the member name of the array: a credential
+    // configuration id list keeps its strings, a grant list does not.
     return value.map((item, index) =>
-      redactPartial(item, `${pointer}/${index}`, policy, state, limits),
+      redactPartial(item, `${pointer}/${index}`, parentKey, policy, state, limits),
     )
   }
   if (value !== null && typeof value === 'object') {
@@ -216,11 +283,18 @@ function redactPartial(
         result[key] = policy.placeholder
         continue
       }
-      result[key] = redactPartial(item, childPointer, policy, state, limits)
+      result[key] = redactPartial(item, childPointer, key, policy, state, limits)
     }
     return result
   }
-  return value
+  if (value === null) {
+    return null
+  }
+  if (parentKey !== null && policy.preservedKeys.has(normalizeKeyName(parentKey))) {
+    return value
+  }
+  recordPath(state, pointer, limits)
+  return policy.placeholder
 }
 
 function redactFull(
@@ -265,7 +339,7 @@ export function redactCaptureDocument(
   const redacted =
     resolved.mode === 'full'
       ? redactFull(value, '', resolved.placeholder, state)
-      : redactPartial(value, '', resolved, state, limits)
+      : redactPartial(value, '', null, resolved, state, limits)
 
   return {
     value: redacted,
@@ -310,13 +384,21 @@ export function redactNormalizedCaptureArtifact(
   const resolved = resolvePolicy(policy, limits)
   const diagnostics: CaptureDiagnostic[] = []
 
-  let redactedBytes: Uint8Array
+  let redactedBytes: Uint8Array = raw.bytes
   let mediaType = raw.mediaType
   let encoding: 'utf8' | 'base64' = 'utf8'
-  let status: CaptureArtifact['redaction']['status']
+  let status: CaptureArtifact['redaction']['status'] = 'none'
   let redactedPaths: readonly string[] = []
-  let redactedValues = 0
   let truncated = false
+
+  const fullFallback = (message: string): void => {
+    diagnostics.push({ code: 'redaction_full_fallback', message, path: 'artifact' })
+    redactedBytes = encodeCaptureText(resolved.placeholder, limits)
+    mediaType = 'text/plain'
+    encoding = 'utf8'
+    status = 'full'
+    redactedPaths = []
+  }
 
   if (isJsonMediaType(raw.mediaType)) {
     let document: unknown
@@ -326,35 +408,42 @@ export function redactNormalizedCaptureArtifact(
       document = undefined
     }
     if (document === undefined) {
-      diagnostics.push({
-        code: 'redaction_full_fallback',
-        message:
-          'the JSON artifact could not be parsed; every value was redacted and the original structure was not preserved',
-        path: 'artifact',
-      })
-      redactedBytes = encodeCaptureText(JSON.stringify(resolved.placeholder), limits)
-      mediaType = 'text/plain'
-      encoding = 'utf8'
-      status = 'full'
+      fullFallback(
+        'the JSON artifact could not be parsed; every value was redacted and the original structure was not preserved',
+      )
     } else {
-      const redacted = redactCaptureDocument(document, policy, limits)
-      redactedBytes = encodeCaptureText(JSON.stringify(redacted.value), limits)
-      redactedPaths = redacted.redactedPaths
-      redactedValues = redacted.redactedValues
-      truncated = redacted.pathsTruncated
-      status = redacted.mode === 'full' ? 'full' : redactedValues > 0 ? 'partial' : 'none'
+      try {
+        const redacted = redactCaptureDocument(document, policy, limits)
+        redactedPaths = redacted.redactedPaths
+        truncated = redacted.pathsTruncated
+        if (redacted.mode === 'full') {
+          redactedBytes = encodeCaptureText(JSON.stringify(redacted.value), limits)
+          status = 'full'
+        } else if (redacted.redactedValues === 0) {
+          // Nothing matched: keep the exact original bytes instead of
+          // re-serialising them and claiming a different digest.
+          redactedBytes = raw.bytes
+          mediaType = raw.mediaType
+          encoding = raw.encoding
+          status = 'none'
+        } else {
+          redactedBytes = encodeCaptureText(JSON.stringify(redacted.value), limits)
+          status = 'partial'
+        }
+      } catch (error) {
+        if (isCaptureError(error) && error.code === 'json_limit') {
+          fullFallback(
+            'the JSON artifact exceeds the redaction bounds; every value was redacted and the original structure was not preserved',
+          )
+        } else {
+          throw error
+        }
+      }
     }
   } else {
-    diagnostics.push({
-      code: 'redaction_full_fallback',
-      message:
-        'the artifact media type is not JSON; only full redaction is available and the original structure was not preserved',
-      path: 'artifact',
-    })
-    redactedBytes = encodeCaptureText(resolved.placeholder, limits)
-    mediaType = 'text/plain'
-    encoding = 'utf8'
-    status = 'full'
+    fullFallback(
+      'the artifact media type is not JSON; only full redaction is available and the original structure was not preserved',
+    )
   }
 
   if (truncated) {

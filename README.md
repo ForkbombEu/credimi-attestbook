@@ -246,7 +246,8 @@ ambiguous and unsupported submissions are rejected with stable codes and message
 echo artifact bytes; the caller's `capturedAt` text and correlation identifiers are preserved
 verbatim and normalization adds only `receivedAt`. SHA-256 integrity covers the exact raw
 bytes (recomputed for inline evidence, explicitly unverified for external references), and
-partial/full redaction replaces sensitive values with path-preserving placeholders. This is
+partial/full redaction keeps only an allow-listed set of non-personal protocol members while
+replacing every other scalar with path-preserving placeholders. This is
 not a live `capture-issuer`/`capture-verifier` integration: transport, storage, signing and
 rulebook correlation remain later issues. See [`docs/capture.md`](capture.md).
 

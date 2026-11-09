@@ -70,6 +70,25 @@ const REDACTION_MEMBERS = new Set(['status', 'policyRef', 'redactedPaths', 'reda
 const INTEGRITY_MEMBERS = new Set(['algorithm', 'digest'])
 
 const IDENTIFIER_PATTERN = /^[\x21-\x7e]+$/
+
+/** True when a string contains only paired UTF-16 surrogates. */
+function isWellFormedString(value: string): boolean {
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index)
+    if (code >= 0xd800 && code <= 0xdbff) {
+      const next = value.charCodeAt(index + 1)
+      if (next < 0xdc00 || next > 0xdfff) {
+        return false
+      }
+      index += 1
+      continue
+    }
+    if (code >= 0xdc00 && code <= 0xdfff) {
+      return false
+    }
+  }
+  return true
+}
 const SOURCE_VERSION_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._+-]*$/
 const METADATA_KEY_PATTERN = /^[a-z][A-Za-z0-9_.-]{0,63}$/
 const JSON_POINTER_PATTERN = /^(?:\/(?:[^~/]|~0|~1)*)*$/
@@ -288,6 +307,13 @@ function parseInlineArtifact(
   if (encoding === 'base64') {
     bytes = decodeBase64(record.content, field)
   } else {
+    if (!isWellFormedString(record.content)) {
+      throw captureError(
+        'invalid_artifact_encoding',
+        `${field}.content contains an unpaired UTF-16 surrogate`,
+        `${field}.content`,
+      )
+    }
     bytes = new TextEncoder().encode(record.content)
   }
   if (bytes.byteLength > limits.maxInlineArtifactBytes) {

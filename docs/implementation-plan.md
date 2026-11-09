@@ -493,7 +493,7 @@ a later issue can act on them; they do not block autonomous Phase 1 work.
 | TS11 catalogue authorisation mechanism is unspecified (§5.2.2) | Provisional product auth only (D-10). | #35; re-check TS11 |
 | `isLOTE` vs `isLoTE` spelling and future `etsi_lote` value | Preserve both/unknown values as extensible data (D-5). | #27 |
 | mdoc/mDL, browser, Deno and ARM behaviour are untested | Explicit `NOT_TESTED` / documented limitation (D-17, R-5, R-12). | Later format/runtime issue |
-| Capture decisions CD-1, CD-2, CD-3, CD-4, CD-5, CD-6 (field set, redaction depth, pull schedule, sync/async push, correlation ownership, artifact storage) | CD-1 (field set), CD-2 (default redaction depth) and CD-6 (reference-only external storage, not fetched) are provisionally settled for envelope version 1 by #46 in [`docs/capture.md`](capture.md); CD-3, CD-4 and CD-5 still need the transport and correlation work in #47/#48. | #46, #47, #48 |
+| Capture decisions CD-1, CD-2, CD-3, CD-4, CD-5, CD-6 (field set, redaction depth, pull schedule, sync/async push, correlation ownership, artifact storage) | CD-1 (field set), CD-2 (default redaction: a preserved-member allow-list with full fallback) and CD-6 (reference-only external storage, not fetched) are provisionally settled for envelope version 1 by #46 in [`docs/capture.md`](capture.md); CD-3, CD-4 and CD-5 still need the transport and correlation work in #47/#48. | #46, #47, #48 |
 | PostgreSQL, semantic canonicalization, TS11 catalogue API and OID4VCI version target | Not needed for the Phase 1 MVP; later decisions with their own issues. | Future issues |
 
 ## 12. Assumptions and non-claims

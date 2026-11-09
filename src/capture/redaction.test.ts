@@ -39,6 +39,19 @@ const EVIDENCE = {
   nested: [{ given_name: 'Luigi' }, { note: 'kept-note' }],
 }
 
+function expectEveryScalarRedacted(value: unknown): void {
+  if (value === null) {
+    return
+  }
+  if (typeof value === 'object') {
+    for (const item of Object.values(value)) {
+      expectEveryScalarRedacted(item)
+    }
+    return
+  }
+  expect(value).toBe(CAPTURE_REDACTION_PLACEHOLDER)
+}
+
 describe('capture document redaction', () => {
   test('partially redacts sensitive members and records their paths', () => {
     const result = redactCaptureDocument(EVIDENCE, { mode: 'partial' })
@@ -46,8 +59,13 @@ describe('capture document redaction', () => {
     expect(result.mode).toBe('partial')
     expect(result.policyRef).toBe(DEFAULT_CAPTURE_REDACTION_POLICY_REF)
     expect(result.placeholder).toBe(CAPTURE_REDACTION_PLACEHOLDER)
-    expect(result.redactedPaths).toEqual(['/claims', '/access_token', '/nested/0/given_name'])
-    expect(result.redactedValues).toBe(3)
+    expect(result.redactedPaths).toEqual([
+      '/claims',
+      '/access_token',
+      '/nested/0/given_name',
+      '/nested/1/note',
+    ])
+    expect(result.redactedValues).toBe(4)
     expect(result.pathsTruncated).toBe(false)
 
     const redacted = result.value as Record<string, unknown>
@@ -56,13 +74,14 @@ describe('capture document redaction', () => {
     expect(redacted.access_token).toBe(CAPTURE_REDACTION_PLACEHOLDER)
     const nested = redacted.nested as ReadonlyArray<Record<string, unknown>>
     expect(nested[0]?.given_name).toBe(CAPTURE_REDACTION_PLACEHOLDER)
-    expect(nested[1]?.note).toBe('kept-note')
+    expect(nested[1]?.note).toBe(CAPTURE_REDACTION_PLACEHOLDER)
 
     const serialized = JSON.stringify(result.value)
     expect(serialized).not.toContain('Mario')
     expect(serialized).not.toContain('Rossi')
     expect(serialized).not.toContain('sensitive-access-token-value')
     expect(serialized).not.toContain('Luigi')
+    expect(serialized).not.toContain('kept-note')
   })
 
   test('matches sensitive key variants and suffixes', () => {
@@ -112,13 +131,28 @@ describe('capture document redaction', () => {
 
   test('redacts additional caller-supplied keys', () => {
     const result = redactCaptureDocument(
-      { custom_field: 'value', keep: 'value' },
+      { custom_field: 'value', issuer: 'https://issuer.example.test' },
       { mode: 'partial', sensitiveKeys: ['custom_field'] },
     )
     expect((result.value as Record<string, unknown>).custom_field).toBe(
       CAPTURE_REDACTION_PLACEHOLDER,
     )
-    expect((result.value as Record<string, unknown>).keep).toBe('value')
+    expect((result.value as Record<string, unknown>).issuer).toBe('https://issuer.example.test')
+  })
+
+  test('preserves additional caller-supplied keys', () => {
+    const document = { custom: 'value' }
+    const redactedByDefault = redactCaptureDocument(document, { mode: 'partial' })
+    expect((redactedByDefault.value as Record<string, unknown>).custom).toBe(
+      CAPTURE_REDACTION_PLACEHOLDER,
+    )
+
+    const kept = redactCaptureDocument(document, {
+      mode: 'partial',
+      preservedKeys: ['custom'],
+    })
+    expect((kept.value as Record<string, unknown>).custom).toBe('value')
+    expect(kept.redactedValues).toBe(0)
   })
 
   test('truncates path evidence at the configured limit', () => {
@@ -129,6 +163,99 @@ describe('capture document redaction', () => {
     )
     expect(result.redactedPaths).toHaveLength(1)
     expect(result.pathsTruncated).toBe(true)
+  })
+
+  test('redacts credential-offer secrets while keeping safe offer structure', () => {
+    const offer = {
+      credential_issuer: 'https://issuer.example.test',
+      credential_configuration_ids: ['pid'],
+      grants: {
+        'urn:ietf:params:oauth:grant-type:pre-authorized_code': {
+          'pre-authorized_code': 'SECRET-PREAUTH',
+          tx_code: { length: 4, input_mode: 'numeric' },
+        },
+        authorization_code: { issuer_state: 'STATE-SECRET' },
+      },
+    }
+    const result = redactCaptureDocument(offer, { mode: 'partial' })
+    const serialized = JSON.stringify(result.value)
+
+    expect(serialized).not.toContain('SECRET-PREAUTH')
+    expect(serialized).not.toContain('STATE-SECRET')
+    expect(serialized).not.toContain('numeric')
+    expect((result.value as typeof offer).credential_issuer).toBe('https://issuer.example.test')
+    expect((result.value as typeof offer).credential_configuration_ids).toEqual(['pid'])
+    expect(result.redactedPaths).toContain(
+      '/grants/urn:ietf:params:oauth:grant-type:pre-authorized_code/pre-authorized_code',
+    )
+  })
+
+  test('redacts common PID claims and protocol secrets by default', () => {
+    const document = {
+      nationality: 'IT',
+      birth_place: 'Roma',
+      resident_address: 'Via Example 1',
+      email_address: 'mario@example.test',
+      mobile_phone_number: '+390000000',
+      document_number: 'DOC-SECRET',
+      sex: 1,
+      age_over_18: true,
+      age_in_years: 40,
+      portrait: 'BASE64-PORTRAIT',
+      birth_family_name: 'Rossi',
+      given_name_birth: 'Mario',
+      place_of_birth: { locality: 'Roma' },
+      code: 'AUTH-CODE-SECRET',
+      c_nonce: 'NONCE-SECRET',
+      proof: { jwt: 'PROOF-JWT-SECRET' },
+      dpop: 'DPOP-SECRET',
+      client_assertion: 'ASSERTION-SECRET',
+    }
+    const result = redactCaptureDocument(document, { mode: 'partial' })
+    const redacted = result.value as Record<string, unknown>
+
+    for (const key of Object.keys(document)) {
+      expectEveryScalarRedacted(redacted[key])
+    }
+    const serialized = JSON.stringify(result.value)
+    for (const secret of [
+      'IT',
+      'Roma',
+      'Via Example 1',
+      'mario@example.test',
+      '+390000000',
+      'DOC-SECRET',
+      'BASE64-PORTRAIT',
+      'AUTH-CODE-SECRET',
+      'NONCE-SECRET',
+      'PROOF-JWT-SECRET',
+      'DPOP-SECRET',
+      'ASSERTION-SECRET',
+    ]) {
+      expect(serialized).not.toContain(secret)
+    }
+  })
+
+  test('keeps DCQL structure and redacts the claims subtree', () => {
+    const query = {
+      dcql_query: {
+        credentials: [
+          {
+            id: 'pid',
+            format: 'dc+sd-jwt',
+            meta: { vct_values: ['urn:eudi:pid:1'] },
+            claims: [{ path: ['given_name'] }],
+          },
+        ],
+      },
+    }
+    const result = redactCaptureDocument(query, { mode: 'partial' })
+    const serialized = JSON.stringify(result.value)
+
+    // The claims subtree is deny-listed and replaced whole.
+    expect(serialized).not.toContain('given_name')
+    expect(serialized).toContain('"id":"pid"')
+    expect(serialized).toContain('"format":"dc+sd-jwt"')
   })
 
   test('rejects an invalid policy', () => {
@@ -143,6 +270,11 @@ describe('capture document redaction', () => {
     expect(
       captureErrorFrom(() =>
         redactCaptureDocument({}, { mode: 'partial', sensitiveKeys: new Array(65).fill('key') }),
+      ).code,
+    ).toBe('invalid_redaction')
+    expect(
+      captureErrorFrom(() =>
+        redactCaptureDocument({}, { mode: 'partial', preservedKeys: new Array(65).fill('key') }),
       ).code,
     ).toBe('invalid_redaction')
   })
@@ -179,6 +311,31 @@ describe('redacting a normalized capture', () => {
     const parsed = JSON.parse(text) as Record<string, unknown>
     expect(parsed.issuer).toBe('https://issuer.example.test')
     expect(result.diagnostics).toEqual([])
+  })
+
+  test('redacts a captured credential-offer artifact before it can be logged', () => {
+    const offer = {
+      credential_issuer: 'https://issuer.example.test',
+      credential_configuration_ids: ['pid'],
+      grants: {
+        authorization_code: { issuer_state: 'SECRET-PREAUTH' },
+      },
+    }
+    const artifact = inlineArtifact(offer)
+    const normalized = normalizeCaptureArtifact(
+      issuerEnvelope({
+        artifactType: 'credential-offer',
+        artifact,
+        integrity: integrityOf(String(artifact.content)),
+      }),
+      { now },
+    )
+    const result = redactNormalizedCaptureArtifact(normalized, { mode: 'partial' }, limits)
+    const text = new TextDecoder().decode(result.sensitive?.bytes)
+
+    expect(result.envelope.redaction.status).toBe('partial')
+    expect(text).not.toContain('SECRET-PREAUTH')
+    expect(text).toContain('https://issuer.example.test')
   })
 
   test('fully redacts an inline JSON artifact when requested', () => {
@@ -245,6 +402,9 @@ describe('redacting a normalized capture', () => {
       redactedPaths: [],
       redactedDigest: null,
     })
+    // A no-op partial pass keeps the exact original bytes.
+    expect(result.sensitive?.digest).toBe(normalized.envelope.integrity.digest)
+    expect(result.sensitive?.bytes).toEqual(normalized.sensitive?.bytes)
   })
 
   test('refuses to redact an artifact that stayed external', () => {

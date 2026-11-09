@@ -54,7 +54,12 @@ function isBlockedHostname(hostname: string): boolean {
     return true
   }
   const literal = stripBrackets(hostname)
-  return isIP(literal) !== 0 && isBlockedAddress(literal)
+  if (isIP(literal) !== 0) {
+    return isBlockedAddress(literal)
+  }
+  // A single-label DNS name is never a public artifact host; on some clouds it
+  // resolves to an internal metadata service.
+  return !hostname.includes('.')
 }
 
 /**
@@ -120,7 +125,8 @@ export function parseCaptureArtifactReference(
       `${field}.uri`,
     )
   }
-  if (url.hash !== '') {
+  // `url.hash` is empty for a trailing `#`, so check the submitted text too.
+  if (uri.includes('#')) {
     throw captureError('invalid_reference', `${field}.uri must not have a fragment`, `${field}.uri`)
   }
   if (url.hostname === '') {
