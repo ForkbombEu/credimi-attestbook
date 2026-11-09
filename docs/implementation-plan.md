@@ -112,8 +112,12 @@ the two without a current migrated issue are marked explicitly.
   immutable-rulebook snapshot cache that never skips digest or version-identity checks,
   reproducible cold/warm evidence tests and a development benchmark
   ([`docs/validation-performance.md`](validation-performance.md), spec §17 and Phase 6).
-  [#54](https://github.com/ForkbombEu/credimi-attestbook/issues/54) (ETSI migration and
-  external interoperability) remains.
+  #54 shipped the ETSI migration and external interoperability assessment: the public
+  ETSI EN 319 482-3 draft v0.0.7 (2026-11) `SchemaMeta` model is compared clause by clause
+  with TS11 v1.0.1 and the OWF 0.5.4 adapter, with frozen SIROS/FIDES/ETSI fixtures and
+  executable positive and negative outcomes, and no conformance claim
+  ([`docs/etsi-interoperability.md`](etsi-interoperability.md), `src/standards/interoperability.test.ts`,
+  spec §3 and Phase 6).
 - mdoc/mDL validation. Phase 1 recognises the format from metadata but reports it
   `NOT_TESTED`; no fake parser and no implied support (FR-011).
 - Real cryptographic, trust, protocol or interoperability validation of credentials.
@@ -134,7 +138,7 @@ Versions in this table were inspected or executed during Phase 0. Values marked
 | --- | --- | --- | --- |
 | EC TS11 | v1.0.1 (2026-01-30) | verified | [`docs/standards.md`](standards.md) Part II §2, §3; specification §3.2 |
 | EUDI ARF | 3.0.0 (tag 2026-07-21), §5.5/§5.6 | verified | [`docs/standards.md`](standards.md) Part II §4 |
-| ETSI EN 319 482-3 | draft v0.0.6 (2026-10-27), content restricted | **UNVERIFIED** | [`docs/standards.md`](standards.md) Part II §6, §8 |
+| ETSI EN 319 482-3 | draft v0.0.7 (2026-11) read 2026-11-09; v0.0.6 (2026-10-27) never retrievable | v0.0.7 verified as a draft; no published-EN or v0.0.6 delta claim | [`docs/etsi-interoperability.md`](etsi-interoperability.md); [`docs/standards.md`](standards.md) Part II §6, §8 |
 | OWF package | `@owf/eudi-attestation-schema` **0.5.4** (published 2026-10-30) | verified, 46 runtime exports | [`docs/standards.md`](standards.md) §2–§3; `research/owf-audit` |
 | OWF dependencies | `@owf/crypto` 0.6.2, `@owf/identity-common` 0.6.2, `@owf/cose` 0.6.2, `@owf/token-status-list` 0.6.2, `@sd-jwt/sd-jwt-vc` 0.24.1, `@sd-jwt/core` 0.24.1, `zod` 4.6.7 | verified via lockfile and pinned by `overrides` | `research/owf-audit/package-lock.json`, `bun.lock`, `src/owf.test.ts` |
 | Node.js | 20.20.2, 22.23.4, 24.22.2 | verified | [`docs/standards.md`](standards.md) §8 |
@@ -148,8 +152,10 @@ Rules that follow from this table:
 
 - Pin `@owf/eudi-attestation-schema` to **exactly 0.5.4** with the lockfile, and do not use
   a range or the `0.6.0-alpha-*` prerelease. Any upgrade repeats the audit (D-1, R-1).
-- Do not cite ETSI EN 319 482-3 clause by clause. The version-aware adapter is the only
-  mitigation until the draft is public (D-4, R-4).
+- Cite ETSI EN 319 482-3 only as work in progress and only at the assessed revision
+  (**draft v0.0.7, 2026-11**); v0.0.6 was never read. The version-aware adapter and the
+  recorded comparison in [`docs/etsi-interoperability.md`](etsi-interoperability.md) are
+  the boundary (D-4, R-4).
 - A library chosen for the implementation is pinned in the lockfile and covered by a test
   in the issue that introduces it. This plan names the intended stack but does not claim
   untested versions are verified. If a candidate fails its compatibility probe, the
@@ -169,7 +175,7 @@ later issue explicitly supersedes one.
 | **D-1** | AD-1 | Pin `@owf/eudi-attestation-schema` **0.5.4** exactly; pin the lockfile and exercise the real package in integration tests. | 0.5.4 is the tested `latest`; 0.6.0-alpha is a prerelease on `@owf/*` 0.7.0-alpha. Spec §2.1; standards §2, §9.2. | #27 |
 | **D-2** | AD-2 | Keep a canonical AttestBook domain model and a narrow, version-aware codec between TS11 v1.0.1, the OWF 0.5.4 profile and AttestBook metadata. Never expose OWF `SchemaMeta` as the TS11 public contract. | The models diverge in id, integrity placement, trust frameworks, `supportedFormats`, schema references and format set (standards §6). Spec §2.1; AC-04. | #27 |
 | **D-3** | AD-3 | Wrap JOSE verification in a strict policy: no `alg: none`, no unbound `alg`/key, reject header/payload inconsistencies, allowlist algorithms (ES256 first), reject synthetic `iat`, and verify `x5c`/trust separately or report it `NOT_TESTED`. | OWF `verifySchemaMeta` accepts inconsistent headers and synthesises `iat` (standards §5.4). Spec §15; SR-16. | #27 |
-| **D-4** | AD-4 | Pin **EC TS11 v1.0.1** as the Phase 1 baseline, store the applicable spec version per rulebook/schema, and treat ETSI EN 319 482-3 as an evolving, UNVERIFIED target. | Standards Part II §6, §9; specification §3.2. No clause-level ETSI delta exists yet. | #27, #29 |
+| **D-4** | AD-4 | Pin **EC TS11 v1.0.1** as the Phase 1 baseline, store the applicable spec version per rulebook/schema, and treat ETSI EN 319 482-3 as an evolving draft target. | Standards Part II §6, §9; specification §3.2. Issue #54 read draft v0.0.7 (2026-11) and recorded the clause-level comparison and blocking gaps; v0.0.6 remains unread, so no v0.0.6 → v0.0.7 delta is claimed. | #27, #29, #54 |
 | **D-5** | AD-5 | Store TS11/OWF enumerated values as extensible data, validating membership against the pinned baseline; do not make them closed TypeScript unions. Unknown future values are preserved and reported, not silently coerced. | The TS11→ETSI migration may add values (e.g. `etsi_lote`); standards §9.2, architecture §4.2. | #27 |
 | **D-6** | AD-6 | A version's content digest is **SHA-256 over the exact stored artifact bytes**. Published bytes are immutable and content-addressed. No semantic canonicalization is required in Phase 1; if a canonical form is needed later, use RFC 8785 JCS. Known limitation: re-serialized source JSON (key order or whitespace) gets a different digest; #31 compares normalized content for change detection and reports serialization-only changes instead of silently ignoring them (R-17). | Byte-exact storage is reproducible and needs no unverified canonicalizer; OWF has no canonicalization API (architecture §9). | #29 |
 | **D-7** | AD-7 | Use a **single SQLite database file** for Phase 1, with WAL, foreign keys, checked-in migrations and a repository interface. PostgreSQL is not a Phase 1 dependency; adopting it later requires a separate decision. | Zero-config local development, no external service, portable Docker, strong relational integrity for provider→rulebook→version invariants (architecture §10, spec §17). | #28 |
@@ -365,7 +371,7 @@ Rules:
 | R-1 | OWF 0.5.4 is experimental and may break on upgrade or with TS11/ETSI changes | medium / high | Exact pin, lockfile, adapter boundary, audit probe, re-audit every upgrade | Upgrade issue required; no automatic version range |
 | R-2 | OWF JOSE permissiveness leaks into AttestBook | high / high | Strict wrapper D-3, negative tests for every observed permissive case | x5c/trust chain remains `NOT_TESTED` until a trust configuration exists |
 | R-3 | TS11/OWF profile divergence causes data loss | high / medium | Canonical model, lossless unknown members, round-trip tests, no OWF parse as persistence | Unmappable fields are reported, not silently dropped |
-| R-4 | ETSI EN 319 482-3 content is unverified and may change the model | high / medium | Version-aware adapter, stored `specVersion`, no ETSI claim | Re-verify when the draft is public |
+| R-4 | ETSI EN 319 482-3 is a draft and may change the model; v0.0.6/v0.0.7 differ and v0.0.6 was never read | high / medium | Version-aware adapter, stored `specVersion`, no ETSI claim, recorded v0.0.7 comparison and blocking gaps | Re-verify against the published EN; see [`docs/etsi-interoperability.md`](etsi-interoperability.md) §8–§9 |
 | R-5 | Bun or a native/optional dependency fails on another platform or in Docker | medium / medium | Audit verified Bun 1.3.1; pin image; Node 22 compatibility job for OWF; document Linux x64 baseline | If Bun is blocked, revisit runtime with evidence before changing |
 | R-6 | SQLite single-writer limits or backup mistakes | medium / medium | WAL, busy timeout, repository layer, single-instance documentation, backup guidance | PostgreSQL adoption requires a new decision |
 | R-7 | SSRF, oversized responses, deep JSON or remote `$ref` attacks | high / high | https-only, DNS/address checks, redirect re-validation, timeouts, size/depth limits, same-origin `$ref`, no code execution | Security negative-test suite in #30 |
@@ -513,7 +519,7 @@ a later issue can act on them; they do not block autonomous Phase 1 work.
 | OWF `SchemaMeta` diverges from TS11 v1.0.1 (id, integrity, trust, formats, schema URIs) | Mitigated by D-2; no public OWF model. | #27 |
 | OWF SRI supports sha256 only | Unsupported algorithms reported, not PASS (D-11). | #30 |
 | OWF 0.6.0-alpha is a prerelease on `@owf/*` 0.7.0-alpha | Not adopted; upgrade needs a new audit (D-1). | Future upgrade issue |
-| ETSI EN 319 482-3 draft v0.0.6 is restricted | No clause-level delta; adapter is version-aware (D-4). | Re-verify when public |
+| ETSI EN 319 482-3 draft v0.0.6 was restricted | v0.0.6 remains unread; public v0.0.7 (2026-11) is assessed with no delta claim, and two blocking model gaps (minimal `etsi_tl` authority, non-SemVer `version`) are recorded (D-4). | Re-verify against the published EN; follow-up implementation issue |
 | ARF vs TS11 registration-obligation discrepancy | Separate metadata, no hard rule (D-12). | #30 |
 | TS11 catalogue authorisation mechanism is unspecified (§5.2.2) | Provisional product auth only (D-10). | #35; re-check TS11 |
 | `isLOTE` vs `isLoTE` spelling and future `etsi_lote` value | Preserve both/unknown values as extensible data (D-5). | #27 |
@@ -528,8 +534,10 @@ a later issue can act on them; they do not block autonomous Phase 1 work.
   for commits and merges under the repository's `AGENTS.md` and issue workflow;
   specification §20 item 11's approval requirement is therefore satisfied at the issue
   level, while production deployment remains out of scope for every Phase 1 issue.
-- TS11 v1.0.1 and ARF 3.0.0 are the verified baselines. ETSI EN 319 482-3 is not read and
-  no delta is claimed.
+- TS11 v1.0.1 and ARF 3.0.0 are the verified baselines. ETSI EN 319 482-3 **draft v0.0.7
+  (2026-11)** is read and compared as a work-in-progress draft; v0.0.6 is unread, no
+  published-EN claim is made, and no v0.0.6 → v0.0.7 delta is claimed
+  ([`docs/etsi-interoperability.md`](etsi-interoperability.md)).
 - Bun 1.3.1 on Linux x64 is the tested runtime baseline. Other runtimes and architectures
   are not claimed.
 - SQLite is a single-instance Phase 1 choice; high availability, replication and
@@ -547,6 +555,8 @@ a later issue can act on them; they do not block autonomous Phase 1 work.
 - [`docs/traceability.md`](traceability.md) — requirements-to-clause and requirements-to-test
 - [`docs/capture-integration.md`](capture-integration.md) — Phase 4 capture contracts
 - [`docs/catalog-research.md`](catalog-research.md) — external catalog survey
+- [`docs/etsi-interoperability.md`](etsi-interoperability.md) — ETSI draft v0.0.7 migration
+  and external interoperability assessment (#54)
 - [`research/owf-audit/README.md`](../research/owf-audit/README.md) — reproducible OWF probe
 - Issues [#25](https://github.com/ForkbombEu/credimi-attestbook/issues/25),
   [#26](https://github.com/ForkbombEu/credimi-attestbook/issues/26),

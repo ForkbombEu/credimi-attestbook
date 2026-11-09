@@ -1,0 +1,524 @@
+{
+  "data": [
+    {
+      "id": "2e5a14fb-3ddb-51a5-9efa-51806cb8ac5e",
+      "version": "1.5",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/demo_pid_rb_1_5/rulebook.html"
+    },
+    {
+      "id": "109402dd-713d-5471-ace5-c9ee31fdd8d1",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_basic",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/sirosfoundation/demo_student_id.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/demo_student_id/rulebook.html"
+    },
+    {
+      "id": "c504d2f3-3c2e-5c12-a1a6-c401b1063f30",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "mso_mdoc"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "mso_mdoc",
+          "uri": "https://registry.siros.org/sirosfoundation/mdl.mdoc.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/mdl/rulebook.html"
+    },
+    {
+      "id": "fa74898b-3d09-51b3-ad8d-0ef90d185b9b",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "mso_mdoc"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "mso_mdoc",
+          "uri": "https://registry.siros.org/sirosfoundation/photoid.mdoc.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/photoid/rulebook.html"
+    },
+    {
+      "id": "fd20568e-20c4-5da9-81a8-91fc0a78c905",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "mso_mdoc"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "mso_mdoc",
+          "uri": "https://registry.siros.org/sirosfoundation/pid_mdoc.mdoc.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/pid_mdoc/rulebook.html"
+    },
+    {
+      "id": "b0880349-7a3d-57a2-9dbb-51c3ea022b33",
+      "version": "1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/sirosfoundation/siros_id.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/siros_id/rulebook.html"
+    },
+    {
+      "id": "c48100f6-f19d-5f79-9bf5-819c293a08a4",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_basic",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/sirosfoundation/vctm_demo_1.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/vctm_demo_1/rulebook.html"
+    },
+    {
+      "id": "ded6dc2a-bd23-5233-8032-a0f807ce9945",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_moderate",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/sirosfoundation/vctm_diploma.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/vctm_diploma/rulebook.html"
+    },
+    {
+      "id": "8192e332-03e4-5ec3-9426-bf95345686cb",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/sirosfoundation/vctm_ehic.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/vctm_ehic/rulebook.html"
+    },
+    {
+      "id": "96c78c4f-9907-537f-9493-b7177fb63524",
+      "version": "1.5",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/sirosfoundation/vctm_pid_arf_1_5.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/vctm_pid_arf_1_5/rulebook.html"
+    },
+    {
+      "id": "10928af8-e06b-5922-94c2-074e1207874e",
+      "version": "1.8",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/sirosfoundation/vctm_pid_arf_1_8.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/vctm_pid_arf_1_8/rulebook.html"
+    },
+    {
+      "id": "b18eb2c8-54a8-5f42-a45b-dd3bd33946ae",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/approved-supplier.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/approved-supplier/rulebook.html"
+    },
+    {
+      "id": "2d74ee73-5690-588f-99b9-fe3cc4d094bd",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/authorised-signatories.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/authorised-signatories/rulebook.html"
+    },
+    {
+      "id": "44c6f715-f7f0-5577-b98d-15e848919523",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/company-info.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/company-info/rulebook.html"
+    },
+    {
+      "id": "b552d7ba-8662-57cf-a08e-ff6596b1da42",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/contact-person.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/contact-person/rulebook.html"
+    },
+    {
+      "id": "89e98e55-ec69-5ffc-b394-e3dd0805581a",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/ds-membership.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/ds-membership/rulebook.html"
+    },
+    {
+      "id": "b674512f-3350-5621-bcd6-87a407b576ee",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/ebwoid.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/ebwoid/rulebook.html"
+    },
+    {
+      "id": "25e0b924-d5d9-5ecd-b5ef-dc32905efb1c",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt",
+        "mso_mdoc"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/pid.vctm.json"
+        },
+        {
+          "formatIdentifier": "mso_mdoc",
+          "uri": "https://registry.siros.org/webuild-consortium/pid.mdoc.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/pid/rulebook.html"
+    },
+    {
+      "id": "9f079cc5-8021-5150-87dc-4866123b0eb9",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/eucc.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/eucc/rulebook.html"
+    },
+    {
+      "id": "fc3c8b24-27d8-5dd3-b77f-42f9ae0bea49",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/eu-poa.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/eu-poa/rulebook.html"
+    },
+    {
+      "id": "a41678e4-1214-512b-9524-7fb1c631831c",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/duns.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/duns/rulebook.html"
+    },
+    {
+      "id": "27d8b9fa-5f45-59e3-806e-150af7aae892",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/e-receipt.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/e-receipt/rulebook.html"
+    },
+    {
+      "id": "2104f583-7308-52a2-b9ac-96f68787efe8",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/gln.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/gln/rulebook.html"
+    },
+    {
+      "id": "74973c8c-2ca7-5750-ac2a-09342820b3be",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/iban-ov.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/iban-ov/rulebook.html"
+    },
+    {
+      "id": "1690a06a-a915-5080-b56d-cb05bf7fe522",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/ownership.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/ownership/rulebook.html"
+    },
+    {
+      "id": "33e3479b-e9d2-5d02-a466-2a565c8fa46e",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/payment-terms.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/payment-terms/rulebook.html"
+    },
+    {
+      "id": "dc7408d2-9f4a-5ebc-9175-6be23ccdfecf",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/site.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/site/rulebook.html"
+    },
+    {
+      "id": "57209a5e-6dd3-547c-bd00-394f60bd9c64",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/ubo.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/ubo/rulebook.html"
+    },
+    {
+      "id": "87219f97-f751-500d-8e0c-b76db4dbb38a",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/webuild-consortium/vat-id.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/vat-id/rulebook.html"
+    },
+    {
+      "id": "7b4e6090-e595-51dc-b9bf-c4bffb61fd2e",
+      "version": "0.1.0",
+      "attestationLoS": "iso_18045_high",
+      "bindingType": "key",
+      "supportedFormats": [
+        "mso_mdoc"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "mso_mdoc",
+          "uri": "https://registry.siros.org/webuild-consortium/ecmr.mdoc.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/webuild-consortium/ecmr/rulebook.html"
+    },
+    {
+      "id": "615d6bdb-9c29-564c-8e55-a136fd18d8c6",
+      "version": "0.4.0",
+      "attestationLoS": "iso_18045_moderate",
+      "bindingType": "key",
+      "supportedFormats": [
+        "mso_mdoc"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "mso_mdoc",
+          "uri": "https://registry.siros.org/sirosfoundation/nym_auth.mdoc.json"
+        }
+      ],
+      "rulebookURI": "https://registry.siros.org/sirosfoundation/nym_auth/rulebook.html"
+    },
+    {
+      "id": "1f281d3b-2ba9-515e-a4fd-693996715bb9",
+      "version": "1.0",
+      "attestationLoS": "iso_18045_basic",
+      "bindingType": "key",
+      "supportedFormats": [
+        "dc+sd-jwt"
+      ],
+      "schemaURIs": [
+        {
+          "formatIdentifier": "dc+sd-jwt",
+          "uri": "https://registry.siros.org/paradigma-cl/ubid-basic.vctm.json"
+        }
+      ],
+      "rulebookURI": "https://github.com/paradigma-cl/ubid-credential-types/blob/main/credentials/ubid-basic.rulebook.md"
+    }
+  ],
+  "limit": 32,
+  "offset": 0,
+  "total": 32
+}

@@ -151,9 +151,32 @@ Added by the Phase 6 security audit ([issue #52](https://github.com/ForkbombEu/c
 
 * * *
 
+Matrix D — ETSI migration and external interoperability (Phase 6)
+-----------------------------------------------------------------
+
+Added by [issue #54](https://github.com/ForkbombEu/credimi-attestbook/issues/54). The
+clause-level comparison, migration gaps and non-claims are in
+[`docs/etsi-interoperability.md`](etsi-interoperability.md); the executable evidence is
+`src/standards/interoperability.test.ts` with frozen fixtures under
+`src/standards/test/interop-fixtures/`.
+
+| ID | Claim / requirement | Normative source | Evidence | Status |
+| --- | --- | --- | --- | --- |
+| ETSI-01 | Draft `SchemaMeta` model and JSON Schema | ETSI EN 319 482-3 draft v0.0.7 (2026-11) Annex E.1–E.2; SCH-AD-6.4-01 | Annex E schema fixture compiled and run by the interoperability test | PARTIAL: no `etsi@0.0.7` profile; an Annex E-valid no-trust document parses and signs |
+| ETSI-02 | JWT representation and signer policy | SCH-AD-6.4-01(a), -02 | `src/standards/interoperability.test.ts` sign/verify test | PARTIAL: OWF-profile JWS supported; catalogue signer policy `NOT_TESTED` |
+| ETSI-03 | `rulebookIntegrity`, per-schema `integrity`/`meta`, two formats | SCH-AD-6.4-03 to -05; Annex E | `src/standards/interoperability.test.ts` | SUPPORTED through the OWF profile |
+| ETSI-04 | Minimal `etsi_tl` trust authority (0..1, no `verificationMethod`) | Annex E.1.5; SCH-AD-6.4-01(g) | `src/standards/interoperability.test.ts` | **UNSUPPORTED**: OWF 0.5.4 requires `verificationMethod` |
+| ETSI-05 | TS11-only members (`supportedFormats`, `aki`, `openid_federation`, `isLOTE`, three formats) | TS11 v1.0.1 §4.3; ETSI draft Annex E | `src/standards/interoperability.test.ts` | PARTIAL: TS11 documents are ETSI-invalid and need translation |
+| ETSI-06 | Scheme-catalogue API | ETSI draft SCH-CM-5.1-05..12 (no API specified); TS11 §5 | [`docs/api.md`](api.md); `src/api/openapi.test.ts` | NOT_TESTED / UNSPECIFIED: the draft defines no API |
+| ETSI-07 | SIROS external catalogue interoperability | Source claim: read-only TS11 §5 subset | Frozen capture + `src/standards/interoperability.test.ts` | 27/32 parse as TS11; 5 non-SemVer negative outcomes |
+| ETSI-08 | FIDES signed catalogue interoperability | Source claim: partial TS11 conformance | Frozen JWT/JWKS + `src/standards/interoperability.test.ts` | ES256 signature verified; 20/121 parse; 0/10 self-reported "compatible" parse |
+| ETSI-09 | EUDI Wallet rulebooks catalog | None: Markdown only | [`docs/catalog-research.md`](catalog-research.md) §3.1 | NOT_TESTED / not machine-readable |
+
+* * *
+
 Notes and status
 ----------------
 
 - Every dimension other than **STR** (and the metadata-level **CRYPTO** of JWS/SRI) is **delegated to an external specification** (OpenID4VCI, OpenID4VP, ISO/IEC 18013-5, SD-JWT, ETSI Trusted Lists/LoTE). AttestBook's engine must not report PASS for those dimensions unless the corresponding external check actually ran (AC-16, AC-17).
-- **ETSI EN 319 482-3** has no entries here because its draft text is not publicly accessible (see `docs/standards.md` §6, §8). It will be added as a column once the draft is readable or published; until then the matrix's normative anchor is **TS11 v1.0.1**.
+- **ETSI EN 319 482-3:** the Phase 0 note said it had no entries because the draft text was not publicly accessible. Issue #54 later read public draft **v0.0.7 (2026-11)** and added Matrix D above and [`docs/etsi-interoperability.md`](etsi-interoperability.md); draft v0.0.6 remains unread, so no v0.0.6 → v0.0.7 delta is claimed. The matrix's normative anchor for implemented behaviour is still **TS11 v1.0.1**.
 - "Unsupported" / "ambiguous" / "draft" / "unverified" items are enumerated in `docs/standards.md` §8 and should be cross-referenced by any test marked NOT_TESTED or INCONCLUSIVE.
