@@ -331,6 +331,38 @@ describe('headless-wallet comparison evidence', () => {
   })
 })
 
+describe('reproducible conformance run', () => {
+  test('returns the same stable reference for repeated pinned runs', async () => {
+    const { client, seeded, credential } = await setup()
+    const pin = await client.pinRulebook({
+      rulebookId: seeded.rulebookId,
+      version: seeded.version,
+      attestationType: seeded.attestationName,
+    })
+    const input = {
+      pin,
+      credential,
+      schemaDocuments: [{ uri: seeded.schemaUri, content: seeded.schemaContent }],
+    }
+
+    const first = await client.runConformance(input)
+    const second = await client.runConformance(input)
+
+    expect(second.resultReference).toBe(first.resultReference)
+    expect(second.input.inputDigest).toBe(first.input.inputDigest)
+    expect(first.pin).toMatchObject({
+      rulebookId: seeded.rulebookId,
+      version: seeded.version,
+      contentDigest: seeded.digest,
+      digestVerified: true,
+      attestationType: seeded.attestationName,
+    })
+    expect(first.outcome).toBe('evidence_incomplete')
+    expect(first.evidence.dimensions).toHaveLength(8)
+    expect(first.nonClaims.recurringExecutionScheduled).toBe(false)
+  })
+})
+
 describe('real-socket failure and timeout handling', () => {
   test('aborts a request that exceeds the configured timeout', async () => {
     const slowServer = Bun.serve({

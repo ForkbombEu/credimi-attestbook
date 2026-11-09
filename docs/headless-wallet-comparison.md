@@ -193,5 +193,8 @@ The feature is covered by fixture-driven tests:
 - The comparison does not diff two credentials or two rulebook versions. It places the
   AttestBook structural evidence of one pinned capture next to one external wallet
   observation.
-- A future continuous-conformance slice ([issue #51](https://github.com/ForkbombEu/credimi-attestbook/issues/51))
-  owns recurring execution and stable run history. This slice does not persist runs.
+- Reproducible continuous-conformance results are now delivered by
+  [issue #51](https://github.com/ForkbombEu/credimi-attestbook/issues/51):
+  `POST /api/v1/conformance/runs` returns a deterministic, content-addressed result
+  ([`docs/conformance.md`](conformance.md)). The comparison slice still does not persist
+  runs, AttestBook schedules no recurrence, and external orchestration owns the run history.

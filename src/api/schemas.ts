@@ -11,6 +11,15 @@ import { z } from 'zod'
 
 import { ISSUER_FIXTURE_KIND, ISSUER_FIXTURE_NEGATIVE_CATEGORIES } from '../fixtures/types'
 import {
+  CONFORMANCE_CANONICALIZATION,
+  CONFORMANCE_DIGEST_ALGORITHM,
+  CONFORMANCE_FAILURE_CLASSES,
+  CONFORMANCE_OUTCOMES,
+  CONFORMANCE_REFERENCE_SCOPE,
+  CONFORMANCE_RESULT_KIND,
+  CONFORMANCE_RESULT_VERSION,
+} from '../conformance/types'
+import {
   COMPARISON_RESULTS,
   EXTERNAL_WALLET_INTERACTIONS,
   HEADLESS_WALLET_COMPARISON_KIND,
@@ -745,6 +754,111 @@ export const credentialValidationResponseSchema = z.object({
   data: credentialValidationResultSchema,
 })
 
+// ------------------------------------- reproducible conformance (#51)
+
+export const CONFORMANCE_OUTCOME_SCHEMA = z.enum(CONFORMANCE_OUTCOMES)
+export const CONFORMANCE_FAILURE_CLASS_SCHEMA = z.enum(CONFORMANCE_FAILURE_CLASSES)
+
+const sha256HexSchema = z.string().regex(/^[0-9a-f]{64}$/)
+
+export const conformancePinSchema = z.object({
+  rulebookId: z.string(),
+  version: z.string(),
+  contentDigest: sha256HexSchema,
+  specVersion: z.string(),
+  attestationType: z.string(),
+  digestVerified: z.literal(true),
+})
+
+export const conformanceSchemaDocumentDigestSchema = z.object({
+  uri: z.string(),
+  contentDigest: sha256HexSchema,
+})
+
+export const conformanceInputSchema = z.object({
+  credentialDigest: sha256HexSchema,
+  credentialFormatHint: nullableString,
+  schemaDocuments: z.array(conformanceSchemaDocumentDigestSchema),
+  inputDigest: sha256HexSchema,
+})
+
+export const conformanceFailureSchema = z.object({
+  code: CONFORMANCE_FAILURE_CLASS_SCHEMA,
+  dimension: VALIDATION_DIMENSION_ID_SCHEMA,
+  findingCodes: z.array(z.string()),
+})
+
+export const conformanceEvidenceSchema = z.object({
+  overallStatus: VALIDATION_STATUS_SCHEMA,
+  credential: z.object({
+    format: nullableString,
+    vct: nullableString,
+    disclosureCount: z.number().int().nonnegative(),
+    keyBindingPresent: z.boolean(),
+  }),
+  attestation: z.object({
+    name: z.string(),
+    attestationLoS: z.string(),
+    bindingType: z.string(),
+    supportedFormats: z.array(z.string()),
+  }),
+  schemaReferences: z.array(
+    z.object({
+      formatIdentifier: z.string(),
+      uri: z.string(),
+      integrity: nullableString,
+      kind: z.enum(['type_metadata', 'json_schema']).nullable(),
+      applied: z.boolean(),
+    }),
+  ),
+  dimensions: z.array(validationDimensionSchema),
+  violations: z.array(validationFindingSchema),
+  limitations: z.array(validationLimitationSchema),
+})
+
+export const conformanceResultSchema = z.object({
+  kind: z.literal(CONFORMANCE_RESULT_KIND),
+  contractVersion: z.literal(CONFORMANCE_RESULT_VERSION),
+  resultReference: sha256HexSchema,
+  deterministic: z.boolean(),
+  environmentConditions: z.array(z.string()),
+  pin: conformancePinSchema,
+  input: conformanceInputSchema,
+  outcome: CONFORMANCE_OUTCOME_SCHEMA,
+  failureClasses: z.array(conformanceFailureSchema),
+  evidence: conformanceEvidenceSchema,
+  references: z.object({
+    canonicalization: z.literal(CONFORMANCE_CANONICALIZATION),
+    digestAlgorithm: z.literal(CONFORMANCE_DIGEST_ALGORITHM),
+    referenceScope: z.literal(CONFORMANCE_REFERENCE_SCOPE),
+    statusTaxonomy: z.literal('FR-012'),
+    engine: z.object({
+      attestbook: z.string(),
+      owfSchema: z.string(),
+    }),
+  }),
+  nonClaims: z.object({
+    cryptographicVerification: z.literal(false),
+    issuerTrust: z.literal(false),
+    protocolConformance: z.literal(false),
+    interoperability: z.literal(false),
+    standardsConformance: z.literal(false),
+    recurringExecutionScheduled: z.literal(false),
+  }),
+  limitations: z.array(z.string()),
+})
+
+export const conformanceRunResponseSchema = z.object({
+  data: conformanceResultSchema,
+})
+
+/**
+ * The conformance run body is the same pinned validation body today. It has its
+ * own component name so the conformance contract can evolve without changing
+ * the credential-validation request by accident.
+ */
+export const conformanceRunRequestSchema = validateCredentialRequestSchema
+
 // -------------------------------------------------- capture explorer (#48)
 
 export const CAPTURE_SOURCE_COMPONENT_SCHEMA = z.enum(['capture-issuer', 'capture-verifier'])
@@ -1359,6 +1473,9 @@ export const OPENAPI_COMPONENTS = {
   ValidateCredentialRequest: validateCredentialRequestSchema,
   CredentialValidationResult: credentialValidationResultSchema,
   CredentialValidationResponse: credentialValidationResponseSchema,
+  ConformanceResult: conformanceResultSchema,
+  ConformanceRunRequest: conformanceRunRequestSchema,
+  ConformanceRunResponse: conformanceRunResponseSchema,
   CaptureExplorerListResponse: captureExplorerPageSchema,
   CaptureExplorerDetailResponse: captureExplorerDetailResponseSchema,
   CorrelateCaptureRequest: correlateCaptureRequestSchema,
@@ -1389,6 +1506,7 @@ const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
   'ImportRequest',
   'DiscoverIssuerRequest',
   'ValidateCredentialRequest',
+  'ConformanceRunRequest',
   'CorrelateCaptureRequest',
   'CompareCaptureRequest',
   'GenerateIssuerFixtureRequest',
@@ -1433,6 +1551,7 @@ export type GenerateIssuerFixtureRequestResource = z.infer<
   typeof generateIssuerFixtureRequestSchema
 >
 export type CredentialValidationResource = z.infer<typeof credentialValidationResultSchema>
+export type ConformanceResultResource = z.infer<typeof conformanceResultSchema>
 export type CaptureExplorerSummaryResource = z.infer<typeof captureExplorerSummarySchema>
 export type CaptureExplorerDetailResource = z.infer<typeof captureExplorerDetailSchema>
 export type CaptureExplorerPageResource = z.infer<typeof captureExplorerPageSchema>

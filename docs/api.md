@@ -39,12 +39,15 @@ Implemented and exposed by this slice:
   [issue #43](https://github.com/ForkbombEu/credimi-attestbook/issues/43));
 - public rulebook-driven unsigned issuer fixture generation (added by
   [issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44));
-- structural credential validation against a pinned rulebook version.
+- structural credential validation against a pinned rulebook version;
+- reproducible continuous-conformance evidence with a stable content-addressed result
+  reference (added by [issue #51](https://github.com/ForkbombEu/credimi-attestbook/issues/51)).
 
 The public API is the integration boundary for Credimi. The standalone adapter documented in
 [`docs/credimi-integration.md`](credimi-integration.md) (issue #49) consumes these routes only:
-it exposes rulebook selection, version pinning, credential validation and capture-evidence
-correlation without database access or a Credimi runtime dependency. It adds no route.
+it exposes rulebook selection, version pinning, credential validation, capture-evidence
+correlation, headless-wallet comparison and a reproducible conformance run without database
+access or a Credimi runtime dependency. It adds no route.
 
 Deliberately **not** in this slice:
 
@@ -75,13 +78,13 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.8.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.9.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
   export operations added by #42, issuer discovery added by #43, issuer fixture generation
   added by #44, the mock-backed capture explorer added by #48, the optional pinned
-  correlation digest added by #49 and the read-only headless-wallet comparison added by
-  #50); it is separate from the package version reported by
-  `/health`.
+  correlation digest added by #49, the read-only headless-wallet comparison added by
+  #50 and the reproducible conformance run added by #51); it is separate from the package
+  version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -118,6 +121,7 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `POST` | `/api/v1/imports` | yes | `200` | Import compatible entries as drafts, reporting per-entry dispositions. |
 | `POST` | `/api/v1/issuers/discover` | yes | `200` | Bounded OpenID4VCI issuer metadata discovery with candidate rulebook associations, ambiguity and unmatched reporting. |
 | `POST` | `/api/v1/credentials/validate` | no | `200` | Structural credential validation with per-dimension evidence. |
+| `POST` | `/api/v1/conformance/runs` | no | `200` | Run the pinned structural validation and return the reproducible conformance result with a stable result reference and failure classification. |
 | `GET` | `/api/v1/captures` | no | `200` | Mock-backed page of normalized capture evidence with correlation identifiers and explicit evidence gaps. |
 | `GET` | `/api/v1/captures/{captureId}` | no | `200` | One capture with its redacted artifact projection, evidence timeline and the validation linked to its pinned rulebook version. |
 | `POST` | `/api/v1/captures/{captureId}/validate` | yes | `200` | Correlate a captured issued credential with a pinned rulebook version and record the structural validation result. |
@@ -593,6 +597,73 @@ starts no wallet and contacts no Credimi or capture endpoint. `404` means an unk
 explorer and `502` a failing capture source. The contract, bounds and non-claims are documented
 in [`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md).
 
+### 3.10 Reproducible continuous-conformance runs
+
+`POST /api/v1/conformance/runs` accepts the same body as `POST /api/v1/credentials/validate`:
+the exact `rulebookId`, `rulebookVersion`, `attestationType`, the credential and optional
+schema documents. It runs the same structural engine and returns
+`attestbook.conformance-result@1`, a machine-readable result for recurring validation:
+
+```json
+{
+  "kind": "attestbook.conformance-result@1",
+  "contractVersion": 1,
+  "resultReference": "<64 lowercase hex characters>",
+  "deterministic": true,
+  "environmentConditions": [],
+  "pin": {
+    "rulebookId": "0f8fad5b-d9cb-469f-a165-70867728950e",
+    "version": "1.0",
+    "contentDigest": "<snapshot digest>",
+    "specVersion": "ts11@1.0.1",
+    "attestationType": "PID",
+    "digestVerified": true
+  },
+  "input": {
+    "credentialDigest": "<credential bytes digest>",
+    "credentialFormatHint": null,
+    "schemaDocuments": [{ "uri": "https://example.org/schemas/pid.json", "contentDigest": "<digest>" }],
+    "inputDigest": "<64 lowercase hex characters>"
+  },
+  "outcome": "evidence_incomplete",
+  "failureClasses": [],
+  "evidence": { "overallStatus": "NOT_TESTED", "dimensions": [ "..." ] },
+  "references": {
+    "canonicalization": "attestbook.stable-json@1",
+    "digestAlgorithm": "sha256",
+    "referenceScope": "pin+input+evidence+failure-classification",
+    "statusTaxonomy": "FR-012",
+    "engine": { "attestbook": "0.1.0", "owfSchema": "0.5.4" }
+  },
+  "nonClaims": {
+    "cryptographicVerification": false,
+    "issuerTrust": false,
+    "protocolConformance": false,
+    "interoperability": false,
+    "standardsConformance": false,
+    "recurringExecutionScheduled": false
+  },
+  "limitations": [ "..." ]
+}
+```
+
+`resultReference` and `inputDigest` are content-addressed over canonical JSON. Repeating the
+same pinned request returns the same values when the run completed deterministically; a
+changed credential, schema document, pinned snapshot or structural evidence changes the
+relevant digest. Supplied schema documents are sorted by URI in UTF-16 code-unit order
+(locale-independent) in the input identity. Validation
+identifiers, timestamps and mutable rulebook lifecycle metadata are excluded and the raw
+credential and schema documents are never echoed.
+
+A runtime condition that cuts a check short (a busy or unavailable schema sandbox, a timeout,
+a memory or output cap) makes `deterministic` `false` and names the condition in
+`environmentConditions`; such a result must be retried and its reference must not be compared
+with an earlier run as drift. The operation is public and read-only: it persists no run and
+schedules no recurrence, so external orchestration owns the run history. `400` is a malformed
+body, `404` an unknown rulebook/version/attestation type and `503` an unwired validation
+service. The full contract, determinism scope and failure-class table are in
+[`docs/conformance.md`](conformance.md).
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -690,6 +761,7 @@ Phase 1 supports idempotency where the domain provides a deterministic identity;
 | `POST /api/v1/rulebooks/{rulebookId}/versions` | **Not idempotent.** A duplicate label is `409 conflict`; the client chooses the next label after a conflict. |
 | `POST /api/v1/imports/preview` | Read-only and side-effect free, but authenticated because a URL preview performs a bounded outbound fetch; safe to retry. |
 | `POST /api/v1/credentials/validate` | Read-only; safe to retry. |
+| `POST /api/v1/conformance/runs` | Read-only and side-effect free. The same pinned request returns the same `inputDigest` and `resultReference` when the run is deterministic; a run cut short by a runtime condition returns `deterministic: false` and must be retried. No run is recorded, so there is no server-side history to deduplicate. |
 
 The import policy is the substantive idempotency mechanism implemented in Phase 1
 ([`docs/import.md`](import.md) §5). A generic idempotency-key store is deliberately deferred:
@@ -738,8 +810,10 @@ bun test src/discovery  # discovery extraction, bounds and association
 bun test src/fixtures   # fixture synthesis, grounding and negative cases
 bun test src/verifier   # typed verifier constraints and OpenID4VP-aware mappings
 bun test src/comparison # headless-wallet comparison contract and bounds
+bun test src/conformance # reproducible result references and failure classification
 bun test src/api/verifier.test.ts  # verifier-constraint HTTP contract
 bun test src/api/comparison.test.ts  # comparison HTTP contract and pin linkage
+bun test src/api/conformance.test.ts  # conformance HTTP contract, repeats and classification
 bun run check           # formatting, lint, strict typecheck and all tests
 ```
 
@@ -775,6 +849,12 @@ own component and browser tests described in [`docs/ui.md`](ui.md).
   or protocol result, reports every mapping it cannot express, and inspects only
   caller-supplied, integrity-verified schema documents within hard bounds
   ([`docs/verifier.md`](verifier.md) §2.1, §5 and §6).
+- Conformance runs are not persisted: `POST /api/v1/conformance/runs` recomputes the
+  deterministic result on every call and returns a content-addressed `resultReference`
+  instead of a stored run resource. External orchestration keeps the run history. A run cut
+  short by a runtime condition returns `deterministic: false` with its
+  `environmentConditions` and must be retried rather than compared as drift
+  ([`docs/conformance.md`](conformance.md) §4 and §9).
 - Validation results are returned synchronously and are not persisted
   (`GET /api/v1/validations/{id}` does not exist in this slice; the specification lists it as
   a suggested resource, not an implemented one).

@@ -15,12 +15,15 @@
 
 import type { ZodType } from 'zod'
 
+import { sha256Hex } from '../../registry/digest'
+
 import {
   attestationListResponseSchema,
   captureCorrelationResponseSchema,
   captureExplorerDetailResponseSchema,
   captureExplorerPageSchema,
   compareCaptureRequestSchema,
+  conformanceRunResponseSchema,
   correlateCaptureRequestSchema,
   credentialValidationResponseSchema,
   headlessWalletComparisonResponseSchema,
@@ -33,6 +36,7 @@ import {
 
 import {
   assertPinnedComparison,
+  assertPinnedConformance,
   assertPinnedCorrelation,
   assertPinnedValidation,
   credimiRulebookPinSchema,
@@ -42,6 +46,8 @@ import {
   type CredimiCapturePage,
   type CredimiCaptureQuery,
   type CredimiComparisonInput,
+  type CredimiConformanceInput,
+  type CredimiConformanceResult,
   type CredimiCorrelationInput,
   type CredimiEvidenceCorrelation,
   type CredimiHeadlessWalletComparison,
@@ -115,6 +121,15 @@ function invalidConfiguration(message: string): CredimiAdapterError {
 
 function invalidRequest(message: string): CredimiAdapterError {
   return new CredimiAdapterError('invalid_request', message)
+}
+
+/**
+ * Locale-independent UTF-16 code-unit order. It must match the server's
+ * `compareCodeUnits` in `src/import/identity.ts`, which orders the schema
+ * documents in the conformance input identity.
+ */
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0
 }
 
 function invalidResponse(operation: string, message: string): CredimiAdapterError {
@@ -524,6 +539,100 @@ export class CredimiAdapter {
     })
     assertPinnedValidation(pin, response.data)
     return response.data
+  }
+
+  /**
+   * Runs one reproducible structural conformance check against the pinned
+   * rulebook version. The result is rejected with `pin_mismatch` unless it
+   * names exactly the pinned rulebook/version/digest/specification/attestation
+   * type, and with `invalid_response` unless its input digests name exactly the
+   * credential and schema documents this request supplied.
+   *
+   * Repeating the same call with the same pinned inputs returns the same
+   * `resultReference`; the caller stores it to detect a later drift. AttestBook
+   * starts no execution and schedules no recurrence.
+   */
+  async runConformance(input: CredimiConformanceInput): Promise<CredimiConformanceResult> {
+    const pin = this.requirePin(input.pin)
+    const credential =
+      typeof input.credential === 'string' ? input.credential : input.credential.value
+    if (typeof credential !== 'string' || credential.trim() === '') {
+      throw invalidRequest('credential must not be empty.')
+    }
+    const body = parseRequest(
+      validateCredentialRequestSchema,
+      {
+        rulebookId: pin.rulebookId,
+        rulebookVersion: pin.version,
+        attestationType: pin.attestationType,
+        credential: input.credential,
+        ...(input.schemaDocuments === undefined
+          ? {}
+          : { schemaDocuments: [...input.schemaDocuments] }),
+      },
+      'conformance run',
+    )
+    const response = await this.requestJson({
+      operation: 'conformance run',
+      method: 'POST',
+      path: `${API_PREFIX}/conformance/runs`,
+      body,
+      schema: conformanceRunResponseSchema,
+      retryable: false,
+    })
+    assertPinnedConformance(pin, response.data)
+    this.assertConformanceInput(input, response.data)
+    return response.data
+  }
+
+  /** Verifies that the result's input identity is exactly what was sent. */
+  private assertConformanceInput(
+    input: CredimiConformanceInput,
+    result: CredimiConformanceResult,
+  ): void {
+    const credential =
+      typeof input.credential === 'string' ? input.credential : input.credential.value
+    const expectedCredentialDigest = sha256Hex(new TextEncoder().encode(credential))
+    if (result.input.credentialDigest !== expectedCredentialDigest) {
+      throw invalidResponse('conformance run', 'the result names a different credential digest')
+    }
+    // The server trims an explicit format hint through `requireText`; compare
+    // the normalized value, not the caller's raw spacing.
+    const expectedFormatHint =
+      typeof input.credential === 'string' ? null : (input.credential.format?.trim() ?? null)
+    if (result.input.credentialFormatHint !== expectedFormatHint) {
+      throw invalidResponse(
+        'conformance run',
+        'the result names a different credential format hint',
+      )
+    }
+    // Schema URIs are trimmed by the server and sorted in the input identity.
+    const expectedSchemaDocuments = (input.schemaDocuments ?? [])
+      .map((document) => ({
+        uri: document.uri.trim(),
+        contentDigest: sha256Hex(new TextEncoder().encode(document.content)),
+      }))
+      .sort((left, right) => compareCodeUnits(left.uri, right.uri))
+    const actualSchemaDocuments = result.input.schemaDocuments
+    if (actualSchemaDocuments.length !== expectedSchemaDocuments.length) {
+      throw invalidResponse(
+        'conformance run',
+        'the result names different supplied schema documents',
+      )
+    }
+    for (const [index, expected] of expectedSchemaDocuments.entries()) {
+      const actual = actualSchemaDocuments[index]
+      if (
+        actual === undefined ||
+        actual.uri !== expected.uri ||
+        actual.contentDigest !== expected.contentDigest
+      ) {
+        throw invalidResponse(
+          'conformance run',
+          'the result names different supplied schema documents',
+        )
+      }
+    }
   }
 
   /** Lists capture evidence, newest first, with explicit evidence gaps. */

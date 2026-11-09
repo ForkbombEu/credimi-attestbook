@@ -1,0 +1,263 @@
+// Pure tests for the reproducible conformance result builder (FR-022, #51).
+//
+// These tests prove the properties the API depends on: the same pinned inputs
+// and evidence produce the same digest/reference even across validation
+// identifiers, timestamps and lifecycle metadata; a changed input or a changed
+// evidence set produces a different reference; and failures are classified with
+// stable codes.
+
+import { describe, expect, test } from 'bun:test'
+
+import applicationPackage from '../../package.json'
+import { stableJson } from '../import/identity'
+import type { ValidationFinding } from '../validation'
+
+import {
+  buildConformanceResult,
+  conformanceOutcome,
+  CONFORMANCE_RESULT_LIMITATIONS,
+  sha256Text,
+} from './result'
+import {
+  conformanceRequest,
+  conformanceResult,
+  conformanceValidationResult,
+  TEST_CREDENTIAL,
+  TEST_RULEBOOK_DIGEST,
+  TEST_SCHEMA_URI,
+  TEST_SCHEMA_CONTENT,
+} from './test/fixtures'
+
+describe('reproducible conformance result', () => {
+  test('repeating the same pinned inputs produces an identical result', () => {
+    const first = conformanceResult()
+    const second = conformanceResult()
+
+    expect(second).toEqual(first)
+    expect(first.resultReference).toMatch(/^[0-9a-f]{64}$/)
+    expect(first.input.inputDigest).toMatch(/^[0-9a-f]{64}$/)
+    expect(first.deterministic).toBe(true)
+    expect(first.environmentConditions).toEqual([])
+  })
+
+  test('excludes validation identifiers, timestamps and mutable lifecycle metadata', () => {
+    const first = conformanceResult()
+    const second = conformanceResult({
+      validationId: 'a-different-validation-id',
+      validatedAt: '2030-12-31T23:59:59.000Z',
+      rulebookName: 'A renamed rulebook',
+      rulebookStatus: 'historical',
+    })
+
+    expect(second.input.inputDigest).toBe(first.input.inputDigest)
+    expect(second.resultReference).toBe(first.resultReference)
+    expect(JSON.stringify(second.evidence)).not.toContain('A renamed rulebook')
+    expect(JSON.stringify(second.evidence)).not.toContain('historical')
+  })
+
+  test('changes the reference when the credential changes', () => {
+    const base = conformanceResult()
+    const changed = conformanceResult({ credential: `${TEST_CREDENTIAL}x` })
+
+    expect(changed.input.credentialDigest).not.toBe(base.input.credentialDigest)
+    expect(changed.resultReference).not.toBe(base.resultReference)
+  })
+
+  test('changes the reference when a supplied schema document changes', () => {
+    const base = conformanceResult()
+    const changed = conformanceResult({
+      schemaDocuments: [{ uri: TEST_SCHEMA_URI, content: '{"type":"object"}' }],
+    })
+
+    expect(changed.input.schemaDocuments[0]?.contentDigest).not.toBe(
+      base.input.schemaDocuments[0]?.contentDigest,
+    )
+    expect(changed.resultReference).not.toBe(base.resultReference)
+  })
+
+  test('keeps the input identity independent of schema-document order', () => {
+    const first = conformanceResult({
+      schemaDocuments: [
+        { uri: 'https://example.org/schemas/a.json', content: '{"type":"object"}' },
+        { uri: 'https://example.org/schemas/B.json', content: '{"type":"object"}' },
+      ],
+    })
+    const second = conformanceResult({
+      schemaDocuments: [
+        { uri: 'https://example.org/schemas/B.json', content: '{"type":"object"}' },
+        { uri: 'https://example.org/schemas/a.json', content: '{"type":"object"}' },
+      ],
+    })
+
+    // UTF-16 code-unit order: uppercase 'B' sorts before lowercase 'a'.
+    expect(first.input.schemaDocuments.map((document) => document.uri)).toEqual([
+      'https://example.org/schemas/B.json',
+      'https://example.org/schemas/a.json',
+    ])
+    expect(second.input.inputDigest).toBe(first.input.inputDigest)
+    expect(second.resultReference).toBe(first.resultReference)
+  })
+
+  test('recomputes the documented input digest and result reference', () => {
+    const result = conformanceResult()
+    const inputPayload = {
+      format: 'attestbook.conformance-input@1',
+      pin: {
+        rulebookId: result.pin.rulebookId,
+        version: result.pin.version,
+        contentDigest: result.pin.contentDigest,
+        specVersion: result.pin.specVersion,
+        attestationType: result.pin.attestationType,
+      },
+      credentialDigest: result.input.credentialDigest,
+      credentialFormatHint: result.input.credentialFormatHint,
+      schemaDocuments: result.input.schemaDocuments,
+    }
+    expect(sha256Text(stableJson(inputPayload))).toBe(result.input.inputDigest)
+
+    const referencePayload = {
+      format: 'attestbook.conformance-reference@1',
+      contractVersion: 1,
+      pin: result.pin,
+      input: result.input,
+      deterministic: result.deterministic,
+      environmentConditions: result.environmentConditions,
+      outcome: result.outcome,
+      evidence: result.evidence,
+      failureClasses: result.failureClasses,
+    }
+    expect(sha256Text(stableJson(referencePayload))).toBe(result.resultReference)
+  })
+
+  test('changes the reference when the same input produces different evidence', () => {
+    const base = conformanceResult()
+    const failed = conformanceResult({ statuses: { schema_validation: 'FAIL' } })
+
+    expect(failed.input.inputDigest).toBe(base.input.inputDigest)
+    expect(failed.resultReference).not.toBe(base.resultReference)
+  })
+
+  test('reports a runtime condition as non-deterministic and not as drift', () => {
+    const baseline = conformanceResult()
+    const sandboxBusy: ValidationFinding = {
+      code: 'schema_sandbox_busy',
+      message: 'The schema evaluation sandbox is at its concurrency limit.',
+      severity: 'warning',
+      dimension: 'schema_validation',
+    }
+    const cutShort = conformanceResult({
+      statuses: { schema_validation: 'NOT_TESTED' },
+      findings: { schema_validation: [sandboxBusy] },
+    })
+
+    expect(baseline.deterministic).toBe(true)
+    expect(baseline.environmentConditions).toEqual([])
+    expect(cutShort.deterministic).toBe(false)
+    expect(cutShort.environmentConditions).toEqual(['schema_sandbox_busy'])
+    expect(cutShort.outcome).toBe('inconclusive')
+    expect(cutShort.resultReference).not.toBe(baseline.resultReference)
+    expect(cutShort.limitations.join(' ')).toContain('deterministic false')
+  })
+
+  test('includes an explicit format hint in the input identity', () => {
+    const withoutHint = conformanceResult()
+    const withHint = conformanceResult({ credentialFormatHint: 'dc+sd-jwt' })
+
+    expect(withHint.input.credentialDigest).toBe(withoutHint.input.credentialDigest)
+    expect(withHint.input.credentialFormatHint).toBe('dc+sd-jwt')
+    expect(withoutHint.input.credentialFormatHint).toBeNull()
+    expect(withHint.input.inputDigest).not.toBe(withoutHint.input.inputDigest)
+  })
+
+  test('maps every FR-012 aggregate status to a structural outcome', () => {
+    expect(conformanceOutcome('PASS')).toBe('structural_pass')
+    expect(conformanceOutcome('FAIL')).toBe('structural_fail')
+    expect(conformanceOutcome('INCONCLUSIVE')).toBe('inconclusive')
+    expect(conformanceOutcome('NOT_TESTED')).toBe('evidence_incomplete')
+    expect(conformanceOutcome('NOT_APPLICABLE')).toBe('not_applicable')
+  })
+
+  test('classifies failed dimensions with stable codes and their finding codes', () => {
+    const result = conformanceResult({
+      statuses: {
+        credential_parsing: 'FAIL',
+        schema_validation: 'FAIL',
+        attestation_constraints: 'FAIL',
+      },
+    })
+
+    expect(result.outcome).toBe('structural_fail')
+    expect(result.failureClasses).toEqual([
+      {
+        code: 'credential_unparseable',
+        dimension: 'credential_parsing',
+        findingCodes: ['sd_jwt_malformed'],
+      },
+      {
+        code: 'schema_violation',
+        dimension: 'schema_validation',
+        findingCodes: ['schema_violation'],
+      },
+      {
+        code: 'attestation_constraint_violation',
+        dimension: 'attestation_constraints',
+        findingCodes: ['missing_key_binding'],
+      },
+    ])
+  })
+
+  test('classifies only failed dimensions and keeps the incomplete evidence explicit', () => {
+    const result = conformanceResult()
+
+    expect(result.outcome).toBe('evidence_incomplete')
+    expect(result.failureClasses).toEqual([])
+    expect(result.evidence.limitations.length).toBeGreaterThan(0)
+    expect(result.evidence.overallStatus).toBe('NOT_TESTED')
+  })
+
+  test('carries the exact pin, explicit references and non-claims without credential material', () => {
+    const result = conformanceResult()
+    const serialized = JSON.stringify(result)
+
+    expect(result.pin).toEqual({
+      rulebookId: 'rulebook-conformance-1',
+      version: '2.1',
+      contentDigest: TEST_RULEBOOK_DIGEST,
+      specVersion: 'ts11@1.0.1',
+      attestationType: 'PID',
+      digestVerified: true,
+    })
+    expect(result.references).toEqual({
+      canonicalization: 'attestbook.stable-json@1',
+      digestAlgorithm: 'sha256',
+      referenceScope: 'pin+input+evidence+failure-classification',
+      statusTaxonomy: 'FR-012',
+      engine: {
+        attestbook: applicationPackage.version,
+        owfSchema: '0.5.4',
+      },
+    })
+    expect(result.nonClaims).toEqual({
+      cryptographicVerification: false,
+      issuerTrust: false,
+      protocolConformance: false,
+      interoperability: false,
+      standardsConformance: false,
+      recurringExecutionScheduled: false,
+    })
+    expect(result.limitations).toEqual([...CONFORMANCE_RESULT_LIMITATIONS])
+    expect(result.input.schemaDocuments[0]?.uri).toBe(TEST_SCHEMA_URI)
+    expect(result.input.schemaDocuments[0]?.contentDigest).toMatch(/^[0-9a-f]{64}$/)
+    expect(serialized).not.toContain(TEST_CREDENTIAL)
+    expect(serialized).not.toContain(TEST_SCHEMA_CONTENT)
+    expect(serialized).not.toContain('Ada')
+  })
+
+  test('refuses evidence that does not name the requested pin', () => {
+    const validation = conformanceValidationResult({ rulebookId: 'a-different-rulebook' })
+
+    expect(() => buildConformanceResult({ validation, request: conformanceRequest() })).toThrow(
+      'the validation evidence does not name the requested pinned selection',
+    )
+  })
+})

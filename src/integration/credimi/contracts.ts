@@ -20,6 +20,7 @@ import type {
   captureExplorerPageSchema,
   captureExplorerSummarySchema,
   compareCaptureRequestSchema,
+  conformanceResultSchema,
   credentialValidationResultSchema,
   headlessWalletComparisonSchema,
   rulebookPageSchema,
@@ -54,6 +55,9 @@ export type CredimiAttestation = z.infer<typeof attestationDetailSchema>
 
 /** The complete pinned-version structural validation evidence. */
 export type CredimiValidationEvidence = z.infer<typeof credentialValidationResultSchema>
+
+/** The reproducible continuous-conformance result (FR-022). */
+export type CredimiConformanceResult = z.infer<typeof conformanceResultSchema>
 
 /** The list projection of one capture artifact. */
 export type CredimiCaptureSummary = z.infer<typeof captureExplorerSummarySchema>
@@ -128,6 +132,9 @@ export interface CredimiValidationInput {
   readonly credential: CredimiCredentialInput
   readonly schemaDocuments?: readonly CredimiSchemaDocumentInput[]
 }
+
+/** One version-pinned reproducible conformance run (FR-022). */
+export type CredimiConformanceInput = CredimiValidationInput
 
 /** One capture-correlation request; the pin supplies the rulebook and version. */
 export interface CredimiCorrelationInput {
@@ -209,6 +216,27 @@ export function assertPinnedValidation(
     contentDigest: evidence.rulebook.digest,
   })
   assertAttestationType('validation', pin, evidence.attestation.name)
+}
+
+/**
+ * Throws `pin_mismatch` unless a reproducible conformance result names exactly
+ * the pinned rulebook, version, snapshot digest, specification version and
+ * attestation type. The result reference is content-addressed by AttestBook and
+ * must be verified by the caller against the evidence it stores.
+ */
+export function assertPinnedConformance(
+  pin: CredimiRulebookPin,
+  result: CredimiConformanceResult,
+): void {
+  assertPinIdentity('conformance run', pin, {
+    rulebookId: result.pin.rulebookId,
+    version: result.pin.version,
+    contentDigest: result.pin.contentDigest,
+  })
+  if (result.pin.specVersion !== pin.specVersion) {
+    pinMismatch('conformance run', 'specification version', pin.specVersion, result.pin.specVersion)
+  }
+  assertAttestationType('conformance run', pin, result.pin.attestationType)
 }
 
 /**
