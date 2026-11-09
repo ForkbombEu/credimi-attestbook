@@ -381,8 +381,8 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   the memory-only token field; axe-core checks for the editor page;
 - the mock-backed capture explorer: loading, error and retry, empty and truncation states, the
   normalized summary columns and evidence gaps, the redacted projection (never the raw claim
-  values), external and non-credential evidence refusals, non-credential evidence, the
-  correlation form and its complete-selection and required-token rules, a successful
+  values), external and non-credential evidence refusals, the correlation form and its
+  complete-selection and required-token rules, a successful
   correlation rendering the linked findings, safe correlation errors including a rejected
   token, responsive labels, the shared header navigation and axe-core checks
   (`ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`,
