@@ -29,6 +29,7 @@ import type {
   SchemaReference,
 } from '../registry/types'
 import type { CredentialValidationResult } from '../validation'
+import type { VerifierConstraintsResult } from '../verifier'
 
 import {
   attestationDetailSchema,
@@ -45,8 +46,10 @@ import {
   rulebookVersionDocumentSchema,
   rulebookVersionSchema,
   schemaReferenceSchema,
+  verifierConstraintsResultSchema,
   versionDiffSchema,
   type IssuerFixtureResource,
+  type VerifierConstraintsResource,
 } from './schemas'
 
 /** Public catalogue projection of a provider; authority and metadata stay internal. */
@@ -461,4 +464,15 @@ export function toIssuerFixtureResource(result: IssuerFixtureResult): IssuerFixt
       payload: negativeCase.payload,
     })),
   } as unknown as IssuerFixtureResource
+}
+
+/**
+ * Projects a verifier-constraint result. The resolver already returns only
+ * public fields; parsing with the shared schema turns contract drift into a
+ * server error instead of a silently changed mapping.
+ */
+export function toVerifierConstraintsResource(
+  result: VerifierConstraintsResult,
+): VerifierConstraintsResource {
+  return verifierConstraintsResultSchema.parse(result)
 }

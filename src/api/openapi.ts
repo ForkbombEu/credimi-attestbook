@@ -53,6 +53,11 @@ const TAG_DESCRIPTIONS: readonly { readonly name: string; readonly description: 
     name: 'credentials',
     description: 'Structural credential validation with explicit per-dimension evidence.',
   },
+  {
+    name: 'verifiers',
+    description:
+      'Typed verifier constraints and explicitly partial OpenID4VP-aware policy mappings of pinned rulebook versions.',
+  },
 ]
 
 function toOpenApiPath(path: string): string {

@@ -91,6 +91,10 @@ bun run docs:check    # documentation consistency, plain Node
   synthesized from integrity-verified JSON Schema 2020-12 references of a pinned version,
   effective attribute definitions, JSON-Pointer overrides and labelled negative cases each
   verified to fail the supplied documents; see [`docs/fixtures.md`](fixtures.md);
+- `src/verifier/` — typed verifier constraints from integrity-verified JSON Schema
+  references of a pinned version, with supported verifier-policy interfaces and an explicitly
+  partial OpenID4VP DCQL mapping that reports every unexpressible constraint; see
+  [`docs/verifier.md`](verifier.md);
 - `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
   the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
   routes Hono registered, success/error contract tests for every exposed resource, and
@@ -143,7 +147,8 @@ The product API lives under `/api/v1` and is generated from a single route/schem
 truth. It exposes public rulebook, attestation, schema-reference and version reads; the exact
 version snapshot bytes with a verifiable digest; authenticated rulebook/version creation and
 publication; authenticated import preview and import; authenticated issuer metadata
-discovery; public issuer fixture generation; and credential validation. Successful responses use
+discovery; public issuer fixture generation; public verifier constraints with partial
+OpenID4VP DCQL mappings; and credential validation. Successful responses use
 a `{ "data": ... }` envelope and failures use a stable `{ "error": { "code", "message" } }`
 envelope. Writes and the import preview require a provider bearer token.
 
@@ -207,6 +212,24 @@ Each negative case is verified to fail before it is returned and carries a stabl
 `<category>:<path>` id. The supported synthesis subset, the unsigned boundary and the
 non-claims (no signing, issuance, schema fetching, cryptography or interoperability) are
 documented in [`docs/fixtures.md`](fixtures.md).
+
+## Verifier constraints
+
+`POST /api/v1/verifiers/constraints` returns the **typed attribute and format constraints** of
+one pinned rulebook version and the verifier-policy interfaces AttestBook can map them to. It
+is not an OpenID4VP endpoint: the DCQL mapping is an explicitly partial credential-query
+fragment (`complete: false`) and the result carries `nonClaims` stating that no presentation
+request, proof, cryptographic verification, trust decision or protocol result is produced.
+
+As with credential validation and issuer fixtures, the caller supplies the exact JSON Schema
+document bytes; each URI must be a schema reference of the selected attestation type and its
+sha256 SRI value must match before its constraints are inspected. The response reports the
+per-format grounding, typed attributes (JSON Pointer, required flag, types, extracted
+constraints and DCQL claim paths), every unresolved JSON Schema keyword and every unsupported
+mapping with a stable code and reason. Because the pinned snapshot stores no `vct`/`doctype`
+or trusted authorities, DCQL `meta` and `trusted_authorities` are reported unsupported rather
+than fabricated; Presentation Exchange is reported unsupported rather than guessed. See
+[`docs/verifier.md`](verifier.md) for the contract, extraction subset, bounds and non-claims.
 
 ## Safe URL and JSON import
 

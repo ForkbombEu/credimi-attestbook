@@ -10,6 +10,13 @@
 import { z } from 'zod'
 
 import { ISSUER_FIXTURE_KIND, ISSUER_FIXTURE_NEGATIVE_CATEGORIES } from '../fixtures/types'
+import {
+  VERIFIER_CONSTRAINTS_KIND,
+  VERIFIER_GROUNDING_STATUSES,
+  VERIFIER_MAPPING_SCOPES,
+  VERIFIER_POLICY_INTERFACES,
+  VERIFIER_POLICY_INTERFACE_STATUSES,
+} from '../verifier/types'
 
 export const PUBLICATION_STATUS_SCHEMA = z.enum(['draft', 'published', 'historical'])
 
@@ -835,6 +842,124 @@ export const issuerFixtureSchema = z.object({
 
 export const issuerFixtureResponseSchema = z.object({ data: issuerFixtureSchema })
 
+// ------------------------------------------------------ verifier constraints
+
+export const resolveVerifierConstraintsRequestSchema = z.object({
+  rulebookId: z.string(),
+  rulebookVersion: z.string(),
+  attestationType: z.string(),
+  format: z.string().optional(),
+  schemaDocuments: z
+    .array(
+      z.object({
+        uri: z.string(),
+        content: z.string(),
+      }),
+    )
+    .optional(),
+})
+
+export const verifierUnsupportedConstraintSchema = z.object({
+  keyword: z.string(),
+  reason: z.string(),
+})
+
+export const verifierAttributeConstraintSchema = z.object({
+  pointer: z.string(),
+  name: z.string(),
+  required: z.boolean(),
+  types: z.array(z.string()),
+  constraints: z.record(z.string(), z.json()),
+  unsupportedConstraints: z.array(verifierUnsupportedConstraintSchema),
+  sources: z.array(z.string()),
+  claimPath: z.array(z.union([z.string(), z.number(), z.null()])),
+  claimPathSupported: z.boolean(),
+})
+
+export const verifierUnsupportedMappingSchema = z.object({
+  code: z.string(),
+  scope: z.enum(VERIFIER_MAPPING_SCOPES),
+  path: z.string().optional(),
+  keyword: z.string().optional(),
+  reason: z.string(),
+})
+
+export const verifierDcqlMappingSchema = z.object({
+  interfaceId: z.literal('openid4vp.dcql@1'),
+  complete: z.literal(false),
+  credentialQuery: z.record(z.string(), z.json()).nullable(),
+  mapped: z.array(z.string()),
+  unsupported: z.array(verifierUnsupportedMappingSchema),
+  notes: z.array(z.string()),
+})
+
+export const verifierPolicyDiagnosticSchema = z.object({
+  code: z.string(),
+  message: z.string(),
+  path: z.string().optional(),
+})
+
+export const verifierFormatPolicySchema = z.object({
+  format: z.string(),
+  grounding: z.enum(VERIFIER_GROUNDING_STATUSES),
+  schemaReferences: z.array(
+    z.object({
+      formatIdentifier: z.string(),
+      uri: z.string(),
+      integrity: nullableString,
+      integrityVerified: z.boolean(),
+      kind: z.enum(['json_schema', 'type_metadata']).nullable(),
+      inspected: z.boolean(),
+      diagnostic: z.string().optional(),
+    }),
+  ),
+  attributes: z.array(verifierAttributeConstraintSchema),
+  dcql: verifierDcqlMappingSchema,
+  diagnostics: z.array(verifierPolicyDiagnosticSchema),
+})
+
+export const verifierPolicyInterfaceSchema = z.object({
+  id: z.enum(VERIFIER_POLICY_INTERFACES),
+  status: z.enum(VERIFIER_POLICY_INTERFACE_STATUSES),
+  description: z.string(),
+  supportedFeatures: z.array(z.string()),
+  unsupported: z.array(verifierUnsupportedMappingSchema),
+})
+
+export const verifierConstraintsResultSchema = z.object({
+  kind: z.literal(VERIFIER_CONSTRAINTS_KIND),
+  rulebook: z.object({
+    id: z.string(),
+    name: z.string(),
+    version: z.string(),
+    digest: z.string(),
+    digestVerified: z.literal(true),
+    specVersion: z.string(),
+    status: PUBLICATION_STATUS_SCHEMA,
+  }),
+  attestation: z.object({
+    name: z.string(),
+    attestationLoS: z.string(),
+    bindingType: z.string(),
+    supportedFormats: z.array(z.string()),
+  }),
+  formats: z.array(verifierFormatPolicySchema),
+  policyInterfaces: z.array(verifierPolicyInterfaceSchema),
+  diagnostics: z.array(verifierPolicyDiagnosticSchema),
+  nonClaims: z.object({
+    presentationRequest: z.literal(false),
+    proof: z.literal(false),
+    cryptographicVerification: z.literal('NOT_TESTED'),
+    protocolConformance: z.literal('NOT_TESTED'),
+    interoperability: z.literal('NOT_TESTED'),
+  }),
+  limitations: z.array(z.string()),
+})
+
+export const verifierConstraintsResponseSchema = z.object({
+  data: verifierConstraintsResultSchema,
+})
+
 /** Every schema published as an OpenAPI component, keyed by component name. */
 
 export const OPENAPI_COMPONENTS = {
@@ -883,6 +1008,9 @@ export const OPENAPI_COMPONENTS = {
   GenerateIssuerFixtureRequest: generateIssuerFixtureRequestSchema,
   IssuerFixture: issuerFixtureSchema,
   IssuerFixtureResponse: issuerFixtureResponseSchema,
+  ResolveVerifierConstraintsRequest: resolveVerifierConstraintsRequestSchema,
+  VerifierConstraintsResult: verifierConstraintsResultSchema,
+  VerifierConstraintsResponse: verifierConstraintsResponseSchema,
 } as const
 
 export type OpenApiComponentName = keyof typeof OPENAPI_COMPONENTS
@@ -901,6 +1029,7 @@ const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
   'DiscoverIssuerRequest',
   'ValidateCredentialRequest',
   'GenerateIssuerFixtureRequest',
+  'ResolveVerifierConstraintsRequest',
 ])
 
 /** Generated JSON Schema for one component (OpenAPI 3.1 dialect). */
@@ -941,3 +1070,7 @@ export type GenerateIssuerFixtureRequestResource = z.infer<
   typeof generateIssuerFixtureRequestSchema
 >
 export type CredentialValidationResource = z.infer<typeof credentialValidationResultSchema>
+export type VerifierConstraintsResource = z.infer<typeof verifierConstraintsResultSchema>
+export type ResolveVerifierConstraintsRequestResource = z.infer<
+  typeof resolveVerifierConstraintsRequestSchema
+>

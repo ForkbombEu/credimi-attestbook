@@ -415,6 +415,47 @@ writes nothing and performs no network request. A timeout, memory or output limi
 contract, supported synthesis subset and non-claims are documented in
 [`docs/fixtures.md`](fixtures.md).
 
+### 3.7 Verifier constraints and OpenID4VP-aware mappings
+
+`POST /api/v1/verifiers/constraints` is the public FR-014 slice. It returns the **typed
+attribute and format constraints** of one pinned rulebook version and the verifier-policy
+interfaces AttestBook can map them to. It is not an OpenID4VP endpoint: the DCQL mapping is an
+explicitly partial query fragment and the result carries no proof or protocol result.
+
+```json
+{
+  "rulebookId": "…",
+  "rulebookVersion": "1.0",
+  "attestationType": "PID",
+  "format": "dc+sd-jwt",
+  "schemaDocuments": [
+    { "uri": "https://issuer.example/schema/pid.json", "content": "{ … }" }
+  ]
+}
+```
+
+`format` and `schemaDocuments` are optional. Without `format`, every supported format of the
+attestation type is resolved. The caller supplies the exact schema document bytes, as for
+credential validation and fixtures; each URI must be a schema reference of the selected
+attestation type (and of the requested `format`, when present), and its sha256 SRI value must
+match before the document can ground constraints. An unpinned reference, an unsupplied
+document and SD-JWT VC Type Metadata are reported and never used; a supplied document that
+does not match its pin, a foreign URI or an unbounded document is `400 invalid_request`.
+
+Each format reports a `grounding` state, its schema references, the typed attributes (JSON
+Pointer, required flag, JSON types, extracted constraints, unresolved keywords and a DCQL claim
+path) and a `dcql` mapping. The DCQL mapping has `complete: false`; its `credentialQuery`
+contains only the format and claim paths of a `dc+sd-jwt`/`mso_mdoc` rulebook, and every
+unexpressible constraint is listed in `unsupported` with a stable `code`, `scope` and reason.
+The pinned snapshot has no `vct`/`doctype`, no trusted authorities and no protocol material, so
+those gaps are reported instead of fabricated. `policyInterfaces` enumerates the supported
+native constraints, the partial DCQL interface and the unsupported Presentation Exchange
+interface. `nonClaims` states `presentationRequest: false`, `proof: false` and the
+cryptographic/trust/protocol/interoperability dimensions as `NOT_TESTED`.
+
+The route writes nothing and performs no network request. The contract, supported extraction
+subset and non-claims are documented in [`docs/verifier.md`](verifier.md).
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -451,7 +492,9 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Issuer fixtures | malformed request, unmatched/unpinnable schema document, unsupported synthesis constraint, unknown override path | `400` | `invalid_request` |
 | Issuer fixtures | rulebook, version, attestation type or stored snapshot does not exist | `404` | `not_found` |
 | Issuer fixtures | fixture sandbox at its concurrency limit or unavailable on this platform | `503` | `fixture_unavailable` |
-| API wiring | registry, validation, issuer discovery or issuer fixtures not configured | `503` | `registry_unavailable` / `validation_unavailable` |
+| Verifier constraints | malformed request, foreign/unpinned schema document, integrity mismatch, invalid JSON, exceeded inspection bound or unsupported format | `400` | `invalid_request` |
+| Verifier constraints | rulebook, version, attestation type or stored snapshot does not exist | `404` | `not_found` |
+| API wiring | registry, validation, issuer discovery, issuer fixtures or verifier policy resolver not configured | `503` | `registry_unavailable` / `validation_unavailable` |
 | API | unexpected failure | `500` | `internal_error` |
 
 Unknown routes under any path answer `404` with `not_found` and the same envelope. The
@@ -551,6 +594,8 @@ bun run openapi:check   # generated OpenAPI 3.1 document validates
 bun test src/api        # contract, success and error coverage
 bun test src/discovery  # discovery extraction, bounds and association
 bun test src/fixtures   # fixture synthesis, grounding and negative cases
+bun test src/verifier   # typed verifier constraints and OpenID4VP-aware mappings
+bun test src/api/verifier.test.ts  # verifier-constraint HTTP contract
 bun run check           # formatting, lint, strict typecheck and all tests
 ```
 
@@ -581,6 +626,11 @@ own component and browser tests described in [`docs/ui.md`](ui.md).
   JSON Schema subset; compilation and evaluation run in the shared resource-bounded sandbox,
   and the route fetches no schema, signs nothing and persists nothing
   ([`docs/fixtures.md`](fixtures.md) §2.4, §3 and §6).
+- Verifier constraints are typed attribute and format constraints plus explicitly partial
+  OpenID4VP DCQL mappings. The route produces no presentation request, proof, trust decision
+  or protocol result, reports every mapping it cannot express, and inspects only
+  caller-supplied, integrity-verified schema documents within hard bounds
+  ([`docs/verifier.md`](verifier.md) §2.1, §5 and §6).
 - Validation results are returned synchronously and are not persisted
   (`GET /api/v1/validations/{id}` does not exist in this slice; the specification lists it as
   a suggested resource, not an implemented one).

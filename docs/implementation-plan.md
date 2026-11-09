@@ -70,8 +70,10 @@ the two without a current migrated issue are marked explicitly.
   [#43](https://github.com/ForkbombEu/credimi-attestbook/issues/43); issuer fixtures (FR-013)
   were delivered by [#44](https://github.com/ForkbombEu/credimi-attestbook/issues/44) as
   unsigned, integrity-grounded payloads, overrides and verified negative cases. Verifier
-  fixtures (FR-014) remain Phase 3 work in
-  [#45](https://github.com/ForkbombEu/credimi-attestbook/issues/45).
+  constraints and OpenID4VP-aware mappings (FR-014) were delivered by
+  [#45](https://github.com/ForkbombEu/credimi-attestbook/issues/45) as typed, bounded
+  constraints and explicitly partial DCQL mappings; verifier negative cases and presentation
+  request generation remain unimplemented.
 - Capture artifact ingestion, mock/real capture adapters and the capture explorer
   (FR-015–FR-019, UI-006) — Phase 4, issues
   [#46](https://github.com/ForkbombEu/credimi-attestbook/issues/46),
