@@ -8,6 +8,7 @@ but nothing here declares an integration to be working. The Phase 1 plan
 ([`docs/implementation-plan.md`](implementation-plan.md)) treats these as Phase 4 work.
 
 **Ticket:** [#4 — Design standalone architecture, data model and capture contracts](https://github.com/ForkbombEu/credimi-attestbook/issues/4) · **Consolidated by:** [#25](https://github.com/ForkbombEu/credimi-attestbook/issues/25)
+**Implemented slice:** [issue #46](https://github.com/ForkbombEu/credimi-attestbook/issues/46) implements the versioned envelope, bounded normalization, secure references, integrity, provenance and redaction in `src/capture/`; the implemented contract (which supersedes §3 as the concrete version 1 field set) is documented in [`docs/capture.md`](capture.md). Push/pull transport, mock adapters and correlation UIs remain later issues.
 **Companion:** [`docs/architecture.md`](architecture.md) (modules, validation engine, security outline)
 **Related:** [`docs/standards.md`](standards.md) · [`docs/requirements.md`](requirements.md) · [`docs/traceability.md`](traceability.md)
 **Authoritative spec:** [`docs/specification.md`](specification.md) §11 (FR-015 … FR-019)
@@ -78,7 +79,7 @@ Rules:
   are not embedded in every event (FR-015).
 - `integrity` covers the raw artifact bytes so a redacted artifact can be verified against
   its original digest without retaining the original in the same store.
-- Unknown fields are preserved (same lossless principle as the standards adapter).
+- Unknown members are **rejected** in the implemented version 1 envelope; extension data belongs in the scalar `metadata` object and forward compatibility is expressed by `envelopeVersion` (see [`docs/capture.md`](capture.md)).
 
 ## 4. Logical contracts (proposed names, not mandatory)
 
