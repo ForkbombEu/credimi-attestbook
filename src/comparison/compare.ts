@@ -54,7 +54,7 @@ export const EXTERNAL_DIMENSION_GROUPS: Readonly<
 
 /** Static limitations every comparison carries. */
 export const HEADLESS_WALLET_COMPARISON_LIMITATIONS: readonly string[] = Object.freeze([
-  'AttestBook does not start, observe or orchestrate a wallet or a Credimi test execution. The external wallet observation is caller-supplied, recorded verbatim and not verified by AttestBook.',
+  'AttestBook does not start, observe or orchestrate a wallet or a Credimi test execution. The external wallet observation is caller-supplied, recorded as bounded input and not verified by AttestBook.',
   'The AttestBook side is structural and schema validation only. A structural PASS is not a cryptographic, issuer-trust, protocol or interoperability conclusion.',
   'The report places the two evidence sources side by side; it is not an interoperability verdict and never upgrades an unexecuted dimension.',
   'An external observation is labelled as external and never changes an AttestBook validation status.',

@@ -35,8 +35,8 @@ step 3 as a verdict and never acts as the orchestration platform:
   The protocol, interoperability, cryptographic and trust dimensions are not executed here
   and are never reported `PASS` by AttestBook.
 - The external wallet observation is caller-supplied and untrusted. AttestBook records it
-  verbatim, labels it `external`, bounds it and never verifies it, signs it or turns it into
-  an AttestBook validation status.
+  as bounded input, labels it `external`, bounds it and never verifies it, signs it or turns
+  it into an AttestBook validation status.
 - The comparison is not an interoperability verdict. It separates the two evidence sources
   and lists every dimension it cannot establish instead of omitting it.
 
@@ -102,8 +102,8 @@ The request body of `POST /api/v1/captures/{captureId}/compare` may carry:
 The body is bounded before interpretation:
 
 - `walletId` is an opaque printable-ASCII identifier without whitespace, at most 200
-  characters; it is preserved verbatim and never resolved.
-- `observedAt` is an RFC 3339 timestamp with an explicit offset, preserved verbatim.
+  characters; it is trimmed, bounded and never resolved.
+- `observedAt` is an RFC 3339 timestamp with an explicit offset, trimmed and preserved.
 - `interaction` is `issuance`, `presentation` or `both`.
 - `observations` holds 1–8 entries over distinct FR-010 dimensions. Each entry has a `status`
   in the FR-010 status set and optional `code` (≤ 120 characters) and `detail` (≤ 500

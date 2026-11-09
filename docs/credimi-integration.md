@@ -238,7 +238,7 @@ a second time. The response (`attestbook.headless-wallet-comparison@1`) has:
 - `rulebook` — the exact `rulebookId`, `version`, `contentDigest`, `digestVerified`,
   `specVersion`, `rulebookStatus`, `attestationType` and `boundAt` of the correlation;
 - `attestbook` — the structural evidence of the pinned validation (no raw credential);
-- `externalWallet` — the observation, recorded verbatim and labelled external;
+- `externalWallet` — the observation, recorded as bounded input and labelled external;
 - `comparison.schema`, `comparison.protocol`, `comparison.interoperability` and
   `comparison.trust` — the four evidence groups, each entry carrying `attestbook`, `external`
   and a `result` (`agreement`, `divergence`, `attestbook_only`, `external_only`,

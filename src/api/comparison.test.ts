@@ -236,14 +236,12 @@ describe('headless-wallet comparison API', () => {
     const schemaValidation = body.data.comparison.schema.find(
       (entry) => entry.dimension === 'schema_validation',
     )
-    if (schemaValidation?.result === 'not_provided') {
-      expect(
-        body.data.comparison.unsupported.some(
-          (entry) =>
-            entry.dimension === 'schema_validation' && entry.code === 'no_evidence_supplied',
-        ),
-      ).toBe(true)
-    }
+    expect(schemaValidation?.result).toBe('not_provided')
+    expect(
+      body.data.comparison.unsupported.some(
+        (entry) => entry.dimension === 'schema_validation' && entry.code === 'no_evidence_supplied',
+      ),
+    ).toBe(true)
   })
 
   test('accepts a comparison without an external wallet observation', async () => {
@@ -258,6 +256,68 @@ describe('headless-wallet comparison API', () => {
     expect(
       body.data.limitations.some((line) => line.includes('No external wallet observation')),
     ).toBe(true)
+  })
+
+  test('the documented request examples match the published contract and the server', async () => {
+    const state = await setup()
+    await correlate(state)
+
+    const documentedBody = {
+      externalWallet: {
+        walletId: 'wallet-a',
+        observedAt: '2026-11-05T09:48:30Z',
+        interaction: 'issuance',
+        observations: [
+          { dimension: 'cryptographic_verification', status: 'PASS', code: 'signature-valid' },
+          { dimension: 'issuer_trust', status: 'NOT_TESTED' },
+          {
+            dimension: 'protocol_conformance',
+            status: 'PASS',
+            code: 'issuance-flow-complete',
+          },
+          {
+            dimension: 'interoperability',
+            status: 'FAIL',
+            code: 'claim-not-presented',
+            detail: 'The external wallet did not present the family_name claim.',
+          },
+        ],
+      },
+    }
+
+    for (const body of [documentedBody, { externalWallet: null }, {}]) {
+      assertSchema('CompareCaptureRequest', body)
+      const response = await postJson(state.app, `/api/v1/captures/${CAPTURE_ID}/compare`, body)
+      expect(response.status).toBe(200)
+    }
+
+    const report = await json<{ data: HeadlessWalletComparisonResource }>(
+      await postJson(state.app, `/api/v1/captures/${CAPTURE_ID}/compare`, documentedBody),
+    )
+    const issuerTrust = report.data.comparison.trust.find(
+      (entry) => entry.dimension === 'issuer_trust',
+    )
+    expect(issuerTrust?.external).toEqual({
+      status: 'NOT_TESTED',
+      code: null,
+      detail: null,
+    })
+
+    const tooMany = {
+      externalWallet: {
+        walletId: 'wallet-a',
+        observedAt: '2026-11-05T09:48:30Z',
+        interaction: 'issuance',
+        observations: Array.from({ length: 9 }, () => ({
+          dimension: 'protocol_conformance',
+          status: 'PASS',
+        })),
+      },
+    }
+    const validateRequest = ajv.compile(componentJsonSchema('CompareCaptureRequest'))
+    expect(validateRequest(tooMany)).toBe(false)
+    const rejected = await postJson(state.app, `/api/v1/captures/${CAPTURE_ID}/compare`, tooMany)
+    expect(rejected.status).toBe(400)
   })
 
   test('refuses to compare a capture that is not yet correlated', async () => {
@@ -366,7 +426,7 @@ describe('headless-wallet comparison API', () => {
     expect(detail.data.rulebook?.contentDigest).toBe(state.seeded.digest)
   })
 
-  test('a mismatching recorded digest is still reported, never a silent latest version', async () => {
+  test('reports the exact recorded digest, never a latest-version shortcut', async () => {
     const state = await setup()
     await correlate(state)
     // The correlation is pinned to the seeded digest; the comparison report

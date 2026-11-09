@@ -18,6 +18,13 @@ import {
   UNSUPPORTED_COMPARISON_CODES,
 } from '../comparison/types'
 import {
+  MAX_EXTERNAL_OBSERVATION_CODE_LENGTH,
+  MAX_EXTERNAL_OBSERVATION_DETAIL_LENGTH,
+  MAX_EXTERNAL_OBSERVATION_TIMESTAMP_LENGTH,
+  MAX_EXTERNAL_WALLET_ID_LENGTH,
+  MAX_EXTERNAL_WALLET_OBSERVATIONS,
+} from '../comparison/input'
+import {
   VERIFIER_CONSTRAINTS_KIND,
   VERIFIER_GROUNDING_STATUSES,
   VERIFIER_MAPPING_SCOPES,
@@ -959,12 +966,40 @@ export const externalWalletObservationSchema = z.object({
   observations: z.array(externalDimensionObservationSchema),
 })
 
+/**
+ * Request-only observation schema. It matches what the server actually accepts:
+ * `code` and `detail` are optional, and the wallet observation may be `null`.
+ * The response schema above stays strict because the builder always emits
+ * `null` for a missing `code` or `detail`.
+ */
+export const externalDimensionObservationRequestSchema = z.object({
+  dimension: VALIDATION_DIMENSION_ID_SCHEMA,
+  status: VALIDATION_STATUS_SCHEMA,
+  code: z.string().max(MAX_EXTERNAL_OBSERVATION_CODE_LENGTH).nullable().optional(),
+  detail: z.string().max(MAX_EXTERNAL_OBSERVATION_DETAIL_LENGTH).nullable().optional(),
+})
+
+export const externalWalletObservationRequestSchema = z.object({
+  walletId: z
+    .string()
+    .min(1)
+    .max(MAX_EXTERNAL_WALLET_ID_LENGTH)
+    .regex(/^[\x21-\x7e]+$/),
+  observedAt: z.string().min(1).max(MAX_EXTERNAL_OBSERVATION_TIMESTAMP_LENGTH),
+  interaction: EXTERNAL_WALLET_INTERACTION_SCHEMA,
+  observations: z
+    .array(externalDimensionObservationRequestSchema)
+    .min(1)
+    .max(MAX_EXTERNAL_WALLET_OBSERVATIONS),
+})
+
 export const compareCaptureRequestSchema = z.object({
   /**
-   * Optional caller-supplied external wallet observation. When absent, the
-   * report carries the AttestBook structural evidence and explicit gaps.
+   * Optional caller-supplied external wallet observation. When absent or
+   * `null`, the report carries the AttestBook structural evidence and explicit
+   * gaps.
    */
-  externalWallet: externalWalletObservationSchema.optional(),
+  externalWallet: externalWalletObservationRequestSchema.nullable().optional(),
 })
 
 export const comparisonDimensionEntrySchema = z.object({

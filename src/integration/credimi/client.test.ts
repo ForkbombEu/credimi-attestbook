@@ -33,6 +33,7 @@ import {
   RULEBOOK_PIN_KIND,
   type CredimiAdapterOptions,
   type CredimiEvidenceCorrelation,
+  type CredimiExternalWalletObservation,
   type CredimiHeadlessWalletComparison,
   type CredimiRulebook,
   type CredimiRulebookPage,
@@ -679,6 +680,22 @@ describe('headless-wallet comparison request', () => {
 
     expect(result.externalWallet).toBeNull()
     expect(requestBody(firstCall(calls))).toEqual({})
+  })
+
+  test('sends an observation without code and detail unchanged', async () => {
+    const report = comparisonReport(undefined, 'capture-1')
+    const { fetch, calls } = fakeFetch(() => jsonResponse({ data: report }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+    const externalWallet: CredimiExternalWalletObservation = {
+      walletId: TEST_WALLET_ID,
+      observedAt: '2026-11-05T09:48:30Z',
+      interaction: 'issuance',
+      observations: [{ dimension: 'protocol_conformance', status: 'PASS' }],
+    }
+
+    await client.compareCapture({ captureId: 'capture-1', pin: PIN, externalWallet })
+
+    expect(requestBody(firstCall(calls))).toEqual({ externalWallet })
   })
 
   test('rejects a report that names a different pin', async () => {

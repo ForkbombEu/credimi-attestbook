@@ -585,7 +585,7 @@ facts, the schema references and the structural findings. The comparison separat
 
 Each dimension entry reports `attestbook`, `external` and a `result` of `agreement`,
 `divergence`, `attestbook_only`, `external_only`, `not_provided` or `not_comparable`. The
-external observation is recorded verbatim, labelled `external`, and never changes an
+external observation is recorded as bounded input, labelled `external`, and never changes an
 AttestBook validation status; `nonClaims` fixes `externalObservationVerified` and the four
 unexecuted dimensions to `false`. The operation is public and read-only: it persists nothing,
 starts no wallet and contacts no Credimi or capture endpoint. `404` means an unknown capture,

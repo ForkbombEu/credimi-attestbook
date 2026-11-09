@@ -4,8 +4,9 @@
 // comparison: the exact rulebook version and digest a captured credential was
 // validated against, the non-sensitive credential facts, and the structural
 // dimension statuses. The protocol and interoperability side is supplied by
-// the caller (Credimi) as an external wallet observation and is recorded
-// verbatim, labelled as external and never folded into an AttestBook result.
+// the caller (Credimi) as an external wallet observation and is recorded as
+// bounded input, labelled as external and never folded into an AttestBook
+// result.
 //
 // The contract deliberately has no "overall comparison verdict": the two
 // sources measure different things and a structural PASS is not a protocol,
@@ -86,9 +87,9 @@ export interface ExternalDimensionObservation {
  * treats it as its own validation result.
  */
 export interface ExternalWalletObservation {
-  /** Opaque caller-owned wallet identifier, preserved verbatim. */
+  /** Opaque caller-owned wallet identifier, trimmed and bounded. */
   readonly walletId: string
-  /** Caller-asserted RFC 3339 observation timestamp, preserved verbatim. */
+  /** Caller-asserted RFC 3339 observation timestamp, trimmed and bounded. */
   readonly observedAt: string
   readonly interaction: ExternalWalletInteraction
   readonly observations: readonly ExternalDimensionObservation[]
@@ -118,7 +119,7 @@ export interface ComparisonDimensionEntry {
     readonly applicable: boolean
     readonly executed: boolean
   } | null
-  /** External observation, recorded verbatim and never verified here. */
+  /** External observation, recorded as bounded input and never verified here. */
   readonly external: {
     readonly status: ValidationStatus
     readonly code: string | null

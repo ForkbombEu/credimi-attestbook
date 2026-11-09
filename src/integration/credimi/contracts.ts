@@ -19,6 +19,7 @@ import type {
   captureExplorerDetailSchema,
   captureExplorerPageSchema,
   captureExplorerSummarySchema,
+  compareCaptureRequestSchema,
   credentialValidationResultSchema,
   headlessWalletComparisonSchema,
   rulebookPageSchema,
@@ -71,7 +72,7 @@ export type CredimiHeadlessWalletComparison = z.infer<typeof headlessWalletCompa
 
 /** The caller-supplied external wallet observation of a comparison request. */
 export type CredimiExternalWalletObservation = NonNullable<
-  CredimiHeadlessWalletComparison['externalWallet']
+  z.infer<typeof compareCaptureRequestSchema>['externalWallet']
 >
 
 /** One capture to compare, pinned to the exact rulebook version. */
@@ -79,8 +80,8 @@ export interface CredimiComparisonInput {
   readonly captureId: string
   readonly pin: CredimiRulebookPin
   /**
-   * External wallet behaviour to record verbatim. Omitted when only the
-   * AttestBook structural evidence is needed; the report then lists the
+   * External wallet behaviour to record as bounded input. Omitted when only
+   * the AttestBook structural evidence is needed; the report then lists the
    * protocol and interoperability dimensions as gaps.
    */
   readonly externalWallet?: CredimiExternalWalletObservation
