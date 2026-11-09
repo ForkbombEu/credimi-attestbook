@@ -95,6 +95,10 @@ bun run docs:check    # documentation consistency, plain Node
   references of a pinned version, with supported verifier-policy interfaces and an explicitly
   partial OpenID4VP DCQL mapping that reports every unexpressible constraint; see
   [`docs/verifier.md`](verifier.md);
+- `src/capture/` — the versioned capture artifact envelope: bounded untrusted-input
+  validation, secure external references, SHA-256 integrity, preserved provenance and
+  correlation, segregated raw evidence and path-preserving redaction; see
+  [`docs/capture.md`](capture.md);
 - `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
   the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
   routes Hono registered, success/error contract tests for every exposed resource, and
@@ -230,6 +234,21 @@ mapping with a stable code and reason. Because the pinned snapshot stores no `vc
 or trusted authorities, DCQL `meta` and `trusted_authorities` are reported unsupported rather
 than fabricated; Presentation Exchange is reported unsupported rather than guessed. See
 [`docs/verifier.md`](verifier.md) for the contract, extraction subset, bounds and non-claims.
+
+## Capture artifact envelope
+
+`src/capture/` validates and normalizes untrusted capture evidence before any capture
+transport exists. A versioned, closed envelope (`attestbook.capture-artifact@1`) carries
+correlation and provenance metadata separately from the raw artifact: an inline artifact is
+returned in a segregated `sensitive` field and never appears in the metadata envelope, while
+an external `artifactRef` must be a default-port `https` URL on a public host. Malformed,
+ambiguous and unsupported submissions are rejected with stable codes and messages that do not
+echo artifact bytes; the caller's `capturedAt` text and correlation identifiers are preserved
+verbatim and normalization adds only `receivedAt`. SHA-256 integrity covers the exact raw
+bytes (recomputed for inline evidence, explicitly unverified for external references), and
+partial/full redaction replaces sensitive values with path-preserving placeholders. This is
+not a live `capture-issuer`/`capture-verifier` integration: transport, storage, signing and
+rulebook correlation remain later issues. See [`docs/capture.md`](capture.md).
 
 ## Safe URL and JSON import
 

@@ -42,10 +42,10 @@ split from the closed duplicates #15–#19.
 | FR-012 | PASS / FAIL / NOT_TESTED / NOT_APPLICABLE / INCONCLUSIVE results | Phase 1: #33 | Conservative overall aggregation (D-8), enforced per dimension |
 | FR-013 | Issuer test fixtures | Phase 3: #44 | Unsigned payloads from integrity-verified JSON Schema constraints; no signing or issuance |
 | FR-014 | Verifier test fixtures and policies | Phase 3: #45 | Implemented in #45 for typed attribute/format constraints and partial OpenID4VP DCQL mappings; presentation request generation, proofs and protocol conformance are reported unsupported |
-| FR-015 | Capture artifact model | Phase 0 contracts: [`docs/capture-integration.md`](capture-integration.md); Phase 4: #46 | Not implemented |
+| FR-015 | Capture artifact model | Phase 0 contracts: [`docs/capture-integration.md`](capture-integration.md); Phase 4: #46 (envelope, normalization, secure references, integrity, redaction) | Implemented in #46 for the versioned envelope and normalization ([`docs/capture.md`](capture.md)); adapters #47 and correlation UI #48 are not implemented; no live capture integration |
 | FR-016 | `capture-issuer` integration | Phase 4: #47 | Not claimed operational |
 | FR-017 | `capture-verifier` integration | Phase 4: #47 | Not claimed operational |
-| FR-018 | Capture integration contracts (push/pull, mock adapter) | Phase 0 contracts; Phase 4: #46, #47 | Transport-agnostic, no broker |
+| FR-018 | Capture integration contracts (push/pull, mock adapter) | Phase 0 contracts; Phase 4: #46 (normalizer contract), #47 (push/pull and mock adapters) | The transport-agnostic normalizer contract is implemented in #46; push/pull and mock adapters are not implemented yet; no broker |
 | FR-019 | Correlation and traceability across rulebook, capture and validation | Phase 0 contracts; Phase 4: #48 | Stable ids, pinned version + digest |
 | FR-020 | Credimi test orchestration via API | Phase 5: #49 | No Temporal/StepCI/PocketBase dependency |
 | FR-021 | Headless Wallet testing workflow | Phase 5: #50 | AttestBook validates, does not orchestrate |
