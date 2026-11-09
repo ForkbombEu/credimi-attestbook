@@ -839,9 +839,9 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: '/api/v1/captures/:captureId/validate',
     summary: 'Bind a captured credential to a pinned rulebook version',
     description:
-      "Runs the structural credential engine on the capture's segregated inline artifact and records the correlation between the capture identifier, the opaque correlation and test-execution references, and the exact pinned rulebook version and digest. An external reference is not fetched, and source-redacted or non-credential evidence answers 409 instead of being validated. A structural status never implies cryptographic, issuer-trust, protocol or interoperability success.",
+      "Runs the structural credential engine on the capture's segregated inline artifact and records the correlation between the capture identifier, the opaque correlation and test-execution references, and the exact pinned rulebook version and digest. An external reference is not fetched, and non-credential evidence answers 409 instead of being validated. A structural status never implies cryptographic, issuer-trust, protocol or interoperability success. Requires a provider bearer token: the correlation is recorded server-side and shown to every reader.",
     tag: 'captures',
-    security: false,
+    security: true,
     parameters: [PATH_CAPTURE_ID],
     request: {
       schema: 'CorrelateCaptureRequest',
@@ -855,7 +855,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'The recorded correlation and the structural validation result.',
         schema: 'CaptureCorrelationResponse',
       },
-      ...errors(400, 404, 409, 413, 500, 502, 503),
+      ...errors(400, 401, 404, 409, 413, 500, 502, 503),
     ],
   },
   {

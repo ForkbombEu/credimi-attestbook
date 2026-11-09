@@ -202,13 +202,21 @@ export function makeCaptureCorrelation(
 }
 
 export interface FakeCaptureApi extends CaptureExplorerApi {
-  readonly correlated: { readonly captureId: string; readonly request: CorrelateCaptureRequest }[]
+  readonly correlated: {
+    readonly captureId: string
+    readonly request: CorrelateCaptureRequest
+    readonly token: string
+  }[]
 }
 
 export function createFakeCaptureApi(
   detail: CaptureExplorerDetail = makeCaptureDetail(),
 ): FakeCaptureApi {
-  const correlated: { captureId: string; request: CorrelateCaptureRequest }[] = []
+  const correlated: {
+    captureId: string
+    request: CorrelateCaptureRequest
+    token: string
+  }[] = []
   return {
     correlated,
     listCaptures(): Promise<CaptureExplorerPage> {
@@ -225,8 +233,9 @@ export function createFakeCaptureApi(
     correlateCapture(
       captureId: string,
       request: CorrelateCaptureRequest,
+      token: string,
     ): Promise<CaptureCorrelationResult> {
-      correlated.push({ captureId, request })
+      correlated.push({ captureId, request, token })
       return Promise.resolve(
         makeCaptureCorrelation(makeBoundCaptureDetail(), makeValidationResult()),
       )

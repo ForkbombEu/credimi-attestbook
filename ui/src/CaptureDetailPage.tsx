@@ -32,6 +32,9 @@ interface CaptureDetailPageProps {
   readonly api: CaptureExplorerApi
   readonly catalogApi: CatalogApi
   readonly captureId: string
+  /** Provider bearer token held in App memory; never persisted. */
+  readonly token: string
+  readonly onTokenChange: (token: string) => void
   readonly onNavigate: (path: string) => void
 }
 
@@ -343,6 +346,8 @@ interface CorrelationPanelProps {
   readonly catalog: CatalogState
   readonly related: RelatedState
   readonly values: CorrelationForm
+  readonly token: string
+  readonly onTokenChange: (token: string) => void
   readonly formError: string | null
   readonly run: RunState
   readonly onChange: (patch: Partial<CorrelationForm>) => void
@@ -357,6 +362,8 @@ function CorrelationPanel({
   catalog,
   related,
   values,
+  token,
+  onTokenChange,
   formError,
   run,
   onChange,
@@ -510,6 +517,23 @@ function CorrelationPanel({
               </select>
             </div>
 
+            <div className="field capture-validation-token">
+              <label htmlFor="capture-token">Provider token</label>
+              <input
+                id="capture-token"
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                value={token}
+                onChange={(event) => onTokenChange(event.target.value)}
+                aria-describedby="capture-token-hint"
+              />
+              <p className="field-hint" id="capture-token-hint">
+                Required to record a correlation. Sent only in the Authorization header; held in app
+                memory for this page session and never written to storage or the URL.
+              </p>
+            </div>
+
             <div className="field capture-validation-submit">
               <button
                 type="button"
@@ -563,6 +587,8 @@ export function CaptureDetailPage({
   api,
   catalogApi,
   captureId,
+  token,
+  onTokenChange,
   onNavigate,
 }: CaptureDetailPageProps) {
   const [state, setState] = useState<DetailState>({ status: 'loading' })
@@ -713,13 +739,17 @@ export function CaptureDetailPage({
       )
       return
     }
+    if (token.trim() === '') {
+      setFormError('A provider token is required to record a correlation.')
+      return
+    }
     runController.current?.abort()
     const controller = new AbortController()
     runController.current = controller
     setFormError(null)
     setRun({ status: 'running' })
     api
-      .correlateCapture(captureId, values, controller.signal)
+      .correlateCapture(captureId, values, token.trim(), controller.signal)
       .then(() => api.getCapture(captureId, controller.signal))
       .then((detail) => {
         if (!controller.signal.aborted) {
@@ -733,7 +763,7 @@ export function CaptureDetailPage({
         }
         setRun({ status: 'error', message: errorMessage(error, 'The validation request failed.') })
       })
-  }, [api, captureId, values, applyDetail])
+  }, [api, captureId, values, token, applyDetail])
 
   const notFoundAction = useCallback(() => onNavigate(CAPTURES_PATH), [onNavigate])
 
@@ -826,6 +856,8 @@ export function CaptureDetailPage({
                 catalog={catalog}
                 related={related}
                 values={values}
+                token={token}
+                onTokenChange={onTokenChange}
                 formError={formError}
                 run={run}
                 onChange={handleChange}

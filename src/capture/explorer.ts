@@ -377,6 +377,10 @@ export class CaptureExplorer {
         'The capture artifact is stored behind an external reference and AttestBook has not fetched it. External evidence cannot be validated against a rulebook version.',
       )
     }
+    // Defensive check only: an external artifact is refused above, and the
+    // version 1 normalizer rejects an inline artifact that already declares
+    // redaction (`redaction_inconsistent`), so a normalizable inline artifact
+    // always reaches this point with `redaction.status === 'none'`.
     if (envelope.redaction.status !== 'none') {
       throw conflict(
         `The capture artifact was declared ${envelope.redaction.status} redacted by its source. Redacted evidence cannot be validated against a rulebook version.`,

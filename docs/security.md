@@ -71,10 +71,11 @@ The following rules implement that model:
   source gets its own rows and cannot read or mutate the first provider's internal import
   identity.
 - **Public reads.** Provider, rulebook, attestation, schema-reference, version, snapshot,
-  digest, publication-export and export-manifest reads need no token, including working
-  drafts, by design. The read-shaped routes that require authentication are the import preview
-  and issuer discovery, because both perform a bounded outbound fetch under the
-  untrusted-input controls.
+  digest, publication-export, export-manifest and capture-explorer reads need no token,
+  including working drafts, by design. The read-shaped routes that require authentication are
+  the import preview and issuer discovery (both perform a bounded outbound fetch under the
+  untrusted-input controls) and capture correlation (it overwrites the correlation every
+  reader sees).
 - **Provider administration.** Provider creation, token issuance for a provider without a
   token and audit inspection are operator actions. No HTTP route exposes
   `provisionProvider`.
@@ -96,12 +97,15 @@ The following rules implement that model:
 | `POST /api/v1/imports` | yes | Import identity and created drafts are scoped to the actor's provider | `401`; `422` for a refused source |
 | `POST /api/v1/issuers/discover` | yes | No write and no stored issuer state; the token gates the bounded outbound fetch | `401`; `400`/`422`/`502` for the URL or metadata |
 | `POST /api/v1/credentials/validate` | no | Read-only, public by design | `400`/`404`/`503` |
+| `GET /api/v1/captures`, `GET /api/v1/captures/{id}` | no | Mock-backed read; normalized metadata plus the redacted projection only, never the raw artifact | n/a |
+| `POST /api/v1/captures/{id}/validate` | yes | Records an in-memory rulebook correlation visible to every reader; writes no registry data | `401`; `400`; `404`; `409` for evidence that cannot be validated |
 
-The browser editor never persists its provider token: it lives in the app's React memory for
-the current page session only, is sent only in the `Authorization` header of the save request,
-and is cleared by a full page reload. It is never placed in a URL, request body, browser
-storage, log or rendered document, and the live-validation endpoint is public because it
-writes nothing.
+The browser editor and the capture correlation form never persist their provider token: it
+lives in the app's React memory for the current page session only, is sent only in the
+`Authorization` header of the write request, and is cleared by a full page reload. It is never
+placed in a URL, request body, browser storage, log or rendered document. Draft validation and
+credential validation stay public because they write nothing; capture correlation requires a
+token because it records server state that every reader sees.
 
 ## 4. How protection is enforced
 
@@ -155,8 +159,11 @@ the OpenAPI responses of every protected operation.
 - Capture artifacts are untrusted evidence. Normalization segregates an inline artifact out of
   the metadata envelope, the capture explorer never returns those raw bytes (only the redacted
   default-policy projection), and the correlation route refuses an external reference it has not
-  fetched as well as source-redacted or non-credential evidence. The mock explorer keeps
-  evidence and correlations in memory only, logs nothing and persists nothing.
+  fetched as well as non-credential evidence. Correlation requires a provider bearer token
+  because it records a correlation every reader sees; the record does not carry the acting
+  provider. The source-redacted refusal remains a defensive check that normalization currently
+  makes unreachable. The mock explorer keeps evidence and correlations in memory only, logs
+  nothing and persists nothing.
 - Operator provisioning returns the raw token once to the provisioning call and stores only
   its hash; it is deployment tooling, not an API response, and no secret is committed to the
   repository or CI.
@@ -211,8 +218,8 @@ trail is not exposed over HTTP; it is read by operators from the database.
 
 - **Capture explorer and correlation.** `src/capture/explorer.test.ts` and
   `src/api/captures.test.ts` cover the redacted-only projection, explicit evidence gaps, refusal
-  of external/source-redacted/non-credential evidence and a real structural-engine correlation
-  against a seeded pinned version; `ui/src/CapturesPage.test.tsx`,
+  of external/non-credential evidence, the required correlation token and a real
+  structural-engine correlation against a seeded pinned version; `ui/src/CapturesPage.test.tsx`,
   `ui/src/CaptureDetailPage.test.tsx`, `ui/src/capture.test.ts` and `ui/e2e/captures.spec.ts`
   cover the UI, the correlation flow, axe-core scans and the responsive layout.
 

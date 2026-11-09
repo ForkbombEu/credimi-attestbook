@@ -118,12 +118,11 @@ describe('write operation security surface', () => {
       'publishRulebookVersion',
       'refreshRulebookVersion',
       'replaceRulebookDraft',
+      'validateCapture',
     ])
 
     // Draft validation, fixture generation, verifier constraints and credential
-    // validation are read-only POSTs and stay public. Capture correlation is a
-    // public POST that records an in-memory correlation over mock evidence; it
-    // writes no registry data.
+    // validation are read-only POSTs and stay public.
     const publicPosts = API_ROUTES.filter(
       (route) => route.method === 'post' && !route.security,
     ).map((route) => route.operationId)
@@ -131,7 +130,6 @@ describe('write operation security surface', () => {
       'validateRulebookDraft',
       'generateIssuerFixture',
       'validateCredential',
-      'validateCapture',
       'resolveVerifierConstraints',
     ])
   })

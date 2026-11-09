@@ -103,9 +103,11 @@ Implemented by these slices:
     artifact only as its redacted default-policy projection (or an explicit "not fetched"
     notice for an external reference), the ordered evidence timeline and the explorer's
     limitations;
-  - a validation form pins the capture to a real rulebook version and attestation type and runs
-    the structural engine on the segregated inline artifact, then shows the linked findings;
-    external, source-redacted and non-credential evidence state why they cannot be validated;
+  - an authenticated validation form pins the capture to a real rulebook version and attestation
+    type and runs the structural engine on the segregated inline artifact, then shows the linked
+    findings. The provider bearer token lives only in the app's React memory for the page
+    session. External and non-credential evidence (and, defensively, source-declared redaction)
+    state why it cannot be validated;
   - every view says that the evidence is mock-backed and that no live capture component is
     operational;
 - a draft lifecycle and publication panel on `/rulebooks/{id}/edit` (#41):
@@ -185,8 +187,8 @@ The browser is a client of the public API only:
    authenticated `PUT /api/v1/rulebooks/{id}/draft`;
 10. on `/captures`: `GET /api/v1/captures?limit=100&offset=0`; the detail reads
     `GET /api/v1/captures/{captureId}` and, when a correlation is run,
-    `POST /api/v1/captures/{captureId}/validate` with the selected rulebook, version and
-    attestation type;
+    the authenticated `POST /api/v1/captures/{captureId}/validate` with the selected rulebook,
+    version, attestation type and the provider bearer token;
 11. the lifecycle panel reads `GET /api/v1/rulebooks/{id}/versions` and
     `GET /api/v1/rulebooks/{id}/versions/{version}/publication-readiness`, and performs the
     authenticated `POST /api/v1/rulebooks/{id}/versions`, `.../{version}/refresh` and
@@ -379,10 +381,11 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   the memory-only token field; axe-core checks for the editor page;
 - the mock-backed capture explorer: loading, error and retry, empty and truncation states, the
   normalized summary columns and evidence gaps, the redacted projection (never the raw claim
-  values), external and source-redacted evidence refusals, non-credential evidence, the
-  correlation form and its complete-selection rule, a successful correlation rendering the
-  linked findings, safe correlation errors, responsive labels, the shared header navigation and
-  axe-core checks (`ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`,
+  values), external and non-credential evidence refusals, non-credential evidence, the
+  correlation form and its complete-selection and required-token rules, a successful
+  correlation rendering the linked findings, safe correlation errors including a rejected
+  token, responsive labels, the shared header navigation and axe-core checks
+  (`ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`,
   `ui/src/capture.test.ts`);
 - the router: path parsing (including `/playground`, `/captures`, `/captures/<id>`,
   `/rulebooks/new` and `/rulebooks/<id>/edit`), encoded ids, malformed paths, history
@@ -428,8 +431,8 @@ The capture explorer is covered by `ui/e2e/captures.spec.ts`: the eight seeded m
 the mock labelling and explicit gaps, the redacted projection of one JSON fixture (and the
 absence of its raw claim values), the external-reference and non-credential refusals, a real
 correlation of the seeded signed SD-JWT VC against the `Validator Sandbox Rulebook` with the
-structural findings and the exact pinned version, full axe-core scans of the list and detail,
-and a 390 px no-horizontal-overflow check.
+structural findings and the exact pinned version, the required-token refusal, full axe-core
+scans of the list and detail, and a 390 px no-horizontal-overflow check.
 
 CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test:e2e`. The
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves

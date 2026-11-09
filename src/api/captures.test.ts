@@ -62,6 +62,7 @@ interface Setup {
   readonly app: Hono
   readonly seeded: SeededRulebook
   readonly credential: string
+  readonly token: string
 }
 
 async function setup(): Promise<Setup> {
@@ -82,6 +83,7 @@ async function setup(): Promise<Setup> {
     app: createApp({ registry: fixture.registry, validation, captures }),
     seeded,
     credential,
+    token: seeded.token,
   }
 }
 
@@ -101,12 +103,24 @@ async function json<T>(response: Response): Promise<T> {
   return (await response.json()) as T
 }
 
-async function postJson(app: Hono, path: string, body: unknown): Promise<Response> {
+async function postJson(
+  app: Hono,
+  path: string,
+  body: unknown,
+  authorization?: string,
+): Promise<Response> {
   return app.request(path, {
     method: 'POST',
-    headers: { 'content-type': 'application/json' },
+    headers: {
+      'content-type': 'application/json',
+      ...(authorization === undefined ? {} : { authorization }),
+    },
     body: JSON.stringify(body),
   })
+}
+
+function bearer(secret: string): string {
+  return `Bearer ${secret}`
 }
 
 interface CaptureSummaryBody {
@@ -236,12 +250,17 @@ describe('capture explorer read API', () => {
 
 describe('capture correlation API', () => {
   test('binds a captured credential to the pinned rulebook version and links the findings', async () => {
-    const { app, seeded } = await setup()
-    const response = await postJson(app, `/api/v1/captures/${CAPTURE_ID}/validate`, {
-      rulebookId: seeded.rulebookId,
-      rulebookVersion: seeded.version,
-      attestationType: seeded.attestationName,
-    })
+    const { app, seeded, token } = await setup()
+    const response = await postJson(
+      app,
+      `/api/v1/captures/${CAPTURE_ID}/validate`,
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+      },
+      bearer(token),
+    )
     expect(response.status).toBe(200)
     const body = await json<{
       data: {
@@ -276,7 +295,7 @@ describe('capture correlation API', () => {
   })
 
   test('refuses to validate an external artifact reference', async () => {
-    const { app, seeded } = await setup()
+    const { app, seeded, token } = await setup()
     const response = await postJson(
       app,
       '/api/v1/captures/mock-capture-capture-issuer-1/validate',
@@ -285,13 +304,14 @@ describe('capture correlation API', () => {
         rulebookVersion: seeded.version,
         attestationType: seeded.attestationName,
       },
+      bearer(token),
     )
     expect(response.status).toBe(409)
     expect((await json<ErrorEnvelope>(response)).error.code).toBe('conflict')
   })
 
   test('refuses to validate a non-credential artifact type', async () => {
-    const { app, seeded } = await setup()
+    const { app, seeded, token } = await setup()
     const response = await postJson(
       app,
       '/api/v1/captures/mock-capture-capture-verifier-2/validate',
@@ -300,46 +320,109 @@ describe('capture correlation API', () => {
         rulebookVersion: seeded.version,
         attestationType: seeded.attestationName,
       },
+      bearer(token),
     )
     expect(response.status).toBe(409)
     expect((await json<ErrorEnvelope>(response)).error.code).toBe('conflict')
   })
 
   test('answers not found for an unknown capture and rulebook', async () => {
-    const { app, seeded } = await setup()
-    const unknownCapture = await postJson(app, '/api/v1/captures/missing/validate', {
-      rulebookId: seeded.rulebookId,
-      rulebookVersion: seeded.version,
-      attestationType: seeded.attestationName,
-    })
+    const { app, seeded, token } = await setup()
+    const unknownCapture = await postJson(
+      app,
+      '/api/v1/captures/missing/validate',
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+      },
+      bearer(token),
+    )
     expect(unknownCapture.status).toBe(404)
 
-    const unknownRulebook = await postJson(app, `/api/v1/captures/${CAPTURE_ID}/validate`, {
-      rulebookId: 'missing-rulebook',
-      rulebookVersion: seeded.version,
-      attestationType: seeded.attestationName,
-    })
+    const unknownRulebook = await postJson(
+      app,
+      `/api/v1/captures/${CAPTURE_ID}/validate`,
+      {
+        rulebookId: 'missing-rulebook',
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+      },
+      bearer(token),
+    )
     expect(unknownRulebook.status).toBe(404)
   })
 
   test('rejects a malformed correlation request', async () => {
-    const { app, seeded } = await setup()
-    const response = await postJson(app, `/api/v1/captures/${CAPTURE_ID}/validate`, {
-      rulebookId: seeded.rulebookId,
-      rulebookVersion: 'nope',
-      attestationType: seeded.attestationName,
-    })
+    const { app, seeded, token } = await setup()
+    const response = await postJson(
+      app,
+      `/api/v1/captures/${CAPTURE_ID}/validate`,
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: 'nope',
+        attestationType: seeded.attestationName,
+      },
+      bearer(token),
+    )
     expect(response.status).toBe(400)
     expect((await json<ErrorEnvelope>(response)).error.code).toBe('invalid_request')
   })
 
-  test('a correlation does not mutate the pinned rulebook version', async () => {
+  test('requires a bearer token before recording a correlation', async () => {
     const { app, seeded } = await setup()
-    await postJson(app, `/api/v1/captures/${CAPTURE_ID}/validate`, {
+    const response = await postJson(app, `/api/v1/captures/${CAPTURE_ID}/validate`, {
       rulebookId: seeded.rulebookId,
       rulebookVersion: seeded.version,
       attestationType: seeded.attestationName,
     })
+    expect(response.status).toBe(401)
+    expect(response.headers.get('www-authenticate')).toContain('Bearer')
+    expect((await json<ErrorEnvelope>(response)).error.code).toBe('unauthorized')
+
+    const detail = await json<{ data: CaptureDetailBody }>(
+      await app.request(`/api/v1/captures/${CAPTURE_ID}`),
+    )
+    expect(detail.data.rulebook).toBeNull()
+    expect(detail.data.validationResult).toBeNull()
+    expect(detail.data.evidenceGaps.map((gap) => gap.code)).toContain('no_rulebook_binding')
+    expect(detail.data.evidenceGaps.map((gap) => gap.code)).toContain('validation_not_run')
+  })
+
+  test('rejects an unknown bearer token without changing the captured evidence', async () => {
+    const { app, seeded } = await setup()
+    const response = await postJson(
+      app,
+      `/api/v1/captures/${CAPTURE_ID}/validate`,
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+      },
+      bearer('att_unknown_token_value'),
+    )
+    expect(response.status).toBe(401)
+    expect((await json<ErrorEnvelope>(response)).error.code).toBe('unauthorized')
+
+    const detail = await json<{ data: CaptureDetailBody }>(
+      await app.request(`/api/v1/captures/${CAPTURE_ID}`),
+    )
+    expect(detail.data.rulebook).toBeNull()
+    expect(detail.data.validationResult).toBeNull()
+  })
+
+  test('a correlation does not mutate the pinned rulebook version', async () => {
+    const { app, seeded, token } = await setup()
+    await postJson(
+      app,
+      `/api/v1/captures/${CAPTURE_ID}/validate`,
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+      },
+      bearer(token),
+    )
     const content = await app.request(
       `/api/v1/rulebooks/${seeded.rulebookId}/versions/${seeded.version}/content`,
     )

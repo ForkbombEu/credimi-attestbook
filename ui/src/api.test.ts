@@ -357,17 +357,25 @@ describe('createHttpCaptureApi', () => {
     const fetchImpl = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({ data: correlation })))
     const api = createHttpCaptureApi(fetchImpl)
 
-    const result = await api.correlateCapture('capture-1', {
-      rulebookId: 'rulebook-pid',
-      rulebookVersion: '1.0',
-      attestationType: 'Person Identification Data',
-    })
+    const result = await api.correlateCapture(
+      'capture-1',
+      {
+        rulebookId: 'rulebook-pid',
+        rulebookVersion: '1.0',
+        attestationType: 'Person Identification Data',
+      },
+      'att_capture_token',
+    )
     expect(result).toEqual(correlation)
     expect(fetchImpl).toHaveBeenCalledWith(
       '/api/v1/captures/capture-1/validate',
       expect.objectContaining({
         method: 'POST',
-        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+          authorization: 'Bearer att_capture_token',
+        },
         body: JSON.stringify({
           rulebookId: 'rulebook-pid',
           rulebookVersion: '1.0',
@@ -375,6 +383,9 @@ describe('createHttpCaptureApi', () => {
         }),
       }),
     )
+    const [url, init] = fetchImpl.mock.calls[0] ?? []
+    expect(String(url)).not.toContain('att_capture_token')
+    expect(init?.body).not.toContain('att_capture_token')
   })
 
   test('surfaces the safe API error message and status', async () => {
@@ -389,11 +400,15 @@ describe('createHttpCaptureApi', () => {
     const api = createHttpCaptureApi(fetchImpl)
 
     await expect(
-      api.correlateCapture('capture-1', {
-        rulebookId: 'rulebook-pid',
-        rulebookVersion: '1.0',
-        attestationType: 'PID',
-      }),
+      api.correlateCapture(
+        'capture-1',
+        {
+          rulebookId: 'rulebook-pid',
+          rulebookVersion: '1.0',
+          attestationType: 'PID',
+        },
+        'att_capture_token',
+      ),
     ).rejects.toMatchObject({
       name: 'CatalogApiError',
       status: 409,

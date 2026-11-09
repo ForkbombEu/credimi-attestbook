@@ -113,7 +113,7 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `POST` | `/api/v1/credentials/validate` | no | `200` | Structural credential validation with per-dimension evidence. |
 | `GET` | `/api/v1/captures` | no | `200` | Mock-backed page of normalized capture evidence with correlation identifiers and explicit evidence gaps. |
 | `GET` | `/api/v1/captures/{captureId}` | no | `200` | One capture with its redacted artifact projection, evidence timeline and the validation linked to its pinned rulebook version. |
-| `POST` | `/api/v1/captures/{captureId}/validate` | no | `200` | Correlate a captured issued credential with a pinned rulebook version and record the structural validation result. |
+| `POST` | `/api/v1/captures/{captureId}/validate` | yes | `200` | Correlate a captured issued credential with a pinned rulebook version and record the structural validation result. |
 
 Representations are the public projection of the services: rulebook `provenance`,
 `metadata` and `importKey`, attestation/schema-reference `metadata` and version `provenance`
@@ -514,11 +514,15 @@ the exact binding (`rulebook.id`, `name`, `version`, `contentDigest`, `digestVer
 `specVersion`, `status`), the attestation type and the AttestBook `boundAt`, together with the
 caller-owned `captureId`, `correlationId` and `testExecutionRef` preserved verbatim (FR-019;
 AttestBook still does not mint a correlation id, CD-5). The operation writes no registry data,
-does not change a pinned snapshot and is not a durable run history.
+does not change a pinned snapshot and is not a durable run history. It requires a provider
+bearer token because it records server state that every reader sees; the correlation binding
+does not carry the acting provider id.
 
 Evidence that cannot be validated honestly is refused with `409 conflict` and a safe message:
-an external reference (not fetched), an artifact declared source-redacted (not the original
-credential) and a non-`issued-credential` artifact type. A malformed request body or query is
+an external reference (not fetched) and a non-`issued-credential` artifact type. The
+source-redacted refusal remains a defensive check that the version 1 normalizer currently makes
+unreachable, because it rejects an inline artifact that already declares redaction and an
+external artifact is refused before that check. A malformed request body or query is
 `400 invalid_request`; an unknown capture or unknown rulebook/version/attestation type is
 `404 not_found`; a capture-source transport failure is `502 capture_fetch_failed`. A
 structural validation status never implies cryptographic, issuer-trust, protocol or
@@ -564,8 +568,9 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Verifier constraints | malformed request, foreign/unpinned schema document, integrity mismatch, invalid JSON, exceeded inspection bound or unsupported format | `400` | `invalid_request` |
 | Verifier constraints | rulebook, version, attestation type or stored snapshot does not exist | `404` | `not_found` |
 | Capture explorer | malformed page bound or correlation body | `400` | `invalid_request` |
+| Capture explorer | missing, unknown or revoked bearer token on capture correlation | `401` | `unauthorized` |
 | Capture explorer | capture, pinned rulebook, version or attestation type does not exist | `404` | `not_found` |
-| Capture explorer | external reference not fetched, source-redacted artifact or non-credential artifact type | `409` | `conflict` |
+| Capture explorer | external reference not fetched or non-credential artifact type | `409` | `conflict` |
 | Capture explorer | capture-source transport failure | `502` | `capture_fetch_failed` |
 | API wiring | registry, validation, issuer discovery, issuer fixtures, verifier policy resolver or capture explorer not configured | `503` | `registry_unavailable` / `validation_unavailable` / `capture_unavailable` |
 | API | unexpected failure | `500` | `internal_error` |

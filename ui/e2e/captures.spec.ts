@@ -3,10 +3,14 @@ import { readFileSync } from 'node:fs'
 import { AxeBuilder } from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
-import { PID_CREDENTIAL_FIXTURE } from './fixtures'
+import { EDITOR_TOKEN_FIXTURE, PID_CREDENTIAL_FIXTURE } from './fixtures'
 
 function pidCredential(): string {
   return readFileSync(PID_CREDENTIAL_FIXTURE, 'utf8').trim()
+}
+
+function providerToken(): string {
+  return readFileSync(EDITOR_TOKEN_FIXTURE, 'utf8').trim()
 }
 
 async function openExplorer(page: Page): Promise<void> {
@@ -20,13 +24,18 @@ async function openCapture(page: Page, captureId: string): Promise<void> {
   await expect(page.getByRole('heading', { level: 1, name: captureId })).toBeVisible()
 }
 
-async function correlateRealCredential(page: Page): Promise<void> {
+async function choosePinnedVersion(page: Page): Promise<void> {
   await page.getByLabel('Rulebook', { exact: true }).selectOption({
     label: 'Validator Sandbox Rulebook',
   })
   await expect(page.getByLabel('Rulebook version')).toBeEnabled()
   await page.getByLabel('Rulebook version').selectOption('1.0')
   await page.getByLabel('Attestation type').selectOption({ label: 'Sandbox Credential' })
+}
+
+async function correlateRealCredential(page: Page, token: string = providerToken()): Promise<void> {
+  await choosePinnedVersion(page)
+  await page.getByLabel('Provider token').fill(token)
   await page.getByRole('button', { name: 'Run validation' }).click()
   await expect(page.getByRole('heading', { name: 'Overall result' })).toBeVisible()
 }
@@ -103,6 +112,18 @@ test.describe('capture explorer', () => {
     await expect(page.getByText(/linked to the pinned rulebook version/)).toBeVisible()
     await expect(page.getByText('Validation recorded')).toBeVisible()
     await expect(page.getByText('credimi-e2e-execution-48')).toBeVisible()
+  })
+
+  test('requires a provider token before recording a correlation', async ({ page }) => {
+    // Use a capture no other test correlates, so a persisted result from an
+    // earlier test in the shared in-memory explorer cannot mask the refusal.
+    await openCapture(page, 'mock-capture-capture-issuer-3')
+    await choosePinnedVersion(page)
+    await page.getByRole('button', { name: 'Run validation' }).click()
+    await expect(
+      page.getByText('A provider token is required to record a correlation.'),
+    ).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Overall result' })).toHaveCount(0)
   })
 
   test('has no detectable accessibility violations', async ({ page }) => {

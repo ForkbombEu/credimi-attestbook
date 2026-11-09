@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
@@ -9,6 +11,27 @@ import { createFakeApi, makeValidationResult } from './test/fixtures'
 import type { CorrelateCaptureRequest } from './types'
 import { expectNoA11yViolations } from './test/a11y'
 
+interface HarnessProps {
+  readonly api: CaptureExplorerApi
+  readonly catalogApi: CatalogApi
+  readonly onNavigate: (path: string) => void
+  readonly initialToken: string
+}
+
+function Harness({ api, catalogApi, onNavigate, initialToken }: HarnessProps) {
+  const [token, setToken] = useState(initialToken)
+  return (
+    <CaptureDetailPage
+      api={api}
+      catalogApi={catalogApi}
+      captureId="mock-capture-capture-issuer-3"
+      token={token}
+      onTokenChange={setToken}
+      onNavigate={onNavigate}
+    />
+  )
+}
+
 function renderPage(
   api: CaptureExplorerApi = {
     listCaptures: () => new Promise(() => {}),
@@ -16,14 +39,15 @@ function renderPage(
     correlateCapture: () => new Promise(() => {}),
   },
   catalogApi: CatalogApi = createFakeApi(),
+  initialToken = '',
 ) {
   const onNavigate = vi.fn()
   const view = render(
-    <CaptureDetailPage
+    <Harness
       api={api}
       catalogApi={catalogApi}
-      captureId="mock-capture-capture-issuer-3"
       onNavigate={onNavigate}
+      initialToken={initialToken}
     />,
   )
   return { ...view, onNavigate }
@@ -194,20 +218,22 @@ describe('capture detail correlation', () => {
   test('runs the real correlation request and displays the linked validation findings', async () => {
     const user = userEvent.setup()
     let current = makeCaptureDetail()
-    const correlate = vi.fn(async (_captureId: string, _request: CorrelateCaptureRequest) => {
-      current = makeBoundCaptureDetail()
-      const binding = current.rulebook
-      if (binding === null) {
-        throw new Error('the fixture must be bound to a rulebook version')
-      }
-      return {
-        captureId: current.captureId,
-        correlationId: current.correlationId,
-        testExecutionRef: current.testExecutionRef,
-        rulebook: binding,
-        validation: makeValidationResult(),
-      }
-    })
+    const correlate = vi.fn(
+      async (_captureId: string, _request: CorrelateCaptureRequest, _token: string) => {
+        current = makeBoundCaptureDetail()
+        const binding = current.rulebook
+        if (binding === null) {
+          throw new Error('the fixture must be bound to a rulebook version')
+        }
+        return {
+          captureId: current.captureId,
+          correlationId: current.correlationId,
+          testExecutionRef: current.testExecutionRef,
+          rulebook: binding,
+          validation: makeValidationResult(),
+        }
+      },
+    )
     const api: CaptureExplorerApi = {
       listCaptures: () =>
         Promise.resolve({ data: [], pagination: { limit: 100, offset: 0, total: 0 } }),
@@ -217,6 +243,7 @@ describe('capture detail correlation', () => {
     renderPage(api)
 
     await selectCorrelation(user)
+    await user.type(screen.getByLabelText('Provider token'), 'att_test_token')
     await user.click(screen.getByRole('button', { name: 'Run validation' }))
 
     expect(correlate.mock.calls[0]?.[0]).toBe('mock-capture-capture-issuer-3')
@@ -225,6 +252,7 @@ describe('capture detail correlation', () => {
       rulebookVersion: '1.0',
       attestationType: 'Person Identification Data',
     })
+    expect(correlate.mock.calls[0]?.[2]).toBe('att_test_token')
     expect(await screen.findByRole('heading', { name: 'Overall result' })).toBeInTheDocument()
     expect(screen.getByText('rulebook-pid')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'PID Rulebook' })).toHaveAttribute(
@@ -271,9 +299,47 @@ describe('capture detail correlation', () => {
     renderPage(api)
 
     await selectCorrelation(user)
+    await user.type(screen.getByLabelText('Provider token'), 'att_test_token')
     await user.click(screen.getByRole('button', { name: 'Run validation' }))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('declared partial redacted')
+  })
+
+  test('requires a provider token before sending a correlation request', async () => {
+    const user = userEvent.setup()
+    const correlate = vi.fn()
+    const api: CaptureExplorerApi = {
+      listCaptures: () =>
+        Promise.resolve({ data: [], pagination: { limit: 100, offset: 0, total: 0 } }),
+      getCapture: () => Promise.resolve(makeCaptureDetail()),
+      correlateCapture: correlate,
+    }
+    renderPage(api)
+
+    await selectCorrelation(user)
+    await user.click(screen.getByRole('button', { name: 'Run validation' }))
+    expect(screen.getByRole('alert')).toHaveTextContent(
+      'A provider token is required to record a correlation.',
+    )
+    expect(correlate).not.toHaveBeenCalled()
+  })
+
+  test('shows the safe unauthorized message when the token is rejected', async () => {
+    const user = userEvent.setup()
+    const api: CaptureExplorerApi = {
+      listCaptures: () =>
+        Promise.resolve({ data: [], pagination: { limit: 100, offset: 0, total: 0 } }),
+      getCapture: () => Promise.resolve(makeCaptureDetail()),
+      correlateCapture: () =>
+        Promise.reject(new CatalogApiError('A valid bearer token is required.', 401)),
+    }
+    renderPage(api)
+
+    await selectCorrelation(user)
+    await user.type(screen.getByLabelText('Provider token'), 'att_unknown_token')
+    await user.click(screen.getByRole('button', { name: 'Run validation' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('A valid bearer token is required.')
   })
 
   test('has no detectable accessibility violations with a linked validation', async () => {

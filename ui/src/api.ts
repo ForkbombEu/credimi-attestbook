@@ -391,8 +391,9 @@ export function capturePath(captureId: string): string {
 
 /**
  * Read interface of the mock-backed capture explorer. Every capture is served
- * by the deterministic local mock source; correlation runs the structural
- * credential engine and writes no registry data.
+ * by the deterministic local mock source. Correlation runs the structural
+ * credential engine and records the correlation server-side, so it requires a
+ * provider bearer token; the token is sent only in the Authorization header.
  */
 export interface CaptureExplorerApi {
   listCaptures(signal?: AbortSignal): Promise<CaptureExplorerPage>
@@ -400,6 +401,7 @@ export interface CaptureExplorerApi {
   correlateCapture(
     captureId: string,
     request: CorrelateCaptureRequest,
+    token: string,
     signal?: AbortSignal,
   ): Promise<CaptureCorrelationResult>
 }
@@ -439,10 +441,14 @@ export function createHttpCaptureApi(
       })
       return readData<CaptureExplorerDetail>(response, 'capture')
     },
-    async correlateCapture(captureId, request, signal) {
+    async correlateCapture(captureId, request, token, signal) {
       const response = await fetchImpl(`${capturePath(captureId)}/validate`, {
         method: 'POST',
-        headers: { accept: 'application/json', 'content-type': 'application/json' },
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+          authorization: `Bearer ${token}`,
+        },
         body: JSON.stringify(request),
         ...(signal === undefined ? {} : { signal }),
       })

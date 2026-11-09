@@ -62,7 +62,8 @@ Implemented by [#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48)
   source-declared redaction, the opaque correlation and test-execution references and, once
   recorded, the exact pinned rulebook version and the structural validation result (FR-019);
 - explicit evidence gaps for external, source-redacted, unbound and unvalidated evidence, and
-  an in-memory validation correlation that refuses evidence it cannot validate honestly;
+  an authenticated in-memory validation correlation that refuses evidence it cannot validate
+  honestly;
 - the `/captures` explorer read routes and the UI-006 capture explorer UI.
 
 Deliberately **not** implemented in #46 or #47:
@@ -303,18 +304,22 @@ the read routes in `src/api/routes.ts` and the UI in `ui/src/CapturesPage.tsx` a
   `external_artifact_not_fetched`, `artifact_redacted_by_source`,
   `no_test_execution_reference`, `no_rulebook_binding`, `validation_not_run` and
   `validation_not_applicable`. An absent field is never treated as a pass.
-- `POST /api/v1/captures/{captureId}/validate` accepts `{ rulebookId, rulebookVersion,
-  attestationType }`, runs the **real** structural credential engine on the capture's segregated
-  inline artifact and records the correlation. The binding is the exact
+- `POST /api/v1/captures/{captureId}/validate`, authenticated with a provider bearer token,
+  accepts `{ rulebookId, rulebookVersion, attestationType }`, runs the **real** structural
+  credential engine on the capture's segregated inline artifact and records the correlation.
+  The token is required because the recorded correlation is visible to every reader, and the
+  binding does not carry the acting provider id. The binding is the exact
   `rulebook.id`/`name`/`version`/`contentDigest`/`specVersion`/`status`, the selected attestation
   type and the engine's verified digest. The response and the detail read carry back the
   caller-owned `captureId`, `correlationId` and `testExecutionRef` without rewriting them
   (FR-019; CD-5 remains open: AttestBook does not mint a correlation id).
-- Validation is refused with `409 conflict` when the artifact is external (not fetched), was
-  declared source-redacted (not the original credential) or is not an `issued-credential`
-  (no credential for the engine). The engine's own `400`/`404` for a malformed request or an
-  unknown rulebook/version/attestation type is preserved. A correlation never mutates a pinned
-  version or its artifact.
+- Validation is refused with `409 conflict` when the artifact is external (not fetched) or is
+  not an `issued-credential` (no credential for the engine). A source-redacted refusal remains
+  as a defensive check, but the version 1 normalizer currently makes it unreachable: it rejects
+  an inline artifact that already declares redaction, and an external artifact is refused
+  before the check. The engine's own `400`/`404` for a malformed request or an unknown
+  rulebook/version/attestation type is preserved. A correlation never mutates a pinned version
+  or its artifact.
 - The evidence timeline orders the source-asserted `capturedAt`, the AttestBook `receivedAt`,
   the correlation `boundAt` and the validation `validatedAt` by their own timestamps. The test
   execution reference stays opaque: AttestBook does not query Credimi or orchestrate an

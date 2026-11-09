@@ -47,6 +47,8 @@ export function App() {
         api={defaultCaptures}
         catalogApi={defaultApi}
         captureId={route.captureId}
+        token={editorToken}
+        onTokenChange={setEditorToken}
         onNavigate={navigate}
       />
     )
