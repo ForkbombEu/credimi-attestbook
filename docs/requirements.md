@@ -47,7 +47,7 @@ split from the closed duplicates #15–#19.
 | FR-017 | `capture-verifier` integration | Phase 4: #47 (mock adapter and authorization boundary) | Mock-only: a deterministic capture-verifier source exercises normalization and the push/pull contracts; no real endpoint is integrated and the integration is not claimed operational |
 | FR-018 | Capture integration contracts (push/pull, mock adapter) | Phase 0 contracts; Phase 4: #46 (normalizer contract), #47 (push/pull and mock adapters) | The transport-agnostic normalizer is implemented in #46; #47 implements typed push/pull adapter contracts, credential authorization, transport-error codes, bounded paging/idempotency and a deterministic offline mock source; no live transport and no broker |
 | FR-019 | Correlation and traceability across rulebook, capture and validation | Phase 0 contracts; Phase 4: #48 (mock-backed explorer and pinned-rulebook correlation) | Stable ids, pinned version + digest; a recorded correlation carries the caller-owned `correlationId`/`testExecutionRef` and the exact rulebook version, digest and attestation type; no correlation id is minted and no live test execution is queried |
-| FR-020 | Credimi test orchestration via API | Phase 5: #49 | No Temporal/StepCI/PocketBase dependency |
+| FR-020 | Credimi test orchestration via API | Phase 5: #49 (adapter client and pinned-evidence contracts, [`docs/credimi-integration.md`](credimi-integration.md)) | Rulebook selection, exact-version pinning, structural validation, structured evidence and capture correlation over the public `/api/v1` API only; typed failures, bounded timeouts/retries and no Temporal/StepCI/PocketBase dependency; AttestBook does not orchestrate Credimi tests |
 | FR-021 | Headless Wallet testing workflow | Phase 5: #50 | AttestBook validates, does not orchestrate |
 | FR-022 | Continuous conformance: deterministic, reproducible, machine-readable | Phase 1 supports the evidence subset (#33, #34); Phase 5: #51 | No conformance claim |
 
@@ -80,7 +80,7 @@ split from the closed duplicates #15–#19.
 | AC-12 | Architecture supports capture without redesigning the validation engine | Phase 0 contracts; Phase 4: #46, #47, #48 |
 | AC-13 | Mock capture artifacts validate through the public API | Phase 4: #47, #48 (a captured issued credential runs the real structural engine through the capture correlation route) |
 | AC-14 | Capture evidence correlates with validation results | Phase 4: #48 (implemented for a captured issued credential against a pinned rulebook version) |
-| AC-15 | Credimi consumes results without database access | Phase 5: #49 |
+| AC-15 | Credimi consumes results without database access | Phase 5: #49 (HTTP-only adapter; no registry or database handle) |
 | AC-16 | Rulebook, cryptographic, protocol and interoperability results remain distinguishable | Phase 1: #33 |
 | AC-17 | Unsupported functionality explicitly reported | Phase 1: #32, #33 |
 | AC-18 | Automated tests, Docker and developer documentation | Phase 1: #26 (`bun run check`, Docker smoke job, README), #39 |

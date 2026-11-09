@@ -86,10 +86,15 @@ the two without a current migrated issue are marked explicitly.
   `capture-issuer`/`capture-verifier` connectors (gated on their actual APIs) and persistence
   remain unimplemented.
 - Credimi orchestration, headless-wallet workflow and continuous conformance
-  (FR-020–FR-022) — Phase 5, issues
-  [#49](https://github.com/ForkbombEu/credimi-attestbook/issues/49),
-  [#50](https://github.com/ForkbombEu/credimi-attestbook/issues/50) and
-  [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51).
+  (FR-020–FR-022) — Phase 5. Delivered: #49 shipped the standalone Credimi adapter with
+  rulebook selection, exact-version pinning, version-pinned validation evidence, capture
+  correlation over the public `/api/v1` API and tested timeout/retry/error handling
+  ([`docs/credimi-integration.md`](credimi-integration.md), FR-020, AC-15). Still open:
+  [#50](https://github.com/ForkbombEu/credimi-attestbook/issues/50) (headless-wallet
+  comparison evidence) and
+  [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51) (reproducible continuous
+  conformance results); AttestBook remains a validation service, not a second orchestration
+  platform.
 - Security hardening, performance/caching and ETSI migration or external interoperability
   checks — Phase 6, issues
   [#52](https://github.com/ForkbombEu/credimi-attestbook/issues/52),

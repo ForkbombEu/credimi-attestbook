@@ -41,6 +41,11 @@ Implemented and exposed by this slice:
   [issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44));
 - structural credential validation against a pinned rulebook version.
 
+The public API is the integration boundary for Credimi. The standalone adapter documented in
+[`docs/credimi-integration.md`](credimi-integration.md) (issue #49) consumes these routes only:
+it exposes rulebook selection, version pinning, credential validation and capture-evidence
+correlation without database access or a Credimi runtime dependency. It adds no route.
+
 Deliberately **not** in this slice:
 
 - the TS11 catalogue interface (`GET/PUT/DELETE /schemas`, JWS responses) — it must be
