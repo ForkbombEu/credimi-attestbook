@@ -25,6 +25,26 @@ import type {
  */
 const DCQL_FORMATS = new Set<string>(AttestationFormatValues)
 
+/**
+ * Whether one attribute claim path is valid for the format's DCQL query.
+ *
+ * OpenID4VP DCQL allows `null` as an array wildcard for `dc+sd-jwt`, but an
+ * `mso_mdoc` claim path must be exactly `[namespace, data_element_identifier]`
+ * and contains no wildcard. Any other format is not mapped at all.
+ */
+export function isDcqlClaimPathExpressible(
+  format: string,
+  path: readonly (string | number | null)[],
+): boolean {
+  if (!DCQL_FORMATS.has(format)) {
+    return false
+  }
+  if (format === 'mso_mdoc') {
+    return path.length === 2 && path.every((component) => typeof component === 'string')
+  }
+  return path.length > 0
+}
+
 /** Constraint keywords DCQL cannot express on a claim. */
 const VALUE_CONSTRAINT_KEYWORDS = new Set([
   'type',

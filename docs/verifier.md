@@ -123,8 +123,11 @@ Each attribute reports:
 
 Nested object properties and array item constraints are included, so a pointer such as
 `/address/locality` has claim path `['address', 'locality']` and `/nationalities/*` has claim
-path `['nationalities', null]`. An attribute that is only reachable through `required` without
-a declared `properties` entry is reported with an empty type list rather than omitted.
+path `['nationalities', null]`. `claimPathSupported` is format-aware: `dc+sd-jwt` accepts a
+non-empty path with `null` array wildcards, while `mso_mdoc` accepts only a two-element
+`[namespace, data_element_identifier]` path and no wildcard; a format that DCQL cannot select
+is never marked mappable. An attribute that is only reachable through `required` without a
+declared `properties` entry is reported with an empty type list rather than omitted.
 
 ## 4. Supported extraction subset
 
@@ -139,7 +142,13 @@ The inspector is a bounded structural walk over JSON Schema 2020-12. It extracts
 | `minItems`, `maxItems`, `uniqueItems` | Reported as data. |
 | `minProperties`, `maxProperties` | Reported as data on the object attribute. |
 | `properties`, `required`, `items`, `additionalProperties` | Walked to produce nested attributes and object limitations. |
-| `allOf` | Branches are flattened and compatible constraints are intersected. |
+| `allOf` | Branches are flattened and compatible constraints are intersected at every nesting level. |
+
+Property schemas from sibling `allOf` branches are merged before their children are inspected,
+so a `required` flag, nested `properties` or nested `items` declared in one branch is combined
+with the constraints of the other branches into one attribute. Array items are followed
+recursively, including items of items; a constraint on an item's item is never dropped
+silently.
 
 Everything else that can change an instance is reported, not ignored. The reported set
 includes `$ref`, `$dynamicRef`, `$recursiveRef`, `oneOf`, `anyOf`, `not`, `if`/`then`/`else`,
@@ -152,8 +161,9 @@ keeping the first extracted value instead of inventing a merged one.
 
 ## 5. Bounds and non-execution
 
-The parsed document is bounded before inspection: depth 64 and 4,096 nodes overall, at most 16
-nested attribute levels and at most 256 typed attributes per format. A document that exceeds
+The parsed document is bounded before inspection: depth 64 and 4,096 inspection node visits
+overall (a schema node reached again through repeated `allOf` flattening is counted each
+time), at most 16 nested attribute levels and at most 256 typed attributes per format. A document that exceeds
 these bounds, a duplicate document URI or a malformed document is `400 invalid_request`.
 
 The inspector only reads object members and reports values. It does not compile Ajv, evaluate
@@ -197,7 +207,11 @@ What maps:
 
 - `format` for `dc+sd-jwt` and `mso_mdoc`; every other rulebook format is reported
   `format_not_expressible` with `credentialQuery: null`;
-- claim paths from the typed attributes (array elements become `null`).
+- claim paths from the typed attributes (array elements become `null`) for `dc+sd-jwt`; both a
+  container path such as `['address']` and its leaf path `['address', 'locality']` are emitted,
+  so the verifier can choose the granularity it needs. For
+  `mso_mdoc`, only a path of exactly `[namespace, data_element_identifier]` with no wildcard is
+  emitted, and any other path is reported `claim_path_not_expressible`.
 
 What is explicitly reported as unsupported, never fabricated:
 

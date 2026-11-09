@@ -223,6 +223,23 @@ describe('POST /api/v1/verifiers/constraints', () => {
     expect(payload.error.code).toBe('invalid_request')
   })
 
+  test('accepts schema members that shadow Object.prototype names', async () => {
+    const schemaText = JSON.stringify({
+      type: 'object',
+      properties: { identifier: { type: 'string', toString: 1, constructor: {} } },
+    })
+    const setupFixture = setup({ schemaContent: schemaText })
+    const response = await post(setupFixture.app, body(setupFixture))
+    expect(response.status).toBe(200)
+    const payload = (await response.json()) as Record<string, unknown>
+    assertSchema('VerifierConstraintsResponse', payload)
+    const data = payload['data'] as { formats: { attributes: { pointer: string }[] }[] }
+    const identifier = data.formats
+      .flatMap((policy) => policy.attributes)
+      .find((attribute) => attribute.pointer === '/identifier')
+    expect(identifier).toBeDefined()
+  })
+
   test('rejects a schema document that does not match the pinned integrity', async () => {
     const setupFixture = setup()
     const response = await post(

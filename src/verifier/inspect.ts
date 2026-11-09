@@ -41,31 +41,31 @@ const JSON_TYPES = new Set(['null', 'boolean', 'object', 'array', 'number', 'str
  * Keywords whose effect on an instance this slice does not resolve. They are
  * reported on the attribute or object that declares them and never guessed.
  */
-const UNRESOLVED_KEYWORDS: Readonly<Record<string, string>> = {
-  $ref: 'References are not resolved because AttestBook does not fetch referenced schemas.',
-  $dynamicRef: 'Dynamic references are not resolved in this slice.',
-  $recursiveRef: 'Recursive references are not resolved in this slice.',
-  $dynamicAnchor: 'Dynamic anchors are not resolved in this slice.',
-  oneOf: 'Alternative schemas are not merged into one effective constraint set.',
-  anyOf: 'Alternative schemas are not merged into one effective constraint set.',
-  not: 'Negated schemas are not resolved into effective constraints.',
-  if: 'Conditional schemas are not resolved into one effective constraint set.',
-  then: 'Conditional schemas are not resolved into one effective constraint set.',
-  else: 'Conditional schemas are not resolved into one effective constraint set.',
-  dependentRequired: 'Dependent requirements are not resolved into effective constraints.',
-  dependentSchemas: 'Dependent schemas are not resolved into effective constraints.',
-  dependencies: 'Legacy dependencies are not resolved into effective constraints.',
-  patternProperties: 'Pattern properties are not inspected as typed attributes.',
-  propertyNames: 'Property-name constraints are not inspected as typed attributes.',
-  prefixItems: 'Tuple item schemas are not inspected as typed attributes.',
-  additionalItems: 'Legacy tuple items are not inspected as typed attributes.',
-  contains: 'Array containment constraints are not inspected as typed attributes.',
-  minContains: 'Array containment constraints are not inspected as typed attributes.',
-  maxContains: 'Array containment constraints are not inspected as typed attributes.',
-  unevaluatedItems: 'Unevaluated item schemas are not resolved in this slice.',
-  unevaluatedProperties: 'Unevaluated property schemas are not resolved in this slice.',
-  contentSchema: 'Content schemas are not inspected as typed attributes.',
-}
+const UNRESOLVED_KEYWORDS: ReadonlyMap<string, string> = new Map([
+  ['$ref', 'References are not resolved because AttestBook does not fetch referenced schemas.'],
+  ['$dynamicRef', 'Dynamic references are not resolved in this slice.'],
+  ['$recursiveRef', 'Recursive references are not resolved in this slice.'],
+  ['$dynamicAnchor', 'Dynamic anchors are not resolved in this slice.'],
+  ['oneOf', 'Alternative schemas are not merged into one effective constraint set.'],
+  ['anyOf', 'Alternative schemas are not merged into one effective constraint set.'],
+  ['not', 'Negated schemas are not resolved into effective constraints.'],
+  ['if', 'Conditional schemas are not resolved into one effective constraint set.'],
+  ['then', 'Conditional schemas are not resolved into one effective constraint set.'],
+  ['else', 'Conditional schemas are not resolved into one effective constraint set.'],
+  ['dependentRequired', 'Dependent requirements are not resolved into effective constraints.'],
+  ['dependentSchemas', 'Dependent schemas are not resolved into effective constraints.'],
+  ['dependencies', 'Legacy dependencies are not resolved into effective constraints.'],
+  ['patternProperties', 'Pattern properties are not inspected as typed attributes.'],
+  ['propertyNames', 'Property-name constraints are not inspected as typed attributes.'],
+  ['prefixItems', 'Tuple item schemas are not inspected as typed attributes.'],
+  ['additionalItems', 'Legacy tuple items are not inspected as typed attributes.'],
+  ['contains', 'Array containment constraints are not inspected as typed attributes.'],
+  ['minContains', 'Array containment constraints are not inspected as typed attributes.'],
+  ['maxContains', 'Array containment constraints are not inspected as typed attributes.'],
+  ['unevaluatedItems', 'Unevaluated item schemas are not resolved in this slice.'],
+  ['unevaluatedProperties', 'Unevaluated property schemas are not resolved in this slice.'],
+  ['contentSchema', 'Content schemas are not inspected as typed attributes.'],
+])
 
 /**
  * Keyword values extracted into a typed constraint. `pattern` and `format` are
@@ -178,7 +178,7 @@ export function classifySchemaDocument(
   if (!isRecord(document)) {
     return 'unsupported'
   }
-  if (JSON_SCHEMA_ROOT_KEYWORDS.some((keyword) => keyword in document)) {
+  if (JSON_SCHEMA_ROOT_KEYWORDS.some((keyword) => Object.hasOwn(document, keyword))) {
     return 'json_schema'
   }
   if (typeof document['vct'] === 'string') {
@@ -296,7 +296,7 @@ function mergeExtractedValue(
   value: unknown,
 ): void {
   const existing = values[keyword]
-  if (existing === undefined && !(keyword in values)) {
+  if (existing === undefined && !Object.hasOwn(values, keyword)) {
     values[keyword] = value
     return
   }
@@ -304,7 +304,7 @@ function mergeExtractedValue(
   if (merged === CONFLICT) {
     unresolved.set(
       keyword,
-      `The "allOf" branches constrain "${keyword}" incompatibly; only the first value is reported.`,
+      `The "allOf" branches declare different "${keyword}" values; only the first value is reported.`,
     )
     return
   }
@@ -364,10 +364,6 @@ function collectConstraintBranches(schema: unknown, state: InspectionState): Jso
   return branches
 }
 
-function constraintSetFor(schema: unknown, state: InspectionState): ConstraintSet {
-  return mergeConstraintSchemas([schema], state)
-}
-
 function mergeConstraintSchemas(
   schemas: readonly unknown[],
   state: InspectionState,
@@ -379,8 +375,11 @@ function mergeConstraintSchemas(
       for (const [keyword, value] of Object.entries(branch)) {
         if (EXTRACTED_KEYWORDS.has(keyword)) {
           mergeExtractedValue(values, unresolved, keyword, value)
-        } else if (keyword in UNRESOLVED_KEYWORDS) {
-          unresolved.set(keyword, UNRESOLVED_KEYWORDS[keyword] ?? 'This keyword is not resolved.')
+        } else if (UNRESOLVED_KEYWORDS.has(keyword)) {
+          unresolved.set(
+            keyword,
+            UNRESOLVED_KEYWORDS.get(keyword) ?? 'This keyword is not resolved.',
+          )
         }
       }
       if (Array.isArray(branch['items'])) {
@@ -416,7 +415,11 @@ function toUnsupportedConstraints(
     .map(([keyword, reason]) => ({ keyword, reason }))
 }
 
-function collectObjectShape(schema: unknown, state: InspectionState, depth: number): ObjectShape {
+function collectObjectShape(
+  schemas: readonly unknown[],
+  state: InspectionState,
+  depth: number,
+): ObjectShape {
   const shape: ObjectShape = {
     properties: new Map(),
     required: new Set(),
@@ -424,7 +427,9 @@ function collectObjectShape(schema: unknown, state: InspectionState, depth: numb
     branches: [],
   }
   const branches: JsonObject[] = []
-  flattenAllOf(schema, state, depth, branches)
+  for (const schema of schemas) {
+    flattenAllOf(schema, state, depth, branches)
+  }
   for (const branch of branches) {
     shape.branches.push(branch)
     const properties = branch['properties']
@@ -471,14 +476,14 @@ function collectObjectLimitations(
 ): void {
   const pointer = baseSegments.length === 0 ? '/' : pointerFromSegments(baseSegments)
   for (const branch of shape.branches) {
-    for (const keyword of Object.keys(UNRESOLVED_KEYWORDS)) {
-      if (!(keyword in branch)) {
+    for (const [keyword, unresolvedReason] of UNRESOLVED_KEYWORDS) {
+      if (!Object.hasOwn(branch, keyword)) {
         continue
       }
       state.objectLimitations.push({
         pointer,
         keyword,
-        reason: UNRESOLVED_KEYWORDS[keyword] ?? 'This object constraint is not resolved.',
+        reason: unresolvedReason,
       })
     }
   }
@@ -507,8 +512,16 @@ function collectAdditionalPropertiesLimitation(
   }
 }
 
+function hasObjectMembers(branch: JsonObject): boolean {
+  return (
+    Object.hasOwn(branch, 'properties') ||
+    Object.hasOwn(branch, 'required') ||
+    Object.hasOwn(branch, 'additionalProperties')
+  )
+}
+
 function inspectObject(
-  schema: unknown,
+  schemas: readonly unknown[],
   state: InspectionState,
   baseSegments: readonly string[],
   depth: number,
@@ -517,7 +530,7 @@ function inspectObject(
   if (depth > MAX_ATTRIBUTE_DEPTH) {
     throw invalidInput(`${state.source} exceeds the schema attribute depth bound`)
   }
-  const shape = collectObjectShape(schema, state, depth)
+  const shape = collectObjectShape(schemas, state, depth)
   collectObjectLimitations(shape, state, baseSegments)
   collectAdditionalPropertiesLimitation(shape, state, baseSegments)
 
@@ -544,11 +557,10 @@ function inspectObject(
       claimPathSupported: true,
     })
 
-    // Nested object claims are recurse into so their properties are typed too.
-    for (const propertySchema of propertySchemas) {
-      inspectNestedObject(propertySchema, state, segments, depth + 1)
-      inspectArrayItems(propertySchema, state, segments, depth + 1)
-    }
+    // Every schema for this property is merged before the next level is
+    // inspected, so a `required`, `properties` or `items` member from one
+    // `allOf` branch is never lost or duplicated.
+    inspectChildren(propertySchemas, state, segments, depth + 1)
   }
 }
 
@@ -559,68 +571,59 @@ function mergePropertyConstraints(
   return mergeConstraintSchemas(schemas, state)
 }
 
-function inspectNestedObject(
-  schema: unknown,
+/**
+ * Inspects the children of the merged schemas at one instance location:
+ * nested object members and nested array items, including items of items.
+ */
+function inspectChildren(
+  schemas: readonly unknown[],
   state: InspectionState,
   segments: readonly string[],
   depth: number,
 ): void {
-  if (!isRecord(schema)) {
-    return
+  if (depth > MAX_ATTRIBUTE_DEPTH) {
+    throw invalidInput(`${state.source} exceeds the schema attribute depth bound`)
   }
-  // Inspecting the original schema once lets the object-shape collector merge
-  // properties and `required` from every `allOf` branch.
-  for (const branch of collectConstraintBranches(schema, state)) {
-    if (isRecord(branch['properties'])) {
-      inspectObject(schema, state, segments, depth)
-      return
-    }
-  }
-}
+  const branches = schemas.flatMap((schema) => collectConstraintBranches(schema, state))
 
-function inspectArrayItems(
-  schema: unknown,
-  state: InspectionState,
-  segments: readonly string[],
-  depth: number,
-): void {
-  if (!isRecord(schema)) {
+  if (branches.some(hasObjectMembers)) {
+    inspectObject(schemas, state, segments, depth)
+  }
+
+  const itemSchemas: unknown[] = []
+  for (const branch of branches) {
+    const items = branch['items']
+    if (isRecord(items)) {
+      itemSchemas.push(items)
+    }
+  }
+  if (itemSchemas.length === 0) {
     return
   }
-  for (const branch of collectConstraintBranches(schema, state)) {
-    const items = branch['items']
-    if (items === undefined || typeof items === 'boolean' || Array.isArray(items)) {
-      continue
-    }
-    if (!isRecord(items)) {
-      continue
-    }
-    const itemSegments = [...segments, '*']
-    for (const itemBranch of collectConstraintBranches(items, state)) {
-      if (isRecord(itemBranch['properties'])) {
-        inspectObject(items, state, itemSegments, depth)
-        return
+
+  const itemSegments = [...segments, '*']
+  const itemBranches = itemSchemas.flatMap((schema) => collectConstraintBranches(schema, state))
+  if (!itemBranches.some(hasObjectMembers)) {
+    const constraints = mergeConstraintSchemas(itemSchemas, state)
+    if (Object.keys(constraints.values).length > 0 || constraints.unresolved.size > 0) {
+      if (state.attributes.length >= MAX_VERIFIER_ATTRIBUTES) {
+        throw invalidInput(`${state.source} exceeds the typed attribute bound`)
       }
+      state.attributes.push({
+        pointer: pointerFromSegments(itemSegments),
+        name: '*',
+        required: false,
+        types: typesFromConstraints(constraints.values, constraints.unresolved),
+        constraints: constraints.values,
+        unsupportedConstraints: toUnsupportedConstraints(constraints.unresolved),
+        sources: [state.source],
+        claimPath: claimPathFromSegments(itemSegments),
+        claimPathSupported: true,
+      })
     }
-    const constraints = constraintSetFor(items, state)
-    if (Object.keys(constraints.values).length === 0 && constraints.unresolved.size === 0) {
-      continue
-    }
-    if (state.attributes.length >= MAX_VERIFIER_ATTRIBUTES) {
-      throw invalidInput(`${state.source} exceeds the typed attribute bound`)
-    }
-    state.attributes.push({
-      pointer: pointerFromSegments(itemSegments),
-      name: '*',
-      required: false,
-      types: typesFromConstraints(constraints.values, constraints.unresolved),
-      constraints: constraints.values,
-      unsupportedConstraints: toUnsupportedConstraints(constraints.unresolved),
-      sources: [state.source],
-      claimPath: claimPathFromSegments(itemSegments),
-      claimPathSupported: true,
-    })
   }
+
+  inspectChildren(itemSchemas, state, itemSegments, depth + 1)
 }
 
 /**
@@ -638,7 +641,7 @@ export function inspectJsonSchema(document: unknown, source: string): SchemaInsp
     diagnostics: [],
     nodes: 0,
   }
-  inspectObject(document, state, [], 0)
+  inspectObject([document], state, [], 0)
   state.attributes.sort((left, right) => {
     const pointer = left.pointer.localeCompare(right.pointer)
     return pointer !== 0 ? pointer : left.sources.join().localeCompare(right.sources.join())

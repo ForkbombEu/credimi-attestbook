@@ -171,6 +171,15 @@ function findAttribute(
   return undefined
 }
 
+function attributesAt(
+  result: ReturnType<VerifierPolicyResolver['resolve']>,
+  pointer: string,
+): Record<string, unknown>[] {
+  return result.formats.flatMap((policy) =>
+    policy.attributes.filter((attribute) => attribute.pointer === pointer),
+  ) as unknown as Record<string, unknown>[]
+}
+
 function formatPolicy(result: ReturnType<VerifierPolicyResolver['resolve']>, format: string) {
   const policy = result.formats.find((candidate) => candidate.format === format)
   if (policy === undefined) {
@@ -415,7 +424,7 @@ describe('VerifierPolicyResolver', () => {
       {
         keyword: 'type',
         reason:
-          'The "allOf" branches constrain "type" incompatibly; only the first value is reported.',
+          'The "allOf" branches declare different "type" values; only the first value is reported.',
       },
     ])
   })
@@ -524,12 +533,18 @@ describe('VerifierPolicyResolver', () => {
 
     const all = setupFixture.resolver.resolve(setupFixture.request())
     expect(all.formats.map((policy) => policy.format)).toEqual(['dc+sd-jwt', 'mso_mdoc'])
-    expect(formatPolicy(all, 'mso_mdoc').dcql.credentialQuery).toEqual({
-      id: 'credential-2',
-      format: 'mso_mdoc',
-      claims: [{ path: ['name'] }],
+    const mdoc = formatPolicy(all, 'mso_mdoc')
+    expect(mdoc.dcql.credentialQuery).toEqual({ id: 'credential-2', format: 'mso_mdoc' })
+    expect(mdoc.dcql.mapped).toEqual(['credential format'])
+    expect(
+      mdoc.dcql.unsupported.some(
+        (entry) => entry.code === 'claim_path_not_expressible' && entry.path === '/name',
+      ),
+    ).toBe(true)
+    expect(mdoc.attributes.find((attribute) => attribute.pointer === '/name')).toMatchObject({
+      claimPathSupported: false,
     })
-    expect(formatPolicy(all, 'mso_mdoc').dcql.unsupported.map((entry) => entry.code)).toContain(
+    expect(mdoc.dcql.unsupported.map((entry) => entry.code)).toContain(
       'type_identifier_unavailable',
     )
 
@@ -656,6 +671,160 @@ describe('VerifierPolicyResolver', () => {
     expect(formatPolicy(result, 'dc+sd-jwt').dcql.credentialQuery).toMatchObject({
       claims: [{ path: ['__proto__'] }],
     })
+  })
+
+  test('ignores schema members that shadow Object.prototype names', () => {
+    const schemaText = JSON.stringify({
+      type: 'object',
+      properties: {
+        identifier: { type: 'string', toString: 1, constructor: {} },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: SCHEMA_URI, content: schemaText }],
+    })
+    const result = setupFixture.resolver.resolve(setupFixture.request())
+    expect(findAttribute(result, '/identifier')).toMatchObject({
+      types: ['string'],
+      unsupportedConstraints: [],
+    })
+  })
+
+  test('merges required and properties from sibling allOf branches', () => {
+    const schema = {
+      type: 'object',
+      allOf: [
+        {
+          properties: {
+            address: { type: 'object', properties: { street: { type: 'string' } } },
+          },
+        },
+        { properties: { address: { required: ['street'] } } },
+      ],
+    }
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: SCHEMA_URI, content: JSON.stringify(schema) }],
+    })
+    const result = setupFixture.resolver.resolve(setupFixture.request())
+    const streets = attributesAt(result, '/address/street')
+    expect(streets).toHaveLength(1)
+    expect(streets[0]).toMatchObject({ required: true, types: ['string'] })
+  })
+
+  test('merges constraints from sibling allOf property branches', () => {
+    const schema = {
+      type: 'object',
+      allOf: [
+        {
+          properties: {
+            address: {
+              type: 'object',
+              properties: { street: { type: 'string' } },
+            },
+          },
+        },
+        {
+          properties: {
+            address: { properties: { street: { maxLength: 5 } } },
+          },
+        },
+      ],
+    }
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: SCHEMA_URI, content: JSON.stringify(schema) }],
+    })
+    const result = setupFixture.resolver.resolve(setupFixture.request())
+    const streets = attributesAt(result, '/address/street')
+    expect(streets).toHaveLength(1)
+    expect(streets[0]?.['constraints']).toEqual({ type: 'string', maxLength: 5 })
+  })
+
+  test('descends into items of items', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        m: {
+          type: 'array',
+          items: { type: 'array', items: { type: 'string', maxLength: 3 } },
+        },
+      },
+    }
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: SCHEMA_URI, content: JSON.stringify(schema) }],
+    })
+    const result = setupFixture.resolver.resolve(setupFixture.request())
+    expect(findAttribute(result, '/m/*')).toMatchObject({ types: ['array'] })
+    expect(findAttribute(result, '/m/*/*')).toMatchObject({
+      constraints: { type: 'string', maxLength: 3 },
+      claimPath: ['m', null, null],
+    })
+  })
+
+  test('reports additionalProperties on an object without declared properties', () => {
+    const schema = {
+      type: 'object',
+      properties: { address: { type: 'object', additionalProperties: false } },
+    }
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: SCHEMA_URI, content: JSON.stringify(schema) }],
+    })
+    const result = setupFixture.resolver.resolve(setupFixture.request())
+    expect(
+      formatPolicy(result, 'dc+sd-jwt').dcql.unsupported.some(
+        (entry) =>
+          entry.code === 'object_constraint_not_expressible' &&
+          entry.path === '/address' &&
+          entry.keyword === 'additionalProperties',
+      ),
+    ).toBe(true)
+  })
+
+  test('merges array item schemas split across allOf branches', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        list: {
+          type: 'array',
+          items: {
+            allOf: [{ properties: { a: { type: 'string' } } }, { required: ['a'] }],
+          },
+        },
+      },
+    }
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: SCHEMA_URI, content: JSON.stringify(schema) }],
+    })
+    const result = setupFixture.resolver.resolve(setupFixture.request())
+    const entries = attributesAt(result, '/list/*/a')
+    expect(entries).toHaveLength(1)
+    expect(entries[0]).toMatchObject({ required: true, types: ['string'] })
+  })
+
+  test('emits mso_mdoc claim paths only for namespace and element pairs', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        'org.iso.18013.5.1': {
+          type: 'object',
+          properties: { given_name: { type: 'string' } },
+        },
+      },
+    }
+    const setupFixture = setup({
+      supportedFormats: ['mso_mdoc'],
+      documents: [{ format: 'mso_mdoc', uri: SCHEMA_URI, content: JSON.stringify(schema) }],
+    })
+    const result = setupFixture.resolver.resolve(setupFixture.request())
+    const mdoc = formatPolicy(result, 'mso_mdoc')
+    expect(mdoc.dcql.credentialQuery).toEqual({
+      id: 'credential-1',
+      format: 'mso_mdoc',
+      claims: [{ path: ['org.iso.18013.5.1', 'given_name'] }],
+    })
+    expect(mdoc.dcql.mapped).toEqual(['credential format', 'claim paths'])
+    expect(
+      mdoc.attributes.find((attribute) => attribute.pointer === '/org.iso.18013.5.1'),
+    ).toMatchObject({ claimPathSupported: false })
   })
 
   test('rejects a document that does not belong to the selected attestation type', () => {

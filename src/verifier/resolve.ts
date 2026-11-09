@@ -23,7 +23,7 @@ import {
   inspectJsonSchema,
   type InspectedObjectLimitation,
 } from './inspect'
-import { buildDcqlMapping, buildPolicyInterfaces } from './mapping'
+import { buildDcqlMapping, buildPolicyInterfaces, isDcqlClaimPathExpressible } from './mapping'
 import { parseResolveVerifierConstraintsInput } from './request'
 import {
   VERIFIER_CONSTRAINTS_KIND,
@@ -245,7 +245,8 @@ function inspectFormat(
       continue
     }
 
-    const dialect = isRecord(parsed) && '$schema' in parsed ? parsed['$schema'] : undefined
+    const dialect =
+      isRecord(parsed) && Object.hasOwn(parsed, '$schema') ? parsed['$schema'] : undefined
     if (
       dialect !== undefined &&
       (typeof dialect !== 'string' || !SUPPORTED_SCHEMA_DIALECTS.has(dialect))
@@ -303,12 +304,21 @@ function inspectFormat(
     grounding = suppliedCount === 0 ? 'not_supplied' : 'not_grounded'
   }
 
-  const dcql = buildDcqlMapping({ format, index, attributes, objectLimitations })
+  const mappedAttributes = attributes.map((attribute) => ({
+    ...attribute,
+    claimPathSupported: isDcqlClaimPathExpressible(format, attribute.claimPath),
+  }))
+  const dcql = buildDcqlMapping({
+    format,
+    index,
+    attributes: mappedAttributes,
+    objectLimitations,
+  })
   return {
     format,
     grounding,
     schemaReferences,
-    attributes,
+    attributes: mappedAttributes,
     dcql,
     diagnostics,
   }
