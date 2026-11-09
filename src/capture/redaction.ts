@@ -352,6 +352,18 @@ export function redactCaptureDocument(
   }
 }
 
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.byteLength !== b.byteLength) {
+    return false
+  }
+  for (let index = 0; index < a.byteLength; index += 1) {
+    if (a[index] !== b[index]) {
+      return false
+    }
+  }
+  return true
+}
+
 const utf8Decoder = new TextDecoder('utf-8', { fatal: true })
 
 function isJsonMediaType(mediaType: string): boolean {
@@ -419,19 +431,28 @@ export function redactNormalizedCaptureArtifact(
         if (redacted.mode === 'full') {
           redactedBytes = encodeCaptureText(JSON.stringify(redacted.value), limits)
           status = 'full'
-        } else if (redacted.redactedValues === 0) {
-          // Nothing matched: keep the exact original bytes instead of
-          // re-serialising them and claiming a different digest.
-          redactedBytes = raw.bytes
-          mediaType = raw.mediaType
-          encoding = raw.encoding
-          status = 'none'
         } else {
-          redactedBytes = encodeCaptureText(JSON.stringify(redacted.value), limits)
-          status = 'partial'
+          const serialized = encodeCaptureText(JSON.stringify(redacted.value), limits)
+          if (redacted.redactedValues === 0 && bytesEqual(serialized, raw.bytes)) {
+            // The original bytes are already exactly the canonical
+            // serialization of the redacted value; nothing can be hidden in
+            // them (for example by a repeated member name).
+            redactedBytes = raw.bytes
+            mediaType = raw.mediaType
+            encoding = raw.encoding
+            status = 'none'
+          } else {
+            // Re-serializing drops repeated members, formatting and escapes,
+            // so the projection is labelled even when no value matched.
+            redactedBytes = serialized
+            status = 'partial'
+          }
         }
       } catch (error) {
-        if (isCaptureError(error) && error.code === 'json_limit') {
+        if (
+          isCaptureError(error) &&
+          (error.code === 'json_limit' || error.code === 'response_too_large')
+        ) {
           fullFallback(
             'the JSON artifact exceeds the redaction bounds; every value was redacted and the original structure was not preserved',
           )

@@ -180,8 +180,11 @@ into a loggable/exportable projection. It never touches the metadata envelope.
   only safe mode for opaque (non-JSON) artifacts and for a JSON artifact whose content cannot
   be parsed; the result is labelled `full` and carries a `redaction_full_fallback`
   diagnostic.
-- A partial policy that replaces nothing records `status: "none"` rather than claiming a
-  redaction happened.
+- A partial policy that replaces nothing records `status: "none"` only when the returned
+  bytes are exactly the original bytes and already equal the canonical serialization of the
+  redacted value. Any other partial pass returns re-serialized bytes labelled `partial`;
+  re-serializing also drops repeated JSON members, formatting and escapes, so a value hidden
+  behind a duplicate member name cannot survive in the projection.
 - `redaction.redactedDigest` is the SHA-256 of the redacted bytes. The envelope `integrity`
   continues to describe the unredacted original, so the original can be verified without
   retaining a copy; a consumer must compare `redactedDigest`, not `integrity`, against

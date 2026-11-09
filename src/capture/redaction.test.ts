@@ -407,6 +407,99 @@ describe('redacting a normalized capture', () => {
     expect(result.sensitive?.bytes).toEqual(normalized.sensitive?.bytes)
   })
 
+  test('drops a duplicate member hidden by the last value', () => {
+    const content = '{"email_address":"mario@example.test","email_address":null}'
+    const artifact = {
+      mediaType: 'application/json',
+      encoding: 'utf8',
+      content,
+      byteLength: new TextEncoder().encode(content).byteLength,
+    }
+    const normalized = normalizeCaptureArtifact(
+      issuerEnvelope({
+        artifactType: 'credential-offer',
+        artifact,
+        integrity: integrityOf(content),
+      }),
+      { now },
+    )
+    const result = redactNormalizedCaptureArtifact(normalized, { mode: 'partial' }, limits)
+    const text = new TextDecoder().decode(result.sensitive?.bytes)
+
+    expect(text).not.toContain('mario@example.test')
+    expect(result.envelope.redaction.status).toBe('partial')
+    expect(result.envelope.redaction.redactedDigest).toBe(result.sensitive?.digest ?? null)
+  })
+
+  test('drops a duplicate member that hides a secret behind an empty value', () => {
+    const content = '{"pre-authorized_code":"SECRET-PREAUTH","x":{},"pre-authorized_code":[]}'
+    const artifact = {
+      mediaType: 'application/json',
+      encoding: 'utf8',
+      content,
+      byteLength: new TextEncoder().encode(content).byteLength,
+    }
+    const normalized = normalizeCaptureArtifact(
+      issuerEnvelope({
+        artifactType: 'credential-offer',
+        artifact,
+        integrity: integrityOf(content),
+      }),
+      { now },
+    )
+    const result = redactNormalizedCaptureArtifact(normalized, { mode: 'partial' }, limits)
+    const text = new TextDecoder().decode(result.sensitive?.bytes)
+
+    expect(text).not.toContain('SECRET-PREAUTH')
+    expect(result.envelope.redaction.status).not.toBe('none')
+  })
+
+  test('labels a reformatted no-match pass as partial', () => {
+    const content = '{ "issuer": "https://issuer.example.test" }'
+    const artifact = {
+      mediaType: 'application/json',
+      encoding: 'utf8',
+      content,
+      byteLength: new TextEncoder().encode(content).byteLength,
+    }
+    const normalized = normalizeCaptureArtifact(
+      issuerEnvelope({
+        artifactType: 'credential-offer',
+        artifact,
+        integrity: integrityOf(content),
+      }),
+      { now },
+    )
+    const result = redactNormalizedCaptureArtifact(normalized, { mode: 'partial' }, limits)
+
+    expect(result.envelope.redaction.status).toBe('partial')
+    expect(result.envelope.redaction.redactedPaths).toEqual([])
+    expect(new TextDecoder().decode(result.sensitive?.bytes)).toBe(
+      '{"issuer":"https://issuer.example.test"}',
+    )
+  })
+
+  test('falls back to full redaction when the projection exceeds the envelope limit', () => {
+    const document = { values: Array.from({ length: 20 }, () => 'x'.repeat(20)) }
+    const artifact = inlineArtifact(document)
+    const normalized = normalizeCaptureArtifact(
+      issuerEnvelope({
+        artifact,
+        integrity: integrityOf(String(artifact.content)),
+      }),
+      { now },
+    )
+    const result = redactNormalizedCaptureArtifact(
+      normalized,
+      { mode: 'partial' },
+      resolveCaptureLimits({ maxEnvelopeBytes: 100 }),
+    )
+
+    expect(result.envelope.redaction.status).toBe('full')
+    expect(result.diagnostics.map((entry) => entry.code)).toContain('redaction_full_fallback')
+    expect(new TextDecoder().decode(result.sensitive?.bytes)).toBe(CAPTURE_REDACTION_PLACEHOLDER)
+  })
+
   test('refuses to redact an artifact that stayed external', () => {
     const normalized = normalizeCaptureArtifact(verifierEnvelope(), { now })
     const error = captureErrorFrom(() =>
