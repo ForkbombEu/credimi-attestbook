@@ -305,8 +305,12 @@ the read routes in `src/api/routes.ts` and the UI in `ui/src/CapturesPage.tsx` a
   `no_test_execution_reference`, `no_rulebook_binding`, `validation_not_run` and
   `validation_not_applicable`. An absent field is never treated as a pass.
 - `POST /api/v1/captures/{captureId}/validate`, authenticated with a provider bearer token,
-  accepts `{ rulebookId, rulebookVersion, attestationType }`, runs the **real** structural
-  credential engine on the capture's segregated inline artifact and records the correlation.
+  accepts `{ rulebookId, rulebookVersion, attestationType, rulebookDigest? }`, runs the
+  **real** structural credential engine on the capture's segregated inline artifact and
+  records the correlation. When the optional lowercase-hex SHA-256 `rulebookDigest` is
+  supplied and the version snapshot now has a different digest, the request is refused with
+  `409 conflict` **before** the recorded correlation is changed, so a stale pin cannot
+  overwrite correct evidence.
   The token is required because the recorded correlation is visible to every reader, and the
   binding does not carry the acting provider id. The binding is the exact
   `rulebook.id`/`name`/`version`/`contentDigest`/`specVersion`/`status`, the selected attestation

@@ -847,7 +847,8 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
       schema: 'CorrelateCaptureRequest',
       mediaType: 'application/json',
       required: true,
-      description: 'The rulebook identifier, version and attestation type to pin the capture to.',
+      description:
+        'The rulebook identifier, version, attestation type and optional pinned snapshot digest. A supplied digest that no longer matches the version snapshot is refused with 409 before anything is recorded.',
     },
     responses: [
       {

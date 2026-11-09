@@ -183,6 +183,7 @@ describe('capture explorer correlation', () => {
       rulebookId: 'rulebook-1',
       rulebookVersion: '1.0',
       attestationType: 'Person Identification Data',
+      rulebookDigest: 'a'.repeat(64),
     })
 
     expect(result.captureId).toBe('mock-capture-capture-issuer-3')
@@ -292,6 +293,81 @@ describe('capture explorer correlation', () => {
     }
     expect(validation.calls).toHaveLength(0)
   })
+
+  test('refuses a stale pinned digest without replacing the recorded correlation', async () => {
+    const staleResult: CredentialValidationResult = {
+      ...PINNED_RESULT,
+      validationId: 'validation-2',
+      rulebook: { ...PINNED_RESULT.rulebook, digest: 'b'.repeat(64) },
+    }
+    const results: readonly CredentialValidationResult[] = [PINNED_RESULT, staleResult]
+    let index = 0
+    const service: CredentialValidationService = {
+      validate() {
+        const result = results[index] ?? PINNED_RESULT
+        index += 1
+        return Promise.resolve(result)
+      },
+    }
+    const explorer = createMockCaptureExplorer({ validation: service, now: () => NOW })
+    const captureId = 'mock-capture-capture-issuer-3'
+    const first = await explorer.correlate(captureId, {
+      rulebookId: 'rulebook-1',
+      rulebookVersion: '1.0',
+      attestationType: 'Person Identification Data',
+      rulebookDigest: 'a'.repeat(64),
+    })
+
+    try {
+      await explorer.correlate(captureId, {
+        rulebookId: 'rulebook-1',
+        rulebookVersion: '1.0',
+        attestationType: 'Person Identification Data',
+        rulebookDigest: '0'.repeat(64),
+      })
+      throw new Error('correlation must reject a stale digest')
+    } catch (error) {
+      expectConflict(error)
+      if (isRegistryError(error)) {
+        expect(error.message).toContain('nothing was recorded')
+      }
+    }
+
+    const detail = await explorer.get(captureId)
+    expect(detail?.rulebook?.contentDigest).toBe('a'.repeat(64))
+    expect(detail?.validationResult?.validationId).toBe(first.validation.validationId)
+  })
+
+  test('rejects a malformed digest before running validation', async () => {
+    const validation = fakeValidation()
+    const explorer = explorerWith(validation)
+    try {
+      await explorer.correlate('mock-capture-capture-issuer-3', {
+        rulebookId: 'rulebook-1',
+        rulebookVersion: '1.0',
+        attestationType: 'Person Identification Data',
+        rulebookDigest: 'ABC',
+      })
+      throw new Error('correlation must reject a malformed digest')
+    } catch (error) {
+      expect(isRegistryError(error)).toBe(true)
+      if (isRegistryError(error)) {
+        expect(error.code).toBe('invalid_input')
+      }
+    }
+    expect(validation.calls).toHaveLength(0)
+  })
+
+  test('keeps the pinned digest optional for callers that omit it', async () => {
+    const explorer = explorerWith(fakeValidation())
+    const result = await explorer.correlate('mock-capture-capture-issuer-3', {
+      rulebookId: 'rulebook-1',
+      rulebookVersion: '1.0',
+      attestationType: 'Person Identification Data',
+    })
+
+    expect(result.rulebook.contentDigest).toBe('a'.repeat(64))
+  })
 })
 
 describe('capture correlation request parsing', () => {
@@ -306,6 +382,32 @@ describe('capture correlation request parsing', () => {
       rulebookId: 'rulebook-1',
       rulebookVersion: '1.0',
       attestationType: 'PID',
+      rulebookDigest: null,
     })
+  })
+
+  test('accepts an optional digest and rejects a malformed one', () => {
+    const base = {
+      rulebookId: 'rulebook-1',
+      rulebookVersion: '1.0',
+      attestationType: 'PID',
+    }
+
+    expect(
+      parseCaptureCorrelationInput({ ...base, rulebookDigest: 'a'.repeat(64) }).rulebookDigest,
+    ).toBe('a'.repeat(64))
+    expect(
+      parseCaptureCorrelationInput({ ...base, rulebookDigest: null }).rulebookDigest,
+    ).toBeNull()
+
+    try {
+      parseCaptureCorrelationInput({ ...base, rulebookDigest: 'ABC' })
+      throw new Error('a malformed digest must be rejected')
+    } catch (error) {
+      expect(isRegistryError(error)).toBe(true)
+      if (isRegistryError(error)) {
+        expect(error.code).toBe('invalid_input')
+      }
+    }
   })
 })

@@ -41,6 +41,11 @@ Implemented and exposed by this slice:
   [issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44));
 - structural credential validation against a pinned rulebook version.
 
+The public API is the integration boundary for Credimi. The standalone adapter documented in
+[`docs/credimi-integration.md`](credimi-integration.md) (issue #49) consumes these routes only:
+it exposes rulebook selection, version pinning, credential validation and capture-evidence
+correlation without database access or a Credimi runtime dependency. It adds no route.
+
 Deliberately **not** in this slice:
 
 - the TS11 catalogue interface (`GET/PUT/DELETE /schemas`, JWS responses) — it must be
@@ -70,11 +75,12 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.6.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.7.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
   export operations added by #42, issuer discovery added by #43, issuer fixture generation
-  added by #44 and the mock-backed capture explorer added by #48); it is separate from the
-  package version reported by `/health`.
+  added by #44, the mock-backed capture explorer added by #48 and the optional pinned
+  correlation digest added by #49); it is separate from the package version reported by
+  `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -502,14 +508,22 @@ reported with `availability: "external"` and no projection. The stable gap codes
 `no_test_execution_reference`, `no_rulebook_binding`, `validation_not_run` and
 `validation_not_applicable`; an absent field is never a pass.
 
-`POST /api/v1/captures/{captureId}/validate` takes the pinned selection:
+`POST /api/v1/captures/{captureId}/validate` takes the pinned selection and an optional
+snapshot digest:
 
 ```json
-{ "rulebookId": "…", "rulebookVersion": "1.0", "attestationType": "…" }
+{
+  "rulebookId": "…",
+  "rulebookVersion": "1.0",
+  "attestationType": "…",
+  "rulebookDigest": "<optional lowercase hex SHA-256>"
+}
 ```
 
 It runs the **real** structural credential engine on the capture's segregated inline artifact
-and records the correlation. The response is the engine's `CredentialValidationResult` plus
+and records the correlation. A supplied `rulebookDigest` that no longer matches the version
+snapshot is refused with `409 conflict` before anything is recorded, so a stale pin cannot
+overwrite an existing correlation. The response is the engine's `CredentialValidationResult` plus
 the exact binding (`rulebook.id`, `name`, `version`, `contentDigest`, `digestVerified`,
 `specVersion`, `status`), the attestation type and the AttestBook `boundAt`, together with the
 caller-owned `captureId`, `correlationId` and `testExecutionRef` preserved verbatim (FR-019;

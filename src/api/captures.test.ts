@@ -143,7 +143,10 @@ interface CaptureDetailBody extends CaptureSummaryBody {
     readonly document: unknown
   } | null
   readonly rulebook: { readonly contentDigest: string } | null
-  readonly validationResult: { readonly overallStatus: string } | null
+  readonly validationResult: {
+    readonly overallStatus: string
+    readonly validationId: string
+  } | null
   readonly timeline: readonly { readonly kind: string }[]
 }
 
@@ -258,6 +261,7 @@ describe('capture correlation API', () => {
         rulebookId: seeded.rulebookId,
         rulebookVersion: seeded.version,
         attestationType: seeded.attestationName,
+        rulebookDigest: seeded.digest,
       },
       bearer(token),
     )
@@ -292,6 +296,82 @@ describe('capture correlation API', () => {
     expect(detail.data.evidenceGaps.map((gap) => gap.code)).not.toContain('validation_not_run')
     expect(detail.data.timeline.map((event) => event.kind)).toContain('bound')
     expect(detail.data.timeline.map((event) => event.kind)).toContain('validated')
+  })
+
+  test('refuses a stale pinned digest before recording a correlation', async () => {
+    const { app, seeded, token } = await setup()
+    const response = await postJson(
+      app,
+      `/api/v1/captures/${CAPTURE_ID}/validate`,
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+        rulebookDigest: '0'.repeat(64),
+      },
+      bearer(token),
+    )
+    expect(response.status).toBe(409)
+    expect((await json<ErrorEnvelope>(response)).error.code).toBe('conflict')
+
+    const detail = await json<{ data: CaptureDetailBody }>(
+      await app.request(`/api/v1/captures/${CAPTURE_ID}`),
+    )
+    expect(detail.data.rulebook).toBeNull()
+    expect(detail.data.evidenceGaps.map((gap) => gap.code)).toContain('no_rulebook_binding')
+  })
+
+  test('keeps an earlier correlation when a later correlation pins a stale digest', async () => {
+    const { app, seeded, token } = await setup()
+    const first = await postJson(
+      app,
+      `/api/v1/captures/${CAPTURE_ID}/validate`,
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+        rulebookDigest: seeded.digest,
+      },
+      bearer(token),
+    )
+    expect(first.status).toBe(200)
+    const firstBody = await json<{ data: { validation: { validationId: string } } }>(first)
+
+    const stale = await postJson(
+      app,
+      `/api/v1/captures/${CAPTURE_ID}/validate`,
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+        rulebookDigest: '0'.repeat(64),
+      },
+      bearer(token),
+    )
+    expect(stale.status).toBe(409)
+
+    const detail = await json<{ data: CaptureDetailBody }>(
+      await app.request(`/api/v1/captures/${CAPTURE_ID}`),
+    )
+    expect(detail.data.rulebook?.contentDigest).toBe(seeded.digest)
+    expect(detail.data.validationResult?.validationId).toBe(firstBody.data.validation.validationId)
+  })
+
+  test('rejects a malformed pinned digest', async () => {
+    const { app, seeded, token } = await setup()
+    const response = await postJson(
+      app,
+      `/api/v1/captures/${CAPTURE_ID}/validate`,
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+        rulebookDigest: 'ABC',
+      },
+      bearer(token),
+    )
+    expect(response.status).toBe(400)
+    expect((await json<ErrorEnvelope>(response)).error.code).toBe('invalid_request')
   })
 
   test('refuses to validate an external artifact reference', async () => {

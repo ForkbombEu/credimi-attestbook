@@ -103,6 +103,10 @@ bun run docs:check    # documentation consistency, plain Node
   adapter contracts, a deterministic offline mock source (only transport: `mock`) and the
   mock-backed explorer read model that correlates a captured issued credential with a pinned
   rulebook version; see [`docs/capture.md`](capture.md) §9;
+- `src/integration/credimi/` — the standalone Credimi adapter: rulebook selection,
+  exact-version pinning, version-pinned validation evidence and capture correlation over the
+  public `/api/v1` API, with typed error codes, bounded timeouts/retries and real-server
+  round-trip tests; see [`docs/credimi-integration.md`](credimi-integration.md);
 - `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
   the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
   routes Hono registered, success/error contract tests for every exposed resource, and
@@ -274,6 +278,18 @@ refuses evidence it cannot validate honestly. Storage, fetching, persistence and
 component integration remain later issues. See [`docs/capture.md`](capture.md) §9 and
 [`docs/ui.md`](ui.md).
 
+## Credimi integration adapter
+
+`src/integration/credimi/` is the FR-020/AC-15 client Credimi uses to consume AttestBook over
+HTTP: list rulebooks, select an attestation type, pin one exact version and its snapshot
+digest, request structural validation, read the dimension-aware evidence and correlate a
+capture with an opaque test-execution reference. The adapter reads no AttestBook database and
+has no Temporal, StepCI or PocketBase dependency; every response is parsed against the API's
+own schema and every pinned response is checked against the pin, with typed failures for
+contract drift, stale pins, timeouts and transient server errors. The contract, error codes,
+retry/timeout bounds and non-claims are documented in
+[`docs/credimi-integration.md`](credimi-integration.md).
+
 ## Safe URL and JSON import
 
 The service-level import pipeline in `src/import/` retrieves a supported TS11/OWF rulebook
@@ -400,7 +416,7 @@ No job deploys, publishes an image or needs a secret or a live external service.
 ## Repository layout
 
 ```text
-src/                application code and Bun tests (api, registry, import, validation)
+src/                application code and Bun tests (api, integration, registry, import, validation)
 src/acceptance/     Phase 1 end-to-end acceptance workflow and evidence export
 migrations/         ordered SQL schema migrations
 docs/               specification, architecture, registry, validation and Phase 0 documents
