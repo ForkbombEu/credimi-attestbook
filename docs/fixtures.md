@@ -156,8 +156,15 @@ an override value is evaluated as an ordinary own property (for example by
 `properties.__proto__` subschema. A schema document that declares any key named `__proto__`
 is therefore refused rather than applied: the request fails with `400 invalid_request` when
 no other document can ground the fixture, or reports that document as `applied: false` with a
-`schema_not_usable` diagnostic when another one can. A payload is never reported `PASS`
-against a constraint the evaluator cannot see.
+`schema_not_usable` diagnostic when another one can.
+
+Before reporting any result, the generator also self-checks the evaluator against the
+constraints it synthesized: for every declared property it deletes a required claim, and it
+sets a value that the property's declared `type`, `const` or `enum` forbids, confirming that
+the evaluator rejects both. If the evaluator accepts a violating payload, generation fails
+with `400 invalid_request` rather than returning `PASS`. This structural guard also covers
+property names not known today. The known Ajv 8.20.0 gap is a `required` entry whose name is
+the empty string `""`, which is never enforced.
 
 ## 3. Supported synthesis subset
 
@@ -266,11 +273,13 @@ its own issuer/verifier pipeline.
   definitions, overrides (including deliberate violations), unsupported optional/required
   constraints, format selection, Type Metadata rejection, SRI mismatch, unknown resources,
   the sandbox time limit, unavailable-platform handling, refusal of schemas that declare
-  `__proto__`, undeclared-`__proto__` override evaluation and large-enum intersection;
+  `__proto__`, undeclared-`__proto__` override evaluation, empty-string required-name refusal
+  (nested and top-level), the generic evaluator blind-spot guard, an unconstrained optional
+  property and large-enum intersection;
 - `src/api/fixtures.test.ts` — the Hono route, OpenAPI component validation, overrides,
   400/404/503 cases, the `fixture_unavailable` mapping, an HTTP `__proto__` schema refusal, an
-  undeclared-`__proto__` override failure and a `/health` responsiveness race against a
-  running fixture sandbox;
+  undeclared-`__proto__` override failure, an empty-string required-name refusal and a
+  `/health` responsiveness race against a running fixture sandbox;
 - `bun run openapi:check` — the generated document including the new operation and
   components;
 - `bun run check` — formatting, lint, strict typecheck and the whole test suite.
@@ -298,6 +307,9 @@ bun run check
 - A schema document that declares a key named `__proto__` cannot be applied, because the
   pinned Ajv 8.20.0 evaluator does not evaluate that property subschema. Undeclared
   `__proto__` keys in override values remain ordinary own properties and are evaluated.
+- The generator refuses a fixture when its evaluator self-check accepts a payload that breaks
+  a synthesized property constraint. The known Ajv 8.20.0 case is a `required` entry named
+  `""`; a schema document that declares it cannot ground a fixture in this slice.
 - Compilation, synthesis, payload evaluation and negative-case verification run in the
   shared resource-bounded sandbox. The sandbox limits are configurable through the same
   `SCHEMA_SANDBOX_*` settings as credential validation and the concurrency cap is shared, so

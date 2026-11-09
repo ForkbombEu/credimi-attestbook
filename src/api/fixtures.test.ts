@@ -248,6 +248,35 @@ describe('POST /api/v1/issuers/fixtures', () => {
     expect(parsed.error.code).toBe('invalid_request')
   })
 
+  test('rejects an empty-name required claim the evaluator cannot enforce', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['address'],
+      properties: {
+        address: {
+          type: 'object',
+          required: ['', 'city'],
+          properties: {
+            '': { type: 'string' },
+            city: { type: 'string' },
+          },
+        },
+      },
+    })
+    const setupFixture = setup({ schemaContent: schema })
+    const response = await post(
+      setupFixture.app,
+      body(setupFixture, {
+        overrides: [{ path: '/address', value: { city: 'x' } }],
+      }),
+    )
+
+    expect(response.status).toBe(400)
+    const parsed = (await response.json()) as { error: { code: string } }
+    assertSchema('ErrorEnvelope', parsed)
+    expect(parsed.error.code).toBe('invalid_request')
+  })
+
   test('rejects an undeclared __proto__ key in an HTTP override value', async () => {
     const schema = JSON.stringify({
       type: 'object',

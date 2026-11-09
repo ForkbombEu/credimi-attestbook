@@ -130,10 +130,13 @@ interface SynthProperty {
   readonly node: SynthEntity
 }
 
-interface SynthEntity {
+export interface SynthEntity {
   readonly kind: SynthesisKind
   readonly value: unknown
+  /** Effective types, inferred when the schema does not declare a type. */
   readonly types: readonly string[]
+  /** Types explicitly declared by the schema, or null when none is declared. */
+  readonly declaredTypes: readonly string[] | null
   readonly constraints: Readonly<Record<string, unknown>>
   readonly sources: readonly string[]
   /** Concrete instance location, used to mutate the payload for negative cases. */
@@ -142,7 +145,7 @@ interface SynthEntity {
   readonly items: SynthEntity | null
 }
 
-interface CompiledJsonSchema {
+export interface CompiledJsonSchema {
   readonly pending: PendingSchemaDocument
   readonly reference: SnapshotSchemaReference
   readonly validate: ValidateFunction
@@ -249,7 +252,7 @@ function inferTypes(schemas: readonly SourcedSchema[]): string[] {
   return ['null']
 }
 
-function effectiveTypes(schemas: readonly SourcedSchema[]): string[] {
+function declaredTypesOf(schemas: readonly SourcedSchema[]): string[] | null {
   let intersection: string[] | null = null
   for (const { schema } of schemas) {
     const declared = typeSetOf(schema, '/')
@@ -258,10 +261,7 @@ function effectiveTypes(schemas: readonly SourcedSchema[]): string[] {
     }
     intersection = intersection === null ? declared : intersectTypeSets(intersection, declared)
   }
-  if (intersection === null) {
-    return inferTypes(schemas)
-  }
-  if (intersection.length === 0) {
+  if (intersection !== null && intersection.length === 0) {
     throw new SynthesisError('incompatible_types')
   }
   return intersection
@@ -650,6 +650,7 @@ function synthesizeObject(
   instanceSegments: readonly (string | number)[],
   depth: number,
   types: readonly string[],
+  declaredTypes: readonly string[] | null,
   summary: Readonly<Record<string, unknown>>,
   budget: SynthesisBudget,
   attributes: IssuerFixtureAttribute[],
@@ -739,6 +740,7 @@ function synthesizeObject(
     kind: 'object',
     value: payload,
     types,
+    declaredTypes,
     constraints: summary,
     sources: sourcesOf(schemas),
     instanceSegments,
@@ -753,6 +755,7 @@ function synthesizeArray(
   instanceSegments: readonly (string | number)[],
   depth: number,
   types: readonly string[],
+  declaredTypes: readonly string[] | null,
   summary: Readonly<Record<string, unknown>>,
   budget: SynthesisBudget,
   attributes: IssuerFixtureAttribute[],
@@ -827,6 +830,7 @@ function synthesizeArray(
     kind: 'array',
     value: values,
     types,
+    declaredTypes,
     constraints: summary,
     sources: sourcesOf(schemas),
     instanceSegments,
@@ -855,7 +859,8 @@ function synthesizeNode(
 
   const schemas = flattenAllOf(sources, depth)
   const localAttributes: IssuerFixtureAttribute[] = []
-  const types = effectiveTypes(schemas)
+  const declaredTypes = declaredTypesOf(schemas)
+  const types = declaredTypes ?? inferTypes(schemas)
   const constant = collectConst(schemas)
   const enumerations = collectEnums(schemas)
   const summary = summarizeConstraints(schemas, types, constant, enumerations)
@@ -873,6 +878,7 @@ function synthesizeNode(
       kind: jsonKindOf(constant.value),
       value: constant.value,
       types,
+      declaredTypes,
       constraints: summary,
       sources: sourcesOf(schemas),
       instanceSegments,
@@ -891,6 +897,7 @@ function synthesizeNode(
       kind: jsonKindOf(value),
       value,
       types,
+      declaredTypes,
       constraints: summary,
       sources: sourcesOf(schemas),
       instanceSegments,
@@ -914,6 +921,7 @@ function synthesizeNode(
         instanceSegments,
         depth,
         types,
+        declaredTypes,
         summary,
         budget,
         localAttributes,
@@ -926,6 +934,7 @@ function synthesizeNode(
         instanceSegments,
         depth,
         types,
+        declaredTypes,
         summary,
         budget,
         localAttributes,
@@ -936,6 +945,7 @@ function synthesizeNode(
         kind,
         value: synthesizeString(schemas),
         types,
+        declaredTypes,
         constraints: summary,
         sources: sourcesOf(schemas),
         instanceSegments,
@@ -949,6 +959,7 @@ function synthesizeNode(
         kind,
         value: synthesizeNumber(kind, schemas),
         types,
+        declaredTypes,
         constraints: summary,
         sources: sourcesOf(schemas),
         instanceSegments,
@@ -961,6 +972,7 @@ function synthesizeNode(
         kind,
         value: false,
         types,
+        declaredTypes,
         constraints: summary,
         sources: sourcesOf(schemas),
         instanceSegments,
@@ -973,6 +985,7 @@ function synthesizeNode(
         kind,
         value: null,
         types,
+        declaredTypes,
         constraints: summary,
         sources: sourcesOf(schemas),
         instanceSegments,
@@ -1132,9 +1145,15 @@ function evaluatePayload(
       continue
     }
     const first = document.validate.errors?.[0]
-    if (first !== undefined) {
-      findings.push(findingFor(first))
-    }
+    findings.push(
+      first === undefined
+        ? {
+            code: 'schema_violation',
+            message: 'The fixture payload was rejected by the schema evaluator.',
+            path: '/',
+          }
+        : findingFor(first),
+    )
   }
   return { status: findings.length === 0 ? 'PASS' : 'FAIL', findings }
 }
@@ -1589,6 +1608,84 @@ function describeSynthesisError(error: SynthesisError): string {
   }
 }
 
+const PROBE_CANDIDATES: readonly unknown[] = [0.5, 'fixture-probe', true, null, [], {}]
+
+/** A value the schema explicitly forbids at this node, when one is known. */
+function violatingProbe(node: SynthEntity): { readonly value: unknown } | undefined {
+  if (node.declaredTypes !== null && node.declaredTypes.length > 0) {
+    const declared = node.declaredTypes
+    const value = PROBE_CANDIDATES.find((candidate) => !matchesAnyType(candidate, declared))
+    if (value !== undefined) {
+      return { value }
+    }
+  }
+  if ('const' in node.constraints) {
+    const constant = node.constraints.const
+    const value = PROBE_CANDIDATES.find((candidate) => !isDeepStrictEqual(candidate, constant))
+    if (value !== undefined) {
+      return { value }
+    }
+  }
+  const values = node.constraints.enum
+  if (Array.isArray(values)) {
+    const value = PROBE_CANDIDATES.find(
+      (candidate) => !values.some((entry) => isDeepStrictEqual(entry, candidate)),
+    )
+    if (value !== undefined) {
+      return { value }
+    }
+  }
+  return undefined
+}
+
+/**
+ * Confirms that the pinned Ajv evaluator actually rejects payloads that break
+ * constraints the synthesizer found. This is a structural guard, not a list of
+ * known property names: any Ajv gap on a declared property makes the fixture
+ * fail closed instead of being reported `PASS` without a real check. The known
+ * case is Ajv 8.20.0 ignoring a `required` entry whose name is `""`.
+ */
+export function findEvaluatorBlindSpot(
+  root: SynthEntity,
+  baseline: Record<string, unknown>,
+  compiled: readonly CompiledJsonSchema[],
+): string | null {
+  const rejected = (mutate: (payload: Record<string, unknown>) => boolean): boolean => {
+    const payload: Record<string, unknown> = structuredClone(baseline)
+    return !mutate(payload) || evaluatePayload(compiled, payload).status === 'FAIL'
+  }
+
+  const visit = (node: SynthEntity): string | null => {
+    if (node.kind === 'array') {
+      return node.items === null ? null : visit(node.items)
+    }
+    if (node.kind !== 'object') {
+      return null
+    }
+    for (const property of node.properties) {
+      const segments = property.node.instanceSegments.map((segment) => String(segment))
+      const pointer = toJsonPointer(property.node.instanceSegments)
+      if (property.required && !rejected((payload) => deleteAtPath(payload, segments))) {
+        return `The pinned Ajv 8.20.0 evaluator does not enforce the "required" constraint for ${pointer}, so a fixture for this schema cannot be verified.`
+      }
+      const probe = violatingProbe(property.node)
+      if (
+        probe !== undefined &&
+        !rejected((payload) => setAtPath(payload, segments, probe.value))
+      ) {
+        return `The pinned Ajv 8.20.0 evaluator does not evaluate the schema declared for ${pointer}, so a fixture for this schema cannot be verified.`
+      }
+      const nested = visit(property.node)
+      if (nested !== null) {
+        return nested
+      }
+    }
+    return null
+  }
+
+  return visit(root)
+}
+
 /** Runs one prepared fixture request entirely inside the sandbox child. */
 export function runFixtureCore(request: FixtureSandboxRequest): FixtureSandboxResult {
   const compiled: CompiledJsonSchema[] = []
@@ -1639,6 +1736,11 @@ export function runFixtureCore(request: FixtureSandboxRequest): FixtureSandboxRe
   }
   if (evaluatePayload(compiled, baseline).status !== 'PASS') {
     return { ok: false, reason: FIXTURE_SANDBOX_REASONS.baselineValidationFailed }
+  }
+
+  const blindSpot = findEvaluatorBlindSpot(root, baseline, compiled)
+  if (blindSpot !== null) {
+    return { ok: false, reason: blindSpot }
   }
 
   const deduped = dedupeAttributes(attributes)

@@ -17,6 +17,7 @@ import type { SchemaSandboxLimits } from '../validation/schema-sandbox'
 import { PID_TYPE_METADATA_TEXT, sha256Sri, TEST_VCT } from '../validation/test-support'
 
 import { IssuerFixtureGenerator, IssuerFixtureUnavailableError } from './generate'
+import { findEvaluatorBlindSpot, type CompiledJsonSchema, type SynthEntity } from './synthesize'
 import { ISSUER_FIXTURE_KIND } from './types'
 
 const SCHEMA_URI = 'https://schemas.example.test/pid-claims.json'
@@ -596,6 +597,139 @@ describe('IssuerFixtureGenerator', () => {
       keyword: 'additionalProperties',
       path: '/address',
     })
+  })
+
+  test('refuses a schema whose nested required claim has an empty name', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['address'],
+      properties: {
+        address: {
+          type: 'object',
+          required: ['', 'city'],
+          properties: {
+            '': { type: 'string' },
+            city: { type: 'string' },
+          },
+        },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    let error: unknown
+    try {
+      await setupFixture.generator.generate(setupFixture.request())
+    } catch (caught) {
+      error = caught
+    }
+    expect((error as { readonly code?: string }).code).toBe('invalid_input')
+    expect((error as Error).message).toContain('required')
+    expect((error as Error).message).toContain('/address/')
+  })
+
+  test('refuses an override for a schema whose nested required claim has an empty name', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['address'],
+      properties: {
+        address: {
+          type: 'object',
+          required: ['', 'city'],
+          properties: {
+            '': { type: 'string' },
+            city: { type: 'string' },
+          },
+        },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    let error: unknown
+    try {
+      await setupFixture.generator.generate(
+        setupFixture.request({ overrides: [{ path: '/address', value: { city: 'x' } }] }),
+      )
+    } catch (caught) {
+      error = caught
+    }
+    expect((error as { readonly code?: string }).code).toBe('invalid_input')
+    expect((error as Error).message).toContain('required')
+  })
+
+  test('refuses a schema whose top-level required claim has an empty name', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['', 'b'],
+      properties: {
+        '': { type: 'string' },
+        b: { type: 'string' },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    await expectInvalidInput(() => setupFixture.generator.generate(setupFixture.request()))
+  })
+
+  test('detects an evaluator that accepts a missing required claim', () => {
+    const propertyNode: SynthEntity = {
+      kind: 'string',
+      value: 'fixture',
+      types: ['string'],
+      declaredTypes: ['string'],
+      constraints: {},
+      sources: [],
+      instanceSegments: ['a'],
+      properties: [],
+      items: null,
+    }
+    const root: SynthEntity = {
+      kind: 'object',
+      value: { a: 'fixture' },
+      types: ['object'],
+      declaredTypes: ['object'],
+      constraints: {},
+      sources: [],
+      instanceSegments: [],
+      properties: [{ name: 'a', required: true, node: propertyNode }],
+      items: null,
+    }
+    const alwaysAccepting = [
+      {
+        validate: Object.assign(() => true, { errors: null }),
+      } as unknown as CompiledJsonSchema,
+    ]
+    expect(findEvaluatorBlindSpot(root, { a: 'fixture' }, alwaysAccepting)).toContain('required')
+
+    const enforcing = [
+      {
+        validate: Object.assign(
+          (payload: unknown) => typeof (payload as Record<string, unknown>)['a'] === 'string',
+          { errors: null },
+        ),
+      } as unknown as CompiledJsonSchema,
+    ]
+    expect(findEvaluatorBlindSpot(root, { a: 'fixture' }, enforcing)).toBeNull()
+  })
+
+  test('still synthesizes an unconstrained optional property', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['b'],
+      properties: {
+        b: { type: 'string' },
+        note: {},
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    const result = await setupFixture.generator.generate(setupFixture.request())
+
+    expect(result.payload).toEqual({ b: 'fixture', note: null })
+    expect(result.payloadValidation.status).toBe('PASS')
   })
 
   test('intersects enums with object values independently of member order', async () => {
