@@ -736,6 +736,8 @@ describe('headless-wallet comparison request', () => {
 function pinnedConformanceResult(
   overrides: {
     readonly credential?: string
+    readonly credentialFormatHint?: string | null
+    readonly schemaDocuments?: readonly { readonly uri: string; readonly content: string }[]
     readonly contentDigest?: string
     readonly specVersion?: string
     readonly attestationType?: string
@@ -749,7 +751,10 @@ function pinnedConformanceResult(
       specVersion: overrides.specVersion ?? PIN.specVersion,
       attestationType: overrides.attestationType ?? PIN.attestationType,
       credential: overrides.credential ?? TEST_CREDENTIAL,
-      schemaDocuments: [{ uri: TEST_SCHEMA_URI, content: TEST_SCHEMA_CONTENT }],
+      credentialFormatHint: overrides.credentialFormatHint ?? null,
+      schemaDocuments: overrides.schemaDocuments ?? [
+        { uri: TEST_SCHEMA_URI, content: TEST_SCHEMA_CONTENT },
+      ],
     }),
   )
 }
@@ -778,6 +783,49 @@ describe('reproducible conformance run request', () => {
       credential: TEST_CREDENTIAL,
       schemaDocuments: [{ uri: TEST_SCHEMA_URI, content: TEST_SCHEMA_CONTENT }],
     })
+  })
+
+  test('normalizes a padded format hint and schema URI like the server', async () => {
+    const result = pinnedConformanceResult({ credentialFormatHint: 'dc+sd-jwt' })
+    const { fetch } = fakeFetch(() => jsonResponse({ data: result }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const returned = await client.runConformance({
+      pin: PIN,
+      credential: { format: 'dc+sd-jwt ', value: TEST_CREDENTIAL },
+      schemaDocuments: [{ uri: `  ${TEST_SCHEMA_URI}  `, content: TEST_SCHEMA_CONTENT }],
+    })
+
+    expect(returned.input.credentialFormatHint).toBe('dc+sd-jwt')
+    expect(returned.input.schemaDocuments[0]?.uri).toBe(TEST_SCHEMA_URI)
+  })
+
+  test('rejects a result whose format hint differs from the sent request', async () => {
+    const result = pinnedConformanceResult({ credentialFormatHint: 'dc+sd-jwt' })
+    const { fetch } = fakeFetch(() => jsonResponse({ data: result }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const error = await rejection(client.runConformance({ pin: PIN, credential: TEST_CREDENTIAL }))
+
+    expect(error.code).toBe('invalid_response')
+  })
+
+  test('rejects a result whose schema document digest differs from the sent request', async () => {
+    const result = pinnedConformanceResult({
+      schemaDocuments: [{ uri: TEST_SCHEMA_URI, content: '{"type":"object"}' }],
+    })
+    const { fetch } = fakeFetch(() => jsonResponse({ data: result }))
+    const client = new CredimiAdapter({ baseUrl: BASE_URL, fetch })
+
+    const error = await rejection(
+      client.runConformance({
+        pin: PIN,
+        credential: TEST_CREDENTIAL,
+        schemaDocuments: [{ uri: TEST_SCHEMA_URI, content: TEST_SCHEMA_CONTENT }],
+      }),
+    )
+
+    expect(error.code).toBe('invalid_response')
   })
 
   test('accepts a result pinned exactly and rejects a different snapshot digest', () => {

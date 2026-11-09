@@ -76,11 +76,12 @@ The response is `{ "data": <attestbook.conformance-result@1> }`:
 | Member | Meaning |
 | --- | --- |
 | `kind`, `contractVersion` | Contract marker and version (`1`). |
-| `resultReference` | Lowercase hex SHA-256 of the canonical reference payload. Stable for the same pinned inputs and evidence. |
-| `deterministic` | Always `true`; the deterministic scope is the result, not an external execution history. |
+| `resultReference` | Lowercase hex SHA-256 of the canonical reference payload. Stable for the same pinned inputs and evidence when `deterministic` is `true`. |
+| `deterministic` | `true` only when no runtime condition cut the run short; otherwise `false`, and the result must be retried before it is compared with an earlier run. |
+| `environmentConditions` | Distinct sorted finding codes that show a runtime condition cut the run short, for example `schema_sandbox_busy`, `schema_sandbox_unavailable`, `schema_evaluation_timeout`, `schema_evaluation_memory_exceeded`, `schema_evaluation_output_exceeded` or `schema_evaluation_failed`. Empty for a deterministic run. |
 | `pin` | `rulebookId`, `version`, `contentDigest`, `specVersion`, `attestationType` and `digestVerified: true`. |
-| `input` | `credentialDigest`, the optional `credentialFormatHint`, the supplied `schemaDocuments` (`uri` + `contentDigest`) and an `inputDigest`. No raw credential or schema document is returned. |
-| `outcome` | One of `structural_pass`, `structural_fail`, `inconclusive`, `evidence_incomplete`, `not_applicable`. |
+| `input` | `credentialDigest`, the optional `credentialFormatHint`, the supplied `schemaDocuments` (`uri` + `contentDigest`, sorted by URI) and an `inputDigest`. No raw credential or schema document is returned. |
+| `outcome` | One of `structural_pass`, `structural_fail`, `inconclusive`, `evidence_incomplete`, `not_applicable`. A run with an environment condition is `structural_fail` when the structural aggregate is `FAIL`, otherwise `inconclusive`. |
 | `failureClasses` | Stable failure classes for failed dimensions, each with its dimension and distinct `error` finding codes (sorted). |
 | `evidence` | `overallStatus`, the non-sensitive credential facts, the attestation evidence, schema references, the eight `dimensions` with their findings and evidence, flattened `violations` and explicit `limitations`. |
 | `references` | Canonicalization (`attestbook.stable-json@1`), digest algorithm (`sha256`), reference scope and the FR-012 status taxonomy. |
@@ -99,30 +100,45 @@ evidence.
 ```
 { format: "attestbook.conformance-input@1",
   pin: { rulebookId, version, contentDigest, specVersion, attestationType },
-  credentialDigest, credentialFormatHint, schemaDocuments: [{ uri, contentDigest }] }
+  credentialDigest, credentialFormatHint,
+  schemaDocuments: [{ uri, contentDigest }] }
 ```
+
+The supplied `schemaDocuments` are sorted by URI before digesting, because the engine matches
+them by URI and rejects duplicate URIs; a different request order therefore does not change
+the input identity.
 
 `resultReference` is SHA-256 over the canonical JSON of:
 
 ```
 { format: "attestbook.conformance-reference@1",
   contractVersion: 1, pin, input: <the input object>,
+  deterministic, environmentConditions,
   outcome, evidence, failureClasses }
 ```
 
-Canonicalization sorts object keys recursively; array order stays significant. The result
-reference therefore changes when:
+Canonicalization sorts object keys recursively; array order stays significant except where a
+field is documented as sorted. The result reference therefore changes when:
 
 - the pinned rulebook identifier, version, snapshot digest, specification version or
   attestation type changes;
 - the exact credential bytes, the explicit format hint or a supplied schema document changes;
 - the structural evidence changes (a dimension status, a finding, an evidence detail or a
-  limitation), even when the input is identical.
+  limitation), even when the input is identical;
+- a runtime condition cut the run short and therefore changed `environmentConditions`.
 
 It does **not** change when only the validation identifier, the validation timestamp, the
 rulebook's mutable name/publication status, the static limitation prose or the non-claim
-constants change. `POST /api/v1/conformance/runs` is idempotent and side-effect free: the
-same pinned request returns the same `resultReference` and the same `inputDigest`.
+constants change. When `deterministic` is `true`, `POST /api/v1/conformance/runs` is
+idempotent and side-effect free: the same pinned request returns the same `resultReference`
+and the same `inputDigest`.
+
+A run with `deterministic: false` was cut short by the environment (for example a schema
+sandbox at its concurrency limit or unavailable on the platform). It still reports the
+evidence it produced, but its reference must **not** be compared with an earlier run as
+drift: retry the same pinned request until a deterministic result is returned. A concurrent
+load on the public validation routes can cause such a condition, so an orchestrator must
+treat it as a retryable runtime limitation rather than a rulebook change.
 
 A reference is a stable identifier, not a stored resource. External orchestration keeps it
 with its own run history; AttestBook does not turn conformance results into a second
@@ -135,6 +151,11 @@ execution history or idempotency store.
 `NOT_TESTED` → `evidence_incomplete`, `NOT_APPLICABLE` → `not_applicable`. In this
 structural-only build a `structural_pass` is not reachable, because cryptography and issuer
 trust are required and not executed; the honest aggregate is `evidence_incomplete`.
+
+When `environmentConditions` is non-empty the run was cut short, so the outcome is
+`structural_fail` only when the structural aggregate is `FAIL`; every other environment
+condition is reported as `inconclusive`, never as a pass or a clean `evidence_incomplete`
+result.
 
 Each failed dimension contributes one `failureClasses` entry:
 
@@ -178,22 +199,28 @@ The standalone adapter in `src/integration/credimi/` exposes
 public API, parses the response with the API's Zod schema, rejects a result that does not
 name the pinned rulebook/version/digest/specification/attestation type with `pin_mismatch`,
 and rejects a result whose input digest names a different credential, format hint or schema
-documents with `invalid_response`. It still has no Credimi runtime dependency and no
-database access.
+documents with `invalid_response`. The adapter normalizes an explicit format hint and schema
+URIs the same way the server does (`trim()`) and compares the schema documents by URI and
+digest, not by request order. It still has no Credimi runtime dependency and no database
+access.
 
 ## 8. Tests
 
 - `src/conformance/result.test.ts` — identical results across repeated runs and across
   validation identifiers/timestamps/lifecycle metadata; reference changes on credential,
-  schema-document or evidence changes; every outcome mapping; every failure class; explicit
-  pin, references and non-claims; no credential or schema-document text in the result;
-  refusal of evidence that does not name the requested pin.
+  schema-document or evidence changes; schema-document order independence; every outcome
+  mapping; every failure class; a sandbox runtime condition reported as non-deterministic;
+  explicit pin, references and non-claims; no credential or schema-document text in the
+  result; refusal of evidence that does not name the requested pin.
 - `src/api/conformance.test.ts` — the real Hono application, a real migrated SQLite registry
   and the real structural engine with a genuinely signed SD-JWT VC: two byte-identical runs,
-  changed-input references, a real `FAIL` classification (`missing_key_binding`),
-  `404`/`400`/`503` cases, response-schema validation and non-disclosure of the credential.
+  changed-input references, a real `FAIL` classification (`missing_key_binding`), a
+  non-Linux sandbox reported as `deterministic: false` with
+  `environmentConditions: ["schema_sandbox_unavailable"]`, `404`/`400`/`503` cases,
+  response-schema validation and non-disclosure of the credential.
 - `src/integration/credimi/client.test.ts` and `server.test.ts` — the adapter request shape,
-  pin and input verification, a malformed response and a real-socket repeated run.
+  pin and input verification including trimmed format/URI normalization and mismatched
+  format/document rejection, a malformed response and a real-socket repeated run.
 - `src/api/openapi.test.ts` — the generated document includes the new operation and
   components and still matches the registered routes.
 
@@ -201,6 +228,10 @@ database access.
 
 - No scheduler, queue or recurrence engine is implemented: external orchestration must call
   the endpoint on its own schedule.
+- A run can be cut short by a runtime condition (a busy or unavailable schema sandbox, a
+  timeout, a memory or output cap). Such a result carries `deterministic: false` and the
+  identifying `environmentConditions`; retry it and do not compare its reference with an
+  earlier run as drift.
 - No conformance run is persisted. The stable reference is content-addressed and can be
   recomputed from the pinned input; there is no server-side run history to browse.
 - The result is structural only. Cryptographic verification, issuer trust, protocol

@@ -24,6 +24,7 @@ import type {
 import {
   CONFORMANCE_CANONICALIZATION,
   CONFORMANCE_DIGEST_ALGORITHM,
+  CONFORMANCE_ENVIRONMENT_FINDING_CODES,
   CONFORMANCE_INPUT_FORMAT,
   CONFORMANCE_REFERENCE_FORMAT,
   CONFORMANCE_REFERENCE_SCOPE,
@@ -56,6 +57,7 @@ export const DEFAULT_FAILURE_CLASS: ConformanceFailureClass = 'dimension_failure
 export const CONFORMANCE_RESULT_LIMITATIONS: readonly string[] = Object.freeze([
   'A conformance result is the pinned structural validation evidence of one credential artifact. It is not a standards, cryptographic, issuer-trust, protocol or interoperability verdict.',
   'The resultReference is deterministic for the same pinned snapshot, credential bytes, supplied schema documents and structural evidence. Validation identifiers, wall-clock timestamps, mutable rulebook name/status metadata, static limitation prose and non-claim constants are excluded from it.',
+  'A result with deterministic false was cut short by a runtime condition such as a busy or unavailable schema sandbox. It must be retried, and its resultReference must not be compared with an earlier run as drift.',
   'AttestBook does not schedule, start or observe recurring executions. External orchestration drives recurrence, stores the stable result reference and compares later references.',
   'Cryptographic verification, issuer trust, protocol conformance and interoperability are not executed and are never inferred from a structural outcome.',
 ])
@@ -146,13 +148,27 @@ function failureClassesFor(dimensions: readonly ValidationDimension[]): Conforma
   return failures
 }
 
+function environmentConditionsFor(dimensions: readonly ValidationDimension[]): string[] {
+  const codes = new Set<string>()
+  for (const dimension of dimensions) {
+    for (const finding of dimension.findings) {
+      if ((CONFORMANCE_ENVIRONMENT_FINDING_CODES as readonly string[]).includes(finding.code)) {
+        codes.add(finding.code)
+      }
+    }
+  }
+  return [...codes].sort()
+}
+
 function buildInput(pin: ConformancePin, request: ValidateCredentialInput): ConformanceInput {
-  const schemaDocuments: ConformanceSchemaDocumentDigest[] = (request.schemaDocuments ?? []).map(
-    (document) => ({
+  const schemaDocuments: ConformanceSchemaDocumentDigest[] = (request.schemaDocuments ?? [])
+    // The engine matches schema documents by URI and rejects duplicates, so
+    // sorting makes the input identity independent of request order.
+    .map((document) => ({
       uri: document.uri,
       contentDigest: sha256Text(document.content),
-    }),
-  )
+    }))
+    .sort((left, right) => left.uri.localeCompare(right.uri))
   const credentialDigest = sha256Text(conformanceCredentialText(request))
   const credentialFormatHint = conformanceCredentialFormatHint(request)
   const inputDigest = sha256Text(
@@ -209,7 +225,13 @@ export function buildConformanceResult(input: BuildConformanceResultInput): Conf
   const pin = pinFromValidation(validation)
   const inputDigest = buildInput(pin, request)
   const evidence = buildEvidence(validation)
-  const outcome = conformanceOutcome(validation.overallStatus)
+  const environmentConditions = environmentConditionsFor(validation.dimensions)
+  const deterministic = environmentConditions.length === 0
+  const outcome = deterministic
+    ? conformanceOutcome(validation.overallStatus)
+    : validation.overallStatus === 'FAIL'
+      ? 'structural_fail'
+      : 'inconclusive'
   const failureClasses = failureClassesFor(validation.dimensions)
 
   const resultReference = sha256Text(
@@ -218,6 +240,8 @@ export function buildConformanceResult(input: BuildConformanceResultInput): Conf
       contractVersion: CONFORMANCE_RESULT_VERSION,
       pin,
       input: inputDigest,
+      deterministic,
+      environmentConditions,
       outcome,
       evidence,
       failureClasses,
@@ -228,7 +252,8 @@ export function buildConformanceResult(input: BuildConformanceResultInput): Conf
     kind: CONFORMANCE_RESULT_KIND,
     contractVersion: CONFORMANCE_RESULT_VERSION,
     resultReference,
-    deterministic: true,
+    deterministic,
+    environmentConditions,
     pin,
     input: inputDigest,
     outcome,

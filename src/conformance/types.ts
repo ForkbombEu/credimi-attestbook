@@ -80,6 +80,23 @@ export const CONFORMANCE_FAILURE_CLASSES = [
 ] as const
 export type ConformanceFailureClass = (typeof CONFORMANCE_FAILURE_CLASSES)[number]
 
+/**
+ * Finding codes produced when a runtime condition cut a check short instead of
+ * the caller's pinned inputs producing a genuine result. A run carrying one of
+ * these is not deterministic: retrying the same request may produce a different
+ * structural result, so its reference must not be compared as drift.
+ */
+export const CONFORMANCE_ENVIRONMENT_FINDING_CODES = [
+  'schema_sandbox_busy',
+  'schema_sandbox_unavailable',
+  'schema_evaluation_timeout',
+  'schema_evaluation_memory_exceeded',
+  'schema_evaluation_output_exceeded',
+  'schema_evaluation_failed',
+] as const
+export type ConformanceEnvironmentFindingCode =
+  (typeof CONFORMANCE_ENVIRONMENT_FINDING_CODES)[number]
+
 /** The exact pinned rulebook version a conformance result was produced against. */
 export interface ConformancePin {
   readonly rulebookId: string
@@ -142,7 +159,14 @@ export interface ConformanceResult {
   readonly contractVersion: typeof CONFORMANCE_RESULT_VERSION
   /** Lowercase hex SHA-256 of the canonical reference payload. */
   readonly resultReference: string
-  readonly deterministic: true
+  /**
+   * `true` only when no runtime condition (`environmentConditions` is empty)
+   * cut the run short. A non-deterministic result must be retried before its
+   * reference is compared with an earlier run.
+   */
+  readonly deterministic: boolean
+  /** Distinct sorted environment finding codes that cut the run short. */
+  readonly environmentConditions: readonly string[]
   readonly pin: ConformancePin
   readonly input: ConformanceInput
   readonly outcome: ConformanceOutcome

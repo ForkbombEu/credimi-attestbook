@@ -11,6 +11,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { createApp, type ErrorEnvelope } from '../app'
 import { createRegistryFixture, type RegistryFixture } from '../registry/test-support'
 import { CredentialValidator } from '../validation'
+import type { SchemaSandboxLimits } from '../validation/schema-sandbox'
 import {
   defaultCredentialClaims,
   issueTestCredential,
@@ -34,7 +35,7 @@ interface Setup {
   readonly seeded: SeededRulebook
 }
 
-function setup(): Setup {
+function setup(options: { readonly sandbox?: SchemaSandboxLimits } = {}): Setup {
   fixture = createRegistryFixture()
   const seeded = seedPublishedRulebook(fixture.database, fixture.registry)
   let clockTick = 0
@@ -44,6 +45,7 @@ function setup(): Setup {
     // depend on the validation identifier or timestamp.
     now: () => `2026-01-01T00:00:0${clockTick++}.000Z`,
     generateId: () => `conformance-validation-${clockTick++}`,
+    ...(options.sandbox === undefined ? {} : { sandbox: options.sandbox }),
   })
   return { app: createApp({ validation: validator }), seeded }
 }
@@ -114,6 +116,8 @@ describe('POST /api/v1/conformance/runs', () => {
     expect(first.input.schemaDocuments[0]?.uri).toBe(seeded.schemaUri)
     expect(first.input.schemaDocuments[0]?.contentDigest).toMatch(/^[0-9a-f]{64}$/)
     expect(first.outcome).toBe('evidence_incomplete')
+    expect(first.deterministic).toBe(true)
+    expect(first.environmentConditions).toEqual([])
     expect(first.failureClasses).toEqual([])
     expect(first.evidence.dimensions).toHaveLength(8)
     expect(first.evidence.overallStatus).toBe('NOT_TESTED')
@@ -130,6 +134,23 @@ describe('POST /api/v1/conformance/runs', () => {
     const serialized = JSON.stringify(first)
     expect(serialized).not.toContain(credential)
     expect(serialized).not.toContain(seeded.schemaContent)
+  })
+
+  test('marks a run cut short by the environment as non-deterministic', async () => {
+    // A non-Linux platform makes the schema sandbox unavailable without
+    // spawning a child; the run still returns evidence, but not a deterministic
+    // one.
+    const { app, seeded } = setup({ sandbox: { platform: 'darwin' } })
+    const credential = await issueTestCredential()
+
+    const response = await post(app, requestBody(seeded, credential))
+    expect(response.status).toBe(200)
+    const result = await resultBody(response)
+
+    expect(result.deterministic).toBe(false)
+    expect(result.environmentConditions).toEqual(['schema_sandbox_unavailable'])
+    expect(result.outcome).toBe('inconclusive')
+    expect(result.limitations.join(' ')).toContain('deterministic false')
   })
 
   test('changes the stable reference when the credential or the schema evidence changes', async () => {
@@ -187,7 +208,7 @@ describe('POST /api/v1/conformance/runs', () => {
     expect(((await response.json()) as ErrorEnvelope).error.code).toBe('not_found')
   })
 
-  test('rejects a malformed request body as invalid_input', async () => {
+  test('rejects a malformed request body as invalid_request', async () => {
     const { app } = setup()
 
     const response = await post(app, '{}')

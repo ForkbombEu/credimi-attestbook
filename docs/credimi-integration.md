@@ -277,18 +277,24 @@ returns an `attestbook.conformance-result@1`:
 
 The response carries the exact `pin` (`rulebookId`, `version`, `contentDigest`,
 `specVersion`, `attestationType`, `digestVerified`), the `inputDigest`/`resultReference`
-pair, an `outcome` (`structural_pass`, `structural_fail`, `inconclusive`,
-`evidence_incomplete`, `not_applicable`), stable `failureClasses`, the structural `evidence`
-and explicit non-claims. The raw credential and schema documents are never returned.
+pair, `deterministic`, `environmentConditions`, an `outcome` (`structural_pass`,
+`structural_fail`, `inconclusive`, `evidence_incomplete`, `not_applicable`), stable
+`failureClasses`, the structural `evidence` and explicit non-claims. The raw credential and
+schema documents are never returned.
 
 The reference is content-addressed over the pinned input and the structural evidence, so a
 later run with the same credential, schema documents and pinned snapshot returns the same
 `resultReference`; a changed credential, schema document, snapshot or evidence returns a
-different one. Credimi stores the reference next to its own run and compares later values
-instead of asking AttestBook for a stored run history. The operation schedules nothing and
-persists nothing. `400` is a malformed body, `404` an unknown pinned selection and `503` an
-unwired validation service. The full determinism scope, failure-class table and non-claims
-are in [`docs/conformance.md`](conformance.md).
+different one. The adapter trims an explicit format hint and schema URIs like the server and
+compares the input identity by URI and digest rather than request order. Supplied schema
+documents are sorted by URI in the identity. A run cut short by a runtime condition carries
+`deterministic: false` and an `environmentConditions` entry (for example
+`schema_sandbox_busy`); retry it and do not compare its reference as drift. Credimi stores the
+reference next to its own run and compares later values instead of asking AttestBook for a
+stored run history. The operation schedules nothing and persists nothing. `400` is a malformed
+body, `404` an unknown pinned selection and `503` an unwired validation service. The full
+determinism scope, failure-class table and non-claims are in
+[`docs/conformance.md`](conformance.md).
 
 ## 4. Failure and timeout handling
 

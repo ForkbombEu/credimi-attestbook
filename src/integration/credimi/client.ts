@@ -587,23 +587,42 @@ export class CredimiAdapter {
     if (result.input.credentialDigest !== expectedCredentialDigest) {
       throw invalidResponse('conformance run', 'the result names a different credential digest')
     }
+    // The server trims an explicit format hint through `requireText`; compare
+    // the normalized value, not the caller's raw spacing.
     const expectedFormatHint =
-      typeof input.credential === 'string' ? null : (input.credential.format ?? null)
+      typeof input.credential === 'string' ? null : (input.credential.format?.trim() ?? null)
     if (result.input.credentialFormatHint !== expectedFormatHint) {
       throw invalidResponse(
         'conformance run',
         'the result names a different credential format hint',
       )
     }
-    const expectedSchemaDocuments = (input.schemaDocuments ?? []).map((document) => ({
-      uri: document.uri,
-      contentDigest: sha256Hex(new TextEncoder().encode(document.content)),
-    }))
-    if (JSON.stringify(result.input.schemaDocuments) !== JSON.stringify(expectedSchemaDocuments)) {
+    // Schema URIs are trimmed by the server and sorted in the input identity.
+    const expectedSchemaDocuments = (input.schemaDocuments ?? [])
+      .map((document) => ({
+        uri: document.uri.trim(),
+        contentDigest: sha256Hex(new TextEncoder().encode(document.content)),
+      }))
+      .sort((left, right) => left.uri.localeCompare(right.uri))
+    const actualSchemaDocuments = result.input.schemaDocuments
+    if (actualSchemaDocuments.length !== expectedSchemaDocuments.length) {
       throw invalidResponse(
         'conformance run',
         'the result names different supplied schema documents',
       )
+    }
+    for (const [index, expected] of expectedSchemaDocuments.entries()) {
+      const actual = actualSchemaDocuments[index]
+      if (
+        actual === undefined ||
+        actual.uri !== expected.uri ||
+        actual.contentDigest !== expected.contentDigest
+      ) {
+        throw invalidResponse(
+          'conformance run',
+          'the result names different supplied schema documents',
+        )
+      }
     }
   }
 

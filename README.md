@@ -325,8 +325,10 @@ structural engine against one exact pinned rulebook version and returns an
 and supplied schema documents; a content-addressed `resultReference` over that input and the
 structural evidence; stable failure classes; the exact version/digest/specification
 references; and explicit non-claims. Repeating the same pinned run reproduces both digests,
-while a changed credential, schema document, snapshot or evidence changes them. AttestBook
-schedules no recurrence and persists no run, so external orchestration owns the run history.
+while a changed credential, schema document, snapshot or evidence changes them; a run cut
+short by a schema-sandbox/runtime condition reports `deterministic: false` and its
+`environmentConditions` for retry. AttestBook schedules no recurrence and persists no run, so
+external orchestration owns the run history.
 See [`docs/conformance.md`](conformance.md) and
 [`docs/credimi-integration.md`](credimi-integration.md) §3.5.
 

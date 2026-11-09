@@ -8,6 +8,8 @@
 
 import { describe, expect, test } from 'bun:test'
 
+import type { ValidationFinding } from '../validation'
+
 import {
   buildConformanceResult,
   conformanceOutcome,
@@ -32,6 +34,7 @@ describe('reproducible conformance result', () => {
     expect(first.resultReference).toMatch(/^[0-9a-f]{64}$/)
     expect(first.input.inputDigest).toMatch(/^[0-9a-f]{64}$/)
     expect(first.deterministic).toBe(true)
+    expect(first.environmentConditions).toEqual([])
   })
 
   test('excludes validation identifiers, timestamps and mutable lifecycle metadata', () => {
@@ -69,12 +72,56 @@ describe('reproducible conformance result', () => {
     expect(changed.resultReference).not.toBe(base.resultReference)
   })
 
+  test('keeps the input identity independent of schema-document order', () => {
+    const first = conformanceResult({
+      schemaDocuments: [
+        { uri: 'https://example.org/schemas/a.json', content: '{"type":"object"}' },
+        { uri: 'https://example.org/schemas/b.json', content: '{"type":"object"}' },
+      ],
+    })
+    const second = conformanceResult({
+      schemaDocuments: [
+        { uri: 'https://example.org/schemas/b.json', content: '{"type":"object"}' },
+        { uri: 'https://example.org/schemas/a.json', content: '{"type":"object"}' },
+      ],
+    })
+
+    expect(first.input.schemaDocuments.map((document) => document.uri)).toEqual([
+      'https://example.org/schemas/a.json',
+      'https://example.org/schemas/b.json',
+    ])
+    expect(second.input.inputDigest).toBe(first.input.inputDigest)
+    expect(second.resultReference).toBe(first.resultReference)
+  })
+
   test('changes the reference when the same input produces different evidence', () => {
     const base = conformanceResult()
     const failed = conformanceResult({ statuses: { schema_validation: 'FAIL' } })
 
     expect(failed.input.inputDigest).toBe(base.input.inputDigest)
     expect(failed.resultReference).not.toBe(base.resultReference)
+  })
+
+  test('reports a runtime condition as non-deterministic and not as drift', () => {
+    const baseline = conformanceResult()
+    const sandboxBusy: ValidationFinding = {
+      code: 'schema_sandbox_busy',
+      message: 'The schema evaluation sandbox is at its concurrency limit.',
+      severity: 'warning',
+      dimension: 'schema_validation',
+    }
+    const cutShort = conformanceResult({
+      statuses: { schema_validation: 'NOT_TESTED' },
+      findings: { schema_validation: [sandboxBusy] },
+    })
+
+    expect(baseline.deterministic).toBe(true)
+    expect(baseline.environmentConditions).toEqual([])
+    expect(cutShort.deterministic).toBe(false)
+    expect(cutShort.environmentConditions).toEqual(['schema_sandbox_busy'])
+    expect(cutShort.outcome).toBe('inconclusive')
+    expect(cutShort.resultReference).not.toBe(baseline.resultReference)
+    expect(cutShort.limitations.join(' ')).toContain('deterministic false')
   })
 
   test('includes an explicit format hint in the input identity', () => {

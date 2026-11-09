@@ -610,6 +610,7 @@ schema documents. It runs the same structural engine and returns
   "contractVersion": 1,
   "resultReference": "<64 lowercase hex characters>",
   "deterministic": true,
+  "environmentConditions": [],
   "pin": {
     "rulebookId": "0f8fad5b-d9cb-469f-a165-70867728950e",
     "version": "1.0",
@@ -646,13 +647,19 @@ schema documents. It runs the same structural engine and returns
 ```
 
 `resultReference` and `inputDigest` are content-addressed over canonical JSON. Repeating the
-same pinned request returns the same values; a changed credential, schema document, pinned
-snapshot or structural evidence changes the relevant digest. Validation identifiers,
-timestamps and mutable rulebook lifecycle metadata are excluded and the raw credential and
-schema documents are never echoed. The operation is public and read-only: it persists no run
-and schedules no recurrence, so external orchestration owns the run history. `400` is a
-malformed body, `404` an unknown rulebook/version/attestation type and `503` an unwired
-validation service. The full contract, determinism scope and failure-class table are in
+same pinned request returns the same values when the run completed deterministically; a
+changed credential, schema document, pinned snapshot or structural evidence changes the
+relevant digest. Supplied schema documents are sorted by URI in the input identity. Validation
+identifiers, timestamps and mutable rulebook lifecycle metadata are excluded and the raw
+credential and schema documents are never echoed.
+
+A runtime condition that cuts a check short (a busy or unavailable schema sandbox, a timeout,
+a memory or output cap) makes `deterministic` `false` and names the condition in
+`environmentConditions`; such a result must be retried and its reference must not be compared
+with an earlier run as drift. The operation is public and read-only: it persists no run and
+schedules no recurrence, so external orchestration owns the run history. `400` is a malformed
+body, `404` an unknown rulebook/version/attestation type and `503` an unwired validation
+service. The full contract, determinism scope and failure-class table are in
 [`docs/conformance.md`](conformance.md).
 
 ## 4. Errors
@@ -752,7 +759,7 @@ Phase 1 supports idempotency where the domain provides a deterministic identity;
 | `POST /api/v1/rulebooks/{rulebookId}/versions` | **Not idempotent.** A duplicate label is `409 conflict`; the client chooses the next label after a conflict. |
 | `POST /api/v1/imports/preview` | Read-only and side-effect free, but authenticated because a URL preview performs a bounded outbound fetch; safe to retry. |
 | `POST /api/v1/credentials/validate` | Read-only; safe to retry. |
-| `POST /api/v1/conformance/runs` | Read-only and side-effect free. The same pinned request returns the same `inputDigest` and `resultReference`; no run is recorded, so there is no server-side history to deduplicate. |
+| `POST /api/v1/conformance/runs` | Read-only and side-effect free. The same pinned request returns the same `inputDigest` and `resultReference` when the run is deterministic; a run cut short by a runtime condition returns `deterministic: false` and must be retried. No run is recorded, so there is no server-side history to deduplicate. |
 
 The import policy is the substantive idempotency mechanism implemented in Phase 1
 ([`docs/import.md`](import.md) §5). A generic idempotency-key store is deliberately deferred:
@@ -842,7 +849,9 @@ own component and browser tests described in [`docs/ui.md`](ui.md).
   ([`docs/verifier.md`](verifier.md) §2.1, §5 and §6).
 - Conformance runs are not persisted: `POST /api/v1/conformance/runs` recomputes the
   deterministic result on every call and returns a content-addressed `resultReference`
-  instead of a stored run resource. External orchestration keeps the run history
+  instead of a stored run resource. External orchestration keeps the run history. A run cut
+  short by a runtime condition returns `deterministic: false` with its
+  `environmentConditions` and must be retried rather than compared as drift
   ([`docs/conformance.md`](conformance.md) §4 and §9).
 - Validation results are returned synchronously and are not persisted
   (`GET /api/v1/validations/{id}` does not exist in this slice; the specification lists it as

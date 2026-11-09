@@ -84,6 +84,7 @@ function findingsFor(
 function buildDimension(
   dimension: ValidationDimensionId,
   status: ValidationStatus,
+  findings?: readonly ValidationFinding[],
 ): ValidationDimension {
   const executed = status === 'PASS' || status === 'FAIL' || status === 'INCONCLUSIVE'
   return createDimension({
@@ -91,7 +92,7 @@ function buildDimension(
     status,
     applicable: status !== 'NOT_APPLICABLE',
     executed,
-    findings: findingsFor(dimension, status),
+    findings: findings ?? findingsFor(dimension, status),
     evidence: {
       scope: `Fixture scope for ${dimension}.`,
       reason: `Fixture reason for ${dimension}.`,
@@ -102,6 +103,8 @@ function buildDimension(
 
 export interface ConformanceFixtureOptions {
   readonly statuses?: Partial<Record<ValidationDimensionId, ValidationStatus>>
+  /** Overrides the generated findings of a dimension (for runtime conditions). */
+  readonly findings?: Partial<Record<ValidationDimensionId, readonly ValidationFinding[]>>
   readonly validationId?: string
   readonly validatedAt?: string
   readonly rulebookName?: string
@@ -124,6 +127,7 @@ export function conformanceValidationResult(
     buildDimension(
       dimension as ValidationDimensionId,
       options.statuses?.[dimension as ValidationDimensionId] ?? status,
+      options.findings?.[dimension as ValidationDimensionId],
     ),
   )
   return {
