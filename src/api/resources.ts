@@ -21,6 +21,7 @@ import type {
   CaptureExplorerPage,
   CaptureExplorerSummary,
 } from '../capture'
+import type { HeadlessWalletComparisonReport } from '../comparison'
 import type { IssuerDiscoveryResult } from '../discovery'
 import type { IssuerFixtureResult } from '../fixtures'
 import { isJsonObject, isJsonValue } from '../fixtures/sandbox'
@@ -45,6 +46,7 @@ import {
   captureExplorerSummarySchema,
   credentialValidationResultSchema,
   draftRulebookSchema,
+  headlessWalletComparisonSchema,
   importPreviewSchema,
   importResultSchema,
   issuerDiscoveryResultSchema,
@@ -407,6 +409,15 @@ export function toCaptureCorrelationResource(result: CaptureCorrelationResult) {
     rulebook: result.rulebook,
     validation: result.validation,
   })
+}
+
+/**
+ * Projects the headless-wallet comparison report and validates it against the
+ * published response schema, so a drift between the builder and the OpenAPI
+ * contract becomes a server error instead of a silently different shape.
+ */
+export function toHeadlessWalletComparisonResource(report: HeadlessWalletComparisonReport) {
+  return headlessWalletComparisonSchema.parse(report)
 }
 
 /**

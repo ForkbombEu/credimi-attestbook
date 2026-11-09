@@ -25,6 +25,7 @@ export {
 } from './client'
 
 export {
+  assertPinnedComparison,
   assertPinnedCorrelation,
   assertPinnedValidation,
   CREDIMI_ADAPTER_CONTRACT_VERSION,
@@ -35,9 +36,12 @@ export {
   type CredimiCapturePage,
   type CredimiCaptureQuery,
   type CredimiCaptureSummary,
+  type CredimiComparisonInput,
   type CredimiCorrelationInput,
   type CredimiCredentialInput,
   type CredimiEvidenceCorrelation,
+  type CredimiExternalWalletObservation,
+  type CredimiHeadlessWalletComparison,
   type CredimiRulebook,
   type CredimiRulebookPage,
   type CredimiRulebookPin,

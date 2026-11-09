@@ -14,7 +14,13 @@ import {
   DEFAULT_CAPTURE_PAGE_LIMIT,
   MAX_CAPTURE_PAGE_LIMIT,
   type CaptureExplorer,
+  type CaptureExplorerDetail,
 } from '../capture'
+import {
+  buildHeadlessWalletComparison,
+  parseCompareCaptureInput,
+  type ComparisonEvidenceSource,
+} from '../comparison'
 import { IssuerDiscovery, type IssuerDiscoveryService } from '../discovery'
 import { validateDraftContent } from '../editor'
 import {
@@ -53,6 +59,7 @@ import {
   toCaptureExplorerDetailResource,
   toCaptureExplorerPageResource,
   toDraftRulebookResource,
+  toHeadlessWalletComparisonResource,
   toProviderResource,
   toCredentialValidationResource,
   toImportPreviewResource,
@@ -104,6 +111,7 @@ export type ApiOperationId =
   | 'listCaptures'
   | 'getCapture'
   | 'validateCapture'
+  | 'compareCapture'
   | 'resolveVerifierConstraints'
 
 export interface ApiParameterSpec {
@@ -857,6 +865,33 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         schema: 'CaptureCorrelationResponse',
       },
       ...errors(400, 401, 404, 409, 413, 500, 502, 503),
+    ],
+  },
+  {
+    operationId: 'compareCapture',
+    method: 'post',
+    path: '/api/v1/captures/:captureId/compare',
+    summary: 'Build headless-wallet comparison evidence for a correlated capture',
+    description:
+      'Returns the AttestBook structural/schema evidence of a correlated capture and, optionally, the caller-supplied external wallet observation, separated into schema, protocol, interoperability and trust groups. Every dimension AttestBook cannot execute is listed as unsupported; an external observation is recorded verbatim, labelled as external and never folded into an AttestBook validation status. The capture must already be bound to a pinned rulebook version with POST /api/v1/captures/{captureId}/validate. The operation is read-only: it persists nothing, starts no wallet and contacts no Credimi or capture endpoint.',
+    tag: 'captures',
+    security: false,
+    parameters: [PATH_CAPTURE_ID],
+    request: {
+      schema: 'CompareCaptureRequest',
+      mediaType: 'application/json',
+      required: true,
+      description:
+        'An optional caller-supplied external wallet observation. The AttestBook side comes from the recorded capture correlation, never from the request.',
+    },
+    responses: [
+      {
+        status: 200,
+        description:
+          'The pinned rulebook link, the AttestBook structural evidence, the external observation and the explicit unsupported comparison dimensions.',
+        schema: 'HeadlessWalletComparisonResponse',
+      },
+      ...errors(400, 404, 409, 413, 500, 502, 503),
     ],
   },
   {
@@ -1694,6 +1729,49 @@ function validateCaptureHandler(explorer: CaptureExplorer | undefined): ApiHandl
   }
 }
 
+/**
+ * Builds the AttestBook-side evidence source from a capture detail. The route
+ * refuses an uncorrelated capture, so `rulebook` and `validationResult` are
+ * always present here.
+ */
+function comparisonSourceFromCapture(detail: CaptureExplorerDetail): ComparisonEvidenceSource {
+  const { rulebook, validationResult } = detail
+  if (rulebook === null || validationResult === null) {
+    throw apiError(
+      409,
+      'conflict',
+      'The capture is not bound to a validated rulebook version. Correlate it with a pinned rulebook version before comparing it.',
+    )
+  }
+  return {
+    captureId: detail.captureId,
+    correlationId: detail.correlationId,
+    testExecutionRef: detail.testExecutionRef,
+    sourceComponent: detail.source.component,
+    protocol: detail.protocol,
+    credentialFormat: detail.credentialFormat,
+    rulebook,
+    validation: validationResult,
+  }
+}
+
+function compareCaptureHandler(explorer: CaptureExplorer | undefined): ApiHandler {
+  return async (context) => {
+    const captures = requireCaptures(explorer)
+    const detail = await captures.get(context.req.param('captureId') ?? '')
+    if (detail === null) {
+      throw apiError(404, 'not_found', 'The requested capture does not exist.')
+    }
+    const source = comparisonSourceFromCapture(detail)
+    const body = parseCompareCaptureInput(await readJsonBody(context))
+    const report = buildHeadlessWalletComparison({
+      source,
+      externalWallet: body.externalWallet,
+    })
+    return context.json({ data: toHeadlessWalletComparisonResource(report) }, 200)
+  }
+}
+
 /** Reads only the public issuer identifier; every other member is ignored. */
 function parseDiscoverIssuerInput(body: unknown): { readonly credentialIssuer: string } {
   const record = requireRecord(body, 'request body')
@@ -1777,6 +1855,7 @@ export function createApiHandlers(
     listCaptures: listCapturesHandler(captures),
     getCapture: getCaptureHandler(captures),
     validateCapture: validateCaptureHandler(captures),
+    compareCapture: compareCaptureHandler(captures),
     resolveVerifierConstraints: resolveVerifierConstraintsHandler(verifierPolicy),
   }
 }

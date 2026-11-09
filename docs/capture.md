@@ -331,6 +331,12 @@ the read routes in `src/api/routes.ts` and the UI in `ui/src/CapturesPage.tsx` a
 - The correlation is in memory for the server process only. It writes no registry data and is
   not a durable run history. A captured presentation submission is not unpacked into a
   credential, and no live capture component is integrated.
+- `POST /api/v1/captures/{captureId}/compare` (FR-021, issue #50) reads that recorded
+  correlation and returns the AttestBook structural evidence next to an optional
+  caller-supplied external wallet observation, separated into schema, protocol,
+  interoperability and trust groups with every unsupported dimension explicit. It is
+  read-only and does not orchestrate a wallet
+  ([`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md)).
 
 ## 10. Tests
 

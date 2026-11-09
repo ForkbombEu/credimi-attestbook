@@ -19,7 +19,9 @@ import type {
   captureExplorerDetailSchema,
   captureExplorerPageSchema,
   captureExplorerSummarySchema,
+  compareCaptureRequestSchema,
   credentialValidationResultSchema,
+  headlessWalletComparisonSchema,
   rulebookPageSchema,
   rulebookSchema,
   rulebookVersionSchema,
@@ -64,6 +66,26 @@ export type CredimiCapturePage = z.infer<typeof captureExplorerPageSchema>
 
 /** A capture bound to a pinned rulebook version, with its validation result. */
 export type CredimiEvidenceCorrelation = z.infer<typeof captureCorrelationResultSchema>
+
+/** The headless-wallet comparison report (FR-021). */
+export type CredimiHeadlessWalletComparison = z.infer<typeof headlessWalletComparisonSchema>
+
+/** The caller-supplied external wallet observation of a comparison request. */
+export type CredimiExternalWalletObservation = NonNullable<
+  z.infer<typeof compareCaptureRequestSchema>['externalWallet']
+>
+
+/** One capture to compare, pinned to the exact rulebook version. */
+export interface CredimiComparisonInput {
+  readonly captureId: string
+  readonly pin: CredimiRulebookPin
+  /**
+   * External wallet behaviour to record as bounded input. Omitted when only
+   * the AttestBook structural evidence is needed; the report then lists the
+   * protocol and interoperability dimensions as gaps.
+   */
+  readonly externalWallet?: CredimiExternalWalletObservation
+}
 
 /** A credential artifact as the validation API accepts it. */
 export type CredimiCredentialInput = z.infer<typeof validateCredentialRequestSchema>['credential']
@@ -204,4 +226,22 @@ export function assertPinnedCorrelation(
   })
   assertAttestationType('capture correlation', pin, correlation.rulebook.attestationType)
   assertPinnedValidation(pin, correlation.validation)
+}
+
+/**
+ * Throws `pin_mismatch` unless a headless-wallet comparison report names
+ * exactly the pinned rulebook, version, snapshot digest and attestation type.
+ * The report never carries "the latest version": a stale pin is reported
+ * instead of being silently compared against different bytes.
+ */
+export function assertPinnedComparison(
+  pin: CredimiRulebookPin,
+  comparison: CredimiHeadlessWalletComparison,
+): void {
+  assertPinIdentity('headless-wallet comparison', pin, {
+    rulebookId: comparison.rulebook.rulebookId,
+    version: comparison.rulebook.version,
+    contentDigest: comparison.rulebook.contentDigest,
+  })
+  assertAttestationType('headless-wallet comparison', pin, comparison.rulebook.attestationType)
 }

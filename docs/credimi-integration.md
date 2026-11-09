@@ -2,19 +2,22 @@
 
 **Status:** Phase 5 implementation for
 [issue #49](https://github.com/ForkbombEu/credimi-attestbook/issues/49) (specification
-FR-020, acceptance criterion AC-15). It exposes a standalone client and stable contracts for
-Credimi to select a rulebook, pin one exact version, request credential validation and
-correlate capture evidence. It adds no Credimi runtime dependency, reads no AttestBook
-database and makes no orchestration, protocol or interoperability claim.
+FR-020, acceptance criterion AC-15) and [issue #50](https://github.com/ForkbombEu/credimi-attestbook/issues/50)
+(FR-021). It exposes a standalone client and stable contracts for Credimi to select a
+rulebook, pin one exact version, request credential validation, correlate capture evidence
+and compare a headless-wallet capture with an external wallet observation. It adds no Credimi
+runtime dependency, reads no AttestBook database and makes no orchestration, protocol or
+interoperability claim.
 
-**Authoritative spec:** [`docs/specification.md`](specification.md) §12 (FR-020) and §11
-(FR-015…FR-019).
+**Authoritative spec:** [`docs/specification.md`](specification.md) §12 (FR-020, FR-021) and
+§11 (FR-015…FR-019).
 **API contract:** [`docs/api.md`](api.md) — the adapter consumes the public `/api/v1` API.
 **Validation evidence:** [`docs/validation.md`](validation.md) and
 [`docs/traceability.md`](traceability.md).
 **Capture evidence:** [`docs/capture.md`](capture.md) §9.
-**Related issues:** #50 (headless-wallet comparison evidence) and #51 (reproducible continuous
-conformance) build on this slice; neither is implemented here.
+**Comparison evidence:** [`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md).
+**Related issues:** #51 (reproducible continuous conformance) builds on this slice and is not
+implemented here.
 
 ## 1. Purpose and boundaries
 
@@ -110,6 +113,7 @@ JSON; there is no polling, queue or callback.
 | `listCaptures(query?)` | `GET /api/v1/captures` | no | Capture-evidence page with explicit gaps. |
 | `getCapture(captureId)` | `GET /api/v1/captures/{captureId}` | no | One capture, its redacted projection and linked validation. |
 | `correlateCapture(input)` | `POST /api/v1/captures/{captureId}/validate` | yes | Binds a captured credential to the pinned version and records the result. |
+| `compareCapture(input)` | `POST /api/v1/captures/{captureId}/compare` | no | Read-only headless-wallet comparison evidence: pinned structural results plus an optional external wallet observation. |
 
 `GET /api/v1/rulebooks` also accepts `status=draft|published|historical`; the other pages are
 bounded by `limit` (1–100, default 50) and `offset` (≥ 0). Successful responses are JSON; the
@@ -208,6 +212,49 @@ artifact projection, the evidence timeline and explicit `evidenceGaps` (for exam
 `no_rulebook_binding`, `validation_not_run`, `external_artifact_not_fetched`). Absence of
 evidence is stated, never inferred as success.
 
+### 3.4 Comparing a headless-wallet capture with external wallet behaviour
+
+```json
+POST /api/v1/captures/{captureId}/compare
+
+{
+  "externalWallet": {
+    "walletId": "wallet-a",
+    "observedAt": "2026-11-05T09:48:30Z",
+    "interaction": "issuance",
+    "observations": [
+      { "dimension": "cryptographic_verification", "status": "PASS", "code": "signature-valid" },
+      { "dimension": "issuer_trust", "status": "NOT_TESTED" },
+      { "dimension": "protocol_conformance", "status": "PASS" },
+      { "dimension": "interoperability", "status": "FAIL", "code": "claim-not-presented" }
+    ]
+  }
+}
+```
+
+The capture must already be correlated; the report reuses that exact pin and validates nothing
+a second time. The response (`attestbook.headless-wallet-comparison@1`) has:
+
+- `rulebook` — the exact `rulebookId`, `version`, `contentDigest`, `digestVerified`,
+  `specVersion`, `rulebookStatus`, `attestationType` and `boundAt` of the correlation;
+- `attestbook` — the structural evidence of the pinned validation (no raw credential);
+- `externalWallet` — the observation, recorded as bounded input and labelled external;
+- `comparison.schema`, `comparison.protocol`, `comparison.interoperability` and
+  `comparison.trust` — the four evidence groups, each entry carrying `attestbook`, `external`
+  and a `result` (`agreement`, `divergence`, `attestbook_only`, `external_only`,
+  `not_provided`, `not_comparable`);
+- `comparison.unsupported` — every dimension the comparison cannot establish, with a stable
+  code and reason;
+- `nonClaims` — explicit `false` values for external-observation verification and the four
+  AttestBook-unexecuted dimensions.
+
+This is the FR-021 seam, not an interoperability verdict. Credimi reports structural,
+protocol and interoperability outcomes separately; an external `PASS` never becomes an
+AttestBook status. The operation is public and read-only: `409` means the capture is not yet
+correlated, `404` an unknown capture, `400` a malformed observation and `503` an unwired
+capture explorer. The full contract is in
+[`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md).
+
 ## 4. Failure and timeout handling
 
 The client maps every failure to a stable `CredimiAdapterError.code`; `status` and
@@ -279,7 +326,22 @@ const pin = await client.pinRulebook({
 const evidence = await client.validateCredential({ pin, credential })
 const correlation = await client.correlateCapture({ captureId, pin })
 
+const comparison = await client.compareCapture({
+  captureId,
+  pin,
+  externalWallet: {
+    walletId: 'wallet-a',
+    observedAt: '2026-11-05T09:48:30Z',
+    interaction: 'issuance',
+    observations: [
+      { dimension: 'protocol_conformance', status: 'PASS', code: null, detail: null },
+      { dimension: 'interoperability', status: 'FAIL', code: 'claim-not-presented', detail: null },
+    ],
+  },
+})
+
 console.log(pin.contentDigest, evidence.overallStatus, correlation.testExecutionRef)
+console.log(comparison.comparison.schema[0]?.result, comparison.comparison.unsupported.length)
 ```
 
 Store the pin next to the Credimi test execution. Passing it back on every request is what
@@ -296,12 +358,12 @@ bun run check                     # formatting, lint, typecheck and all tests
 `src/integration/credimi/client.test.ts` exercises the transport boundary with an injected
 `fetch`: configuration bounds, query/path construction, bearer handling, HTTP status mapping,
 non-JSON error bodies, malformed success bodies, the response-size bound, retry bounds and
-the timeout abort, plus direct pin-evidence verification. `src/integration/credimi/server.test.ts`
-runs the client against the real Hono application over a loopback socket and a real migrated
-SQLite registry, covering the complete selection → pin → validation → capture-correlation
-flow, stale-pin rejection, an unknown attestation type, a rejected bearer token, a
-real-socket timeout and an unreachable server. No test contacts a live capture component or
-Credimi.
+the timeout abort, plus direct pin-evidence and comparison verification.
+`src/integration/credimi/server.test.ts` runs the client against the real Hono application
+over a loopback socket and a real migrated SQLite registry, covering the complete selection →
+pin → validation → capture-correlation → headless-wallet-comparison flow, stale-pin
+rejection, an unknown attestation type, a rejected bearer token, a real-socket timeout and an
+unreachable server. No test contacts a live capture component or Credimi.
 
 ## 7. Limitations and non-claims
 
@@ -319,11 +381,13 @@ Credimi.
   status-list checking, protocol conformance and interoperability are not executed and are
   never reported PASS. A result must not be read as ETSI, TS11 or interoperability
   conformance.
-- **Protocol comparison is not implemented here.** Distinguishing rulebook findings from
-  protocol/interoperability observations for a headless-wallet workflow is issue
-  [#50](https://github.com/ForkbombEu/credimi-attestbook/issues/50); reproducible recurring
-  conformance evidence is issue
-  [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51).
+- **Headless-wallet comparison is evidence, not orchestration.** `compareCapture` is a
+  read-only projection over a recorded capture correlation and an optional, unverified
+  caller-supplied external wallet observation. AttestBook does not start a wallet, observe
+  Wallet A or verify the observation, and the report has no interoperability verdict.
+  Reproducible recurring conformance evidence and stable run history remain issue
+  [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51)
+  ([`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md) §8).
 - **No pin store.** AttestBook does not persist pins; Credimi owns the pin and its retention.
 - **No live Credimi adapter in this repository.** Credimi's Go integration must implement the
   documented HTTP contract; this repository provides the contract and the tested reference

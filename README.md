@@ -7,8 +7,9 @@ scaffold, the persistent provider/rulebook registry slice, the bounded URL/JSON 
 import slice, SD-JWT VC structural validation with dimension-aware evidence, the
 versioned REST/OpenAPI contract over those services and the standalone UI: a searchable
 rulebook catalog, rulebook detail/version history, a credential validation playground, a
-rulebook draft editor (UI-001/UI-002/UI-005 and the working-copy slice of UI-003) and a
-mock-backed capture explorer with pinned-rulebook correlation (UI-006, FR-019).
+rulebook draft editor (UI-001/UI-002/UI-005 and the working-copy slice of UI-003), a
+mock-backed capture explorer with pinned-rulebook correlation (UI-006, FR-019) and a
+read-only headless-wallet comparison evidence report (FR-021).
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -104,9 +105,15 @@ bun run docs:check    # documentation consistency, plain Node
   mock-backed explorer read model that correlates a captured issued credential with a pinned
   rulebook version; see [`docs/capture.md`](capture.md) §9;
 - `src/integration/credimi/` — the standalone Credimi adapter: rulebook selection,
-  exact-version pinning, version-pinned validation evidence and capture correlation over the
-  public `/api/v1` API, with typed error codes, bounded timeouts/retries and real-server
-  round-trip tests; see [`docs/credimi-integration.md`](credimi-integration.md);
+  exact-version pinning, version-pinned validation evidence, capture correlation and
+  headless-wallet comparison over the public `/api/v1` API, with typed error codes, bounded
+  timeouts/retries and real-server round-trip tests; see
+  [`docs/credimi-integration.md`](credimi-integration.md);
+- `src/comparison/` — the read-only headless-wallet comparison evidence: a versioned
+  `attestbook.headless-wallet-comparison@1` report that links a correlated capture to its
+  exact pinned rulebook version/digest, separates the AttestBook schema results from a
+  caller-supplied external wallet observation and lists every unsupported dimension
+  explicitly; see [`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md);
 - `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
   the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
   routes Hono registered, success/error contract tests for every exposed resource, and
@@ -289,6 +296,19 @@ own schema and every pinned response is checked against the pin, with typed fail
 contract drift, stale pins, timeouts and transient server errors. The contract, error codes,
 retry/timeout bounds and non-claims are documented in
 [`docs/credimi-integration.md`](credimi-integration.md).
+
+## Headless-wallet comparison evidence
+
+`src/comparison/` and `POST /api/v1/captures/{captureId}/compare` provide the FR-021
+AttestBook-side evidence for a headless-wallet comparison. The read-only report links a
+correlated capture to the exact pinned rulebook version and snapshot digest, carries the
+AttestBook structural/schema evidence, and places an optional caller-supplied external wallet
+observation next to it in separate schema, protocol, interoperability and trust groups. Every
+dimension AttestBook does not execute or cannot establish is explicit in
+`comparison.unsupported`, and an external observation never becomes an AttestBook status. No
+wallet is started or observed and no Credimi execution is orchestrated. The contract, bounds
+and non-claims are documented in
+[`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md).
 
 ## Safe URL and JSON import
 

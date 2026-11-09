@@ -89,9 +89,12 @@ the two without a current migrated issue are marked explicitly.
   (FR-020–FR-022) — Phase 5. Delivered: #49 shipped the standalone Credimi adapter with
   rulebook selection, exact-version pinning, version-pinned validation evidence, capture
   correlation over the public `/api/v1` API and tested timeout/retry/error handling
-  ([`docs/credimi-integration.md`](credimi-integration.md), FR-020, AC-15). Still open:
-  [#50](https://github.com/ForkbombEu/credimi-attestbook/issues/50) (headless-wallet
-  comparison evidence) and
+  ([`docs/credimi-integration.md`](credimi-integration.md), FR-020, AC-15). #50 shipped the
+  read-only headless-wallet comparison evidence: a pinned structural report, an optional
+  caller-supplied external wallet observation separated into schema, protocol,
+  interoperability and trust groups, explicit unsupported comparison dimensions, and the
+  adapter's `compareCapture`, without any wallet orchestration
+  ([`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md), FR-021). Still open:
   [#51](https://github.com/ForkbombEu/credimi-attestbook/issues/51) (reproducible continuous
   conformance results); AttestBook remains a validation service, not a second orchestration
   platform.

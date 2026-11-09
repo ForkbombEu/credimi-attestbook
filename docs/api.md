@@ -75,11 +75,12 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.7.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.8.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
   export operations added by #42, issuer discovery added by #43, issuer fixture generation
-  added by #44, the mock-backed capture explorer added by #48 and the optional pinned
-  correlation digest added by #49); it is separate from the package version reported by
+  added by #44, the mock-backed capture explorer added by #48, the optional pinned
+  correlation digest added by #49 and the read-only headless-wallet comparison added by
+  #50); it is separate from the package version reported by
   `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
@@ -120,6 +121,7 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `GET` | `/api/v1/captures` | no | `200` | Mock-backed page of normalized capture evidence with correlation identifiers and explicit evidence gaps. |
 | `GET` | `/api/v1/captures/{captureId}` | no | `200` | One capture with its redacted artifact projection, evidence timeline and the validation linked to its pinned rulebook version. |
 | `POST` | `/api/v1/captures/{captureId}/validate` | yes | `200` | Correlate a captured issued credential with a pinned rulebook version and record the structural validation result. |
+| `POST` | `/api/v1/captures/{captureId}/compare` | no | `200` | Read-only headless-wallet comparison evidence: the pinned AttestBook structural results plus an optional caller-supplied external wallet observation, with every unsupported dimension explicit. |
 
 Representations are the public projection of the services: rulebook `provenance`,
 `metadata` and `importKey`, attestation/schema-reference `metadata` and version `provenance`
@@ -543,6 +545,54 @@ structural validation status never implies cryptographic, issuer-trust, protocol
 interoperability success. The contract and non-claims are documented in
 [`docs/capture.md`](capture.md) §9.
 
+### 3.9 Headless-wallet comparison evidence
+
+`POST /api/v1/captures/{captureId}/compare` is the read-only FR-021 seam. It requires the
+capture to be correlated already, and it takes an optional caller-supplied external wallet
+observation:
+
+```json
+{
+  "externalWallet": {
+    "walletId": "wallet-a",
+    "observedAt": "2026-11-05T09:48:30Z",
+    "interaction": "issuance",
+    "observations": [
+      { "dimension": "cryptographic_verification", "status": "PASS", "code": "signature-valid" },
+      { "dimension": "issuer_trust", "status": "NOT_TESTED" },
+      { "dimension": "protocol_conformance", "status": "PASS", "code": "issuance-flow-complete" },
+      { "dimension": "interoperability", "status": "FAIL", "code": "claim-not-presented", "detail": "The external wallet did not present the family_name claim." }
+    ]
+  }
+}
+```
+
+It returns the `attestbook.headless-wallet-comparison@1` report. The AttestBook side is the
+exact pinned binding (`rulebookId`, `version`, `contentDigest`, `digestVerified`,
+`specVersion`, `rulebookStatus`, `attestationType`, `boundAt`), the non-sensitive credential
+facts, the schema references and the structural findings. The comparison separates:
+
+- `schema`: the four AttestBook-executable dimensions (`credential_parsing`,
+  `format_recognition`, `schema_validation`, `attestation_constraints`);
+- `protocol`: `protocol_conformance`, from the external observation only;
+- `interoperability`: `interoperability`, from the external observation only;
+- `trust`: `cryptographic_verification` and `issuer_trust`, from the external observation
+  only;
+- `unsupported`: every dimension the comparison cannot establish, with `code`,
+  `attestbookStatus` and a reason. The four AttestBook-unexecuted dimensions are always
+  listed with `attestbook_does_not_execute`; a structural dimension with no evidence is
+  `no_evidence_supplied` and one with non-conclusive values is `not_comparable`.
+
+Each dimension entry reports `attestbook`, `external` and a `result` of `agreement`,
+`divergence`, `attestbook_only`, `external_only`, `not_provided` or `not_comparable`. The
+external observation is recorded as bounded input, labelled `external`, and never changes an
+AttestBook validation status; `nonClaims` fixes `externalObservationVerified` and the four
+unexecuted dimensions to `false`. The operation is public and read-only: it persists nothing,
+starts no wallet and contacts no Credimi or capture endpoint. `404` means an unknown capture,
+`409` an uncorrelated capture, `400` a malformed observation, `503` an unwired capture
+explorer and `502` a failing capture source. The contract, bounds and non-claims are documented
+in [`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md).
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -687,7 +737,9 @@ bun test src/api        # contract, success and error coverage
 bun test src/discovery  # discovery extraction, bounds and association
 bun test src/fixtures   # fixture synthesis, grounding and negative cases
 bun test src/verifier   # typed verifier constraints and OpenID4VP-aware mappings
+bun test src/comparison # headless-wallet comparison contract and bounds
 bun test src/api/verifier.test.ts  # verifier-constraint HTTP contract
+bun test src/api/comparison.test.ts  # comparison HTTP contract and pin linkage
 bun run check           # formatting, lint, strict typecheck and all tests
 ```
 
@@ -731,5 +783,10 @@ own component and browser tests described in [`docs/ui.md`](ui.md).
   artifact reference, does not unpack a captured presentation submission and does not persist a
   run history. A live `capture-issuer`/`capture-verifier` connector remains unimplemented and
   absent rather than present as a placeholder.
+- Headless-wallet comparison evidence is a read-only projection over a recorded capture
+  correlation and the caller's external wallet observation. It orchestrates no wallet, does
+  not verify the observation, does not diff two credentials or rulebook versions, and
+  persists no comparison
+  ([`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md) §8).
 - The TS11 catalogue API remains unimplemented and is absent from the OpenAPI document rather
   than present as a placeholder.
