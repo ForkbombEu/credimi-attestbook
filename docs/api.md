@@ -35,14 +35,17 @@ Implemented and exposed by this slice:
   with the artifact digest, bounded provenance and an explicit signature boundary (added by
   [issue #42](https://github.com/ForkbombEu/credimi-attestbook/issues/42));
 - authenticated import preview and import of URL/JSON sources;
+- authenticated issuer metadata discovery and candidate rulebook association (added by
+  [issue #43](https://github.com/ForkbombEu/credimi-attestbook/issues/43));
+- public rulebook-driven unsigned issuer fixture generation (added by
+  [issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44));
 - structural credential validation against a pinned rulebook version.
 
 Deliberately **not** in this slice:
 
 - the TS11 catalogue interface (`GET/PUT/DELETE /schemas`, JWS responses) — it must be
   implemented separately and exactly if a later issue adds it (architecture §5);
-- issuer discovery, capture validation and validation-result persistence; no route pretends
-  to offer them;
+- capture validation and validation-result persistence; no route pretends to offer them;
 - provider-management HTTP routes, rate limiting and token expiry/rotation — future hardening;
   the implemented write-auth model is documented in [`docs/security.md`](security.md);
 - a publication signature: no export claims one. OWF 0.5.4 signs only a bare OWF-profile
@@ -67,10 +70,10 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.4.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.5.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
-  export operations added by #42 and issuer discovery added by #43); it is separate from
-  the package version reported by `/health`.
+  export operations added by #42, issuer discovery added by #43 and issuer fixture
+  generation added by #44); it is separate from the package version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -367,6 +370,51 @@ are not persisted in this slice. Issuer metadata is never treated as rulebook co
 exposed reference is fetched and no signature, trust or conformance result is derived from it.
 The discovery contract is documented in [`docs/discovery.md`](discovery.md).
 
+### 3.6 Issuer fixtures
+
+`POST /api/v1/issuers/fixtures` is the public FR-013 slice. It synthesizes an **unsigned**
+credential claim payload from the JSON Schema 2020-12 attribute constraints that one pinned
+rulebook version references. It is not a credential issuer: the payload carries
+`kind: "attestbook.unsigned-issuer-fixture@1"`, `signed: false` and `issued: false`.
+
+```json
+{
+  "rulebookId": "…",
+  "rulebookVersion": "1.0",
+  "attestationType": "PID",
+  "format": "dc+sd-jwt",
+  "schemaDocuments": [
+    { "uri": "https://issuer.example/schema/pid.json", "content": "{ … }" }
+  ],
+  "overrides": [{ "path": "/given_name", "value": "Ada" }]
+}
+```
+
+The caller supplies the exact schema document bytes, exactly as for credential validation.
+Each URI must be a schema reference of the selected attestation type in that version (and of
+the requested `format`, when present), and its sha256 SRI value must match before the
+document can ground a payload. References without a verifiable pin, references without a
+supplied document and SD-JWT VC Type Metadata references are reported and never used; when
+no reference is usable the route answers `400 invalid_request` rather than an ungrounded
+fixture.
+
+The response carries the pinned rulebook evidence, the effective attribute definitions (JSON
+Pointer, required flag, types and supported constraints), the generated payload, an explicit
+payload-validation status against the supplied documents, the applied overrides, labelled
+negative cases and limitations. `overrides` replace existing attributes by JSON Pointer and
+are re-validated; an override that deliberately violates a constraint yields
+`payloadValidation.status: "FAIL"` with findings instead of pretending success. Negative cases
+are derived from the supported constraints in deterministic order, each verified to fail the
+supplied documents before it is returned. Their `id` is stable (`<category>:<path>`) and
+`expected` is always `FAIL`.
+
+Compilation, synthesis, payload evaluation and negative-case verification run in the same
+resource-bounded sandbox as credential validation, with a shared concurrency limit. The route
+writes nothing and performs no network request. A timeout, memory or output limit answers
+`400 invalid_request`; a busy or unavailable sandbox answers `503 fixture_unavailable`. The
+contract, supported synthesis subset and non-claims are documented in
+[`docs/fixtures.md`](fixtures.md).
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -400,7 +448,10 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Import or issuer discovery | unsafe/malformed/unsupported source or issuer metadata, limits, refused input | `422` | `import_rejected` |
 | Import or issuer discovery | remote fetch failure, DNS failure, timeout, redirect limit, oversized remote response, unsupported remote status | `502` | `import_fetch_failed` |
 | Import or issuer discovery | `invalid_source`/`invalid_url` client input | `400` | `invalid_request` |
-| API wiring | registry, validation or issuer discovery not configured | `503` | `registry_unavailable` / `validation_unavailable` |
+| Issuer fixtures | malformed request, unmatched/unpinnable schema document, unsupported synthesis constraint, unknown override path | `400` | `invalid_request` |
+| Issuer fixtures | rulebook, version, attestation type or stored snapshot does not exist | `404` | `not_found` |
+| Issuer fixtures | fixture sandbox at its concurrency limit or unavailable on this platform | `503` | `fixture_unavailable` |
+| API wiring | registry, validation, issuer discovery or issuer fixtures not configured | `503` | `registry_unavailable` / `validation_unavailable` |
 | API | unexpected failure | `500` | `internal_error` |
 
 Unknown routes under any path answer `404` with `not_found` and the same envelope. The
@@ -499,6 +550,7 @@ Run the relevant checks from the repository root:
 bun run openapi:check   # generated OpenAPI 3.1 document validates
 bun test src/api        # contract, success and error coverage
 bun test src/discovery  # discovery extraction, bounds and association
+bun test src/fixtures   # fixture synthesis, grounding and negative cases
 bun run check           # formatting, lint, strict typecheck and all tests
 ```
 
@@ -524,6 +576,11 @@ own component and browser tests described in [`docs/ui.md`](ui.md).
 - Discovery is read-only: it does not persist discovered issuers, metadata snapshots or
   manual mappings, and it does not fetch exposed references or verify signed metadata
   ([`docs/discovery.md`](discovery.md) §1 and §9).
+- Issuer fixtures are unsigned claim payloads, not issued credentials. They are synthesized
+  from caller-supplied, integrity-verified schema documents and only within the supported
+  JSON Schema subset; compilation and evaluation run in the shared resource-bounded sandbox,
+  and the route fetches no schema, signs nothing and persists nothing
+  ([`docs/fixtures.md`](fixtures.md) §2.4, §3 and §6).
 - Validation results are returned synchronously and are not persisted
   (`GET /api/v1/validations/{id}` does not exist in this slice; the specification lists it as
   a suggested resource, not an implemented one).

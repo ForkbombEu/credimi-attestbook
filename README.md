@@ -87,6 +87,10 @@ bun run docs:check    # documentation consistency, plain Node
   Schema 2020-12 attribute checks, pinned-version/digest evidence, dimension statuses and a
   timeout/memory-bounded schema-evaluation sandbox; see
   [`docs/validation.md`](docs/validation.md);
+- `src/fixtures/` — rulebook-driven issuer fixtures: deterministic unsigned claim payloads
+  synthesized from integrity-verified JSON Schema 2020-12 references of a pinned version,
+  effective attribute definitions, JSON-Pointer overrides and labelled negative cases each
+  verified to fail the supplied documents; see [`docs/fixtures.md`](fixtures.md);
 - `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
   the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
   routes Hono registered, success/error contract tests for every exposed resource, and
@@ -138,7 +142,8 @@ standards-metadata boundary, authorization model and version lifecycle are docum
 The product API lives under `/api/v1` and is generated from a single route/schema source of
 truth. It exposes public rulebook, attestation, schema-reference and version reads; the exact
 version snapshot bytes with a verifiable digest; authenticated rulebook/version creation and
-publication; authenticated import preview and import; and credential validation. Successful responses use
+publication; authenticated import preview and import; authenticated issuer metadata
+discovery; public issuer fixture generation; and credential validation. Successful responses use
 a `{ "data": ... }` envelope and failures use a stable `{ "error": { "code", "message" } }`
 envelope. Writes and the import preview require a provider bearer token.
 
@@ -180,6 +185,28 @@ and unresolved Type Metadata `extends` are not treated as validated.
 Credential contents and claim values are never logged or returned. The response is wrapped
 in `{ "data": ... }` like the other product-API successes. See
 [`docs/validation.md`](docs/validation.md) for the contract, statuses, limits and non-claims.
+
+## Issuer fixtures
+
+`POST /api/v1/issuers/fixtures` synthesizes an **unsigned** credential claim payload from the
+JSON Schema 2020-12 attribute constraints referenced by one pinned rulebook version. It is
+not an issuer: the response carries `kind: "attestbook.unsigned-issuer-fixture@1"`,
+`signed: false`, `issued: false` and an explicit limitations list. As with credential
+validation, the caller supplies the exact schema document bytes; each URI must be a schema
+reference of the selected attestation type in that version and its sha256 SRI value must
+match before it grounds a payload. References without a verifiable pin, references without a
+supplied document and Type Metadata references are reported, never silently used.
+
+Schema compilation, payload synthesis and negative-case verification run in the same
+resource-bounded sandbox as credential validation, so a hostile pinned schema cannot block the
+HTTP event loop. The response contains the effective attribute definitions (JSON Pointer,
+required flag, types and supported constraints), the generated payload, its validation against
+the supplied documents, the applied JSON-Pointer overrides and deterministic, labelled
+negative cases.
+Each negative case is verified to fail before it is returned and carries a stable
+`<category>:<path>` id. The supported synthesis subset, the unsigned boundary and the
+non-claims (no signing, issuance, schema fetching, cryptography or interoperability) are
+documented in [`docs/fixtures.md`](fixtures.md).
 
 ## Safe URL and JSON import
 

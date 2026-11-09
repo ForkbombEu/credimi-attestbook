@@ -115,11 +115,16 @@ describe('write operation security surface', () => {
       'replaceRulebookDraft',
     ])
 
-    // Credential validation and draft validation are read-only POSTs and stay public.
+    // Draft validation, fixture generation and credential validation are read-only
+    // POSTs and stay public.
     const publicPosts = API_ROUTES.filter(
       (route) => route.method === 'post' && !route.security,
     ).map((route) => route.operationId)
-    expect(publicPosts).toEqual(['validateRulebookDraft', 'validateCredential'])
+    expect(publicPosts).toEqual([
+      'validateRulebookDraft',
+      'generateIssuerFixture',
+      'validateCredential',
+    ])
   })
 
   test('every protected route rejects missing, malformed, unknown and revoked credentials', async () => {

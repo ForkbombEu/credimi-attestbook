@@ -198,8 +198,10 @@ constraints, not values. Hard bounds are: 512 KiB credential, four schema docume
 Schema documents are evaluated in a separate Bun worker process with a configurable hard
 timeout (default 2 s), RSS limit (default 256 MiB), output cap (1 MiB) and concurrency cap
 (two children). The RSS watchdog needs Linux `/proc`; on any other platform the sandbox fails
-closed. The HTTP process never compiles or runs an untrusted schema itself. A limit hit
-produces `NOT_TESTED` evidence with `schema_evaluation_timeout`,
+closed. The HTTP process never compiles or runs an untrusted schema itself; rulebook-driven
+issuer fixture generation uses the same runner and shares its concurrency cap, so a busy
+sandbox can also answer `503 fixture_unavailable` there (FR-013, `docs/fixtures.md` §2.4). In
+validation, a limit hit produces `NOT_TESTED` evidence with `schema_evaluation_timeout`,
 `schema_evaluation_memory_exceeded`, `schema_evaluation_output_exceeded`,
 `schema_evaluation_failed`, `schema_sandbox_busy` or `schema_sandbox_unavailable`. Claim depth
 is checked before and after disclosures are unpacked. Each JSON Schema document is compiled with a fresh Ajv instance so caller-supplied
