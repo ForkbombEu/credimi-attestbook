@@ -387,3 +387,7 @@ The specification §16 capture matrix is covered by `src/capture/`:
   never a live capture, and a correlation is lost on restart. Only a captured
   `issued-credential` inline artifact can be validated; a presentation submission is not
   unpacked, and redacted/external evidence is reported instead of validated.
+- Retention is process-lifetime for evidence and correlations, bounded by
+  `MAX_CAPTURE_RECORDS` and the source page limit; nothing is persisted, and the mock store
+  keeps only ids and submission hashes. The complete data-retention and redaction policy is
+  in [`docs/security-threat-model.md`](security-threat-model.md) §4.

@@ -465,6 +465,48 @@ describe('validateSchemaDocuments integrity and coverage', () => {
     }
   })
 
+  test('rejects cyclic and self-referential schema documents without resolving them', async () => {
+    const parsed = await parseOrThrow(await issueTestCredential())
+    const schemas = [
+      // A root self-reference and a cycle through $defs/definitions are the
+      // shapes an eager resolver would recurse on.
+      { $ref: '#' },
+      {
+        $defs: { node: { $ref: '#/$defs/node' } },
+        properties: { given_name: { $ref: '#/$defs/node' } },
+      },
+      {
+        definitions: {
+          a: { $ref: '#/definitions/b' },
+          b: { $ref: '#/definitions/a' },
+        },
+        properties: { given_name: { $ref: '#/definitions/a' } },
+      },
+      // Dynamic and recursive reference keywords are unsupported for the same
+      // reason: the evaluator cannot prove where they terminate.
+      { $dynamicRef: '#node', $dynamicAnchor: 'node' },
+      { $recursiveRef: '#' },
+    ]
+
+    for (const schema of schemas) {
+      const content = JSON.stringify(schema)
+      const reference = {
+        formatIdentifier: 'dc+sd-jwt',
+        uri: JSON_SCHEMA_URI,
+        integrity: sha256Sri(content),
+      }
+      const outcome = await validateSchemaDocuments({
+        references: [reference],
+        documents: [{ uri: JSON_SCHEMA_URI, content }],
+        parsed,
+      })
+
+      expect(outcome.status).toBe('NOT_TESTED')
+      expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+      expect(outcome.findings.some((entry) => entry.code === 'schema_violation')).toBe(false)
+    }
+  })
+
   test('rejects legacy dependencies schemas that could hide a regex', async () => {
     const schema = JSON.stringify({
       type: 'object',

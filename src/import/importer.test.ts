@@ -14,6 +14,7 @@ import {
   jsonBytes,
   owfDocument,
   publicResolver,
+  ts11Document,
   ts11WithSchemaReferences,
   validTs11Document,
   type FakeTransport,
@@ -201,5 +202,36 @@ describe('authenticated rulebook import', () => {
     expect(caught).toBeInstanceOf(RegistryError)
     expect(fake.requests).toHaveLength(0)
     expect(fixture.registry.listRulebooks()).toHaveLength(0)
+  })
+
+  test('audits every created draft with the provider and never the source bytes', async () => {
+    const marker = 'source-marker-5f2b9c'
+    const source = ts11Document({ description: marker })
+    const fake = createFakeTransport({
+      [IMPORT_URL]: { body: jsonBytes({ data: [source, owfDocument] }) },
+    })
+    const { fixture, provider, token, importer } = setup(fake.transport)
+
+    const result = await importer.import(token.secret, { kind: 'url', url: IMPORT_URL })
+    expect(result.rulebooks).toHaveLength(2)
+
+    const rows = fixture.database
+      .query<{
+        action: string
+        actor_provider_id: string | null
+        detail_json: string
+      }>('SELECT action, actor_provider_id, detail_json FROM audit_log ORDER BY id')
+      .all()
+
+    const creates = rows.filter((row) => row.action === 'rulebook.create')
+    expect(creates).toHaveLength(2)
+    expect(creates.map((row) => row.actor_provider_id)).toEqual([provider.id, provider.id])
+    const actions = rows.map((row) => row.action)
+    expect(actions).toContain('rulebook.create')
+    expect(actions).toContain('attestation.create')
+    expect(actions).toContain('schema_ref.create')
+    // The source description is content, not audit evidence: no audit detail
+    // may copy source bytes or document members into the trail.
+    expect(rows.map((row) => row.detail_json).join('\n')).not.toContain(marker)
   })
 })

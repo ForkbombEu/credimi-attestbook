@@ -325,8 +325,13 @@ deployment constraint, not hidden.
 **Deliverable: security threat/risk outline for imported schemas and sensitive credentials.**
 Synthesizes spec §15 with the observed import risks from
 [#3](https://github.com/ForkbombEu/credimi-attestbook/issues/3) §6 and the JOSE findings from
-[#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1) §5.4. Controls are
-**proposed**; none is implemented in Phase 0.
+[#1](https://github.com/ForkbombEu/credimi-attestbook/issues/1) §5.4. This table records the
+Phase 0 proposals; the controls were implemented by the Phase 1–5 slices and re-verified by
+the Phase 6 security audit
+([issue #52](https://github.com/ForkbombEu/credimi-attestbook/issues/52)). Current status, test
+evidence, the retention/redaction policy and the residual-risk register are in
+[`docs/security-threat-model.md`](security-threat-model.md) §3–§7; the "proposed" values below
+are historical.
 
 | # | Threat / risk | Evidence | Proposed control | Status |
 | --- | --- | --- | --- | --- |

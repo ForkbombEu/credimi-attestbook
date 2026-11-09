@@ -220,6 +220,29 @@ describe('capture explorer correlation', () => {
     expect(times).toEqual([...times].sort((left, right) => left - right))
   })
 
+  test('keeps evidence and correlations in memory only, not across instances', async () => {
+    const validation = fakeValidation()
+    const first = explorerWith(validation)
+    await first.correlate('mock-capture-capture-issuer-3', {
+      rulebookId: 'rulebook-1',
+      rulebookVersion: '1.0',
+      attestationType: 'Person Identification Data',
+      rulebookDigest: 'a'.repeat(64),
+    })
+    expect((await first.get('mock-capture-capture-issuer-3'))?.validation).not.toBeNull()
+
+    // A fresh explorer is a fresh process boundary: no capture evidence or
+    // correlation was persisted anywhere for it to reload.
+    const second = explorerWith(validation)
+    const detail = await second.get('mock-capture-capture-issuer-3')
+    expect(detail?.validation).toBeNull()
+    expect(detail?.validationResult).toBeNull()
+    expect(detail?.rulebook).toBeNull()
+    expect(detail?.limitations.join(' ')).toContain(
+      'held in memory for the lifetime of this server process',
+    )
+  })
+
   test('refuses to validate an external artifact reference', async () => {
     const validation = fakeValidation()
     const explorer = explorerWith(validation)

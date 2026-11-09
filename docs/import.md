@@ -374,5 +374,8 @@ updates, full FR-005 synchronization or interoperability.
 - Issues [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) and
   [#41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) — version history and
   the editor workflow that resolves a reported conflict.
-- Issue [#52](https://github.com/ForkbombEu/credimi-attestbook/issues/52) — further remote
-  import hardening.
+- Issue [#52](https://github.com/ForkbombEu/credimi-attestbook/issues/52) — the Phase 6
+  security audit that verifies these import controls alongside credential, capture and
+  provider-authorization boundaries
+  ([`docs/security-threat-model.md`](security-threat-model.md)). It records, but does not
+  remove, the missing HTTP rate limit (finding F1).
