@@ -9,7 +9,8 @@
 //      specification and the traceability matrix;
 //   4. architecture decisions (AD-*), open questions (OQ-*) and capture
 //      decisions (CD-*) are carried into docs/implementation-plan.md;
-//   5. every Phase 1 issue #26–#39 has a row in the §9 dependency table.
+//   5. every Phase 1 issue #26–#39 has a row in the §9 dependency table;
+//   6. every inline-code citation of a repository test/spec file exists.
 //
 // Reference-style uses without a definition (which render as text, not links)
 // and angle-bracket targets containing spaces are not parsed; the repository
@@ -68,6 +69,7 @@ const linkPattern = /!?\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
 const referenceDefinitionPattern = /^ {0,3}\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))/gm;
 const linksByFile = new Map();
 let localLinkCount = 0;
+let testCitationCount = 0;
 
 for (const file of checkedFiles) {
   const text = readFileSync(file, 'utf8');
@@ -120,6 +122,23 @@ for (const file of checkedFiles) {
   linksByFile.set(file, targets);
 }
 
+// A security or traceability note names its evidence as an inline code path,
+// which the Markdown link pass cannot see. A renamed or never-added test would
+// otherwise stay cited as if it had run. Only test/spec files are checked here:
+// upstream source paths quoted from another repository are legitimate.
+const testPathPattern =
+  /`((?:src|ui|scripts)\/[A-Za-z0-9_./-]+\.(?:test|spec)\.(?:ts|tsx|mjs|js))`/g;
+for (const file of checkedFiles) {
+  const text = readFileSync(file, 'utf8');
+  for (const match of text.matchAll(testPathPattern)) {
+    testCitationCount += 1;
+    if (!existsSync(resolve(root, match[1]))) {
+      const line = text.slice(0, match.index).split('\n').length;
+      fail(`${rel(file)}:${line}: cited test file does not exist -> ${match[1]}`);
+    }
+  }
+}
+
 for (const name of requiredDocs) {
   const file = resolve(docsDir, name);
   const targets = linksByFile.get(file) ?? new Set();
@@ -167,6 +186,6 @@ if (failures.length > 0) {
 
 console.log(
   `docs-check: OK (${requiredDocs.length} required documents, ${checkedFiles.length} files, ` +
-    `${localLinkCount} local links, ${decisionIds.size} decision references, ` +
-    `Phase 1 wave table covers #26-#39)`,
+    `${localLinkCount} local links, ${testCitationCount} test citations, ` +
+    `${decisionIds.size} decision references, Phase 1 wave table covers #26-#39)`,
 );

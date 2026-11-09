@@ -214,6 +214,12 @@ describe('authenticated rulebook import', () => {
 
     const result = await importer.import(token.secret, { kind: 'url', url: IMPORT_URL })
     expect(result.rulebooks).toHaveLength(2)
+    // Prove the marker really reached stored content before asserting that the
+    // audit trail does not copy it; otherwise the negative check could pass
+    // because the marker was dropped during import.
+    expect(
+      fixture.registry.listRulebooks().some((rulebook) => rulebook.description === marker),
+    ).toBe(true)
 
     const rows = fixture.database
       .query<

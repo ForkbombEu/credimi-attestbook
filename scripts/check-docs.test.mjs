@@ -14,6 +14,8 @@ function makeFixture() {
   mkdirSync(join(root, 'research', 'owf-audit'), { recursive: true });
   cpSync(join(repoRoot, 'scripts', 'check-docs.mjs'), join(root, 'scripts', 'check-docs.mjs'));
   cpSync(join(repoRoot, 'docs'), join(root, 'docs'), { recursive: true });
+  cpSync(join(repoRoot, 'src'), join(root, 'src'), { recursive: true });
+  cpSync(join(repoRoot, 'ui'), join(root, 'ui'), { recursive: true });
   cpSync(join(repoRoot, 'AGENTS.md'), join(root, 'AGENTS.md'));
   cpSync(
     join(repoRoot, 'research', 'owf-audit', 'README.md'),
@@ -195,6 +197,47 @@ test('resolves angle-bracket reference definitions and root-relative or encoded 
     mutate(root, 'docs/architecture.md', (text) =>
       `${text}\n[angle-ref]: <requirements.md>\n[root](/docs/specification.md)\n[encoded](requirements%2Emd)\n`,
     );
+    const result = runChecker(root);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('passes when an inline-code test citation exists', () => {
+  const root = makeFixture();
+  try {
+    mutate(root, 'docs/architecture.md', (text) => `${text}\nSee \`src/import/url.test.ts\`.\n`);
+    const result = runChecker(root);
+    assert.equal(result.status, 0, result.stderr);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('fails when an inline-code test citation names a missing test file', () => {
+  const root = makeFixture();
+  try {
+    mutate(
+      root,
+      'docs/architecture.md',
+      (text) => `${text}\nSee \`src/import/transport.test.ts\`.\n`,
+    );
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(
+      result.stderr,
+      /cited test file does not exist -> src\/import\/transport\.test\.ts/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ignores inline-code citations of non-test source paths', () => {
+  const root = makeFixture();
+  try {
+    mutate(root, 'docs/architecture.md', (text) => `${text}\nSee \`src/schemas.ts\`.\n`);
     const result = runChecker(root);
     assert.equal(result.status, 0, result.stderr);
   } finally {

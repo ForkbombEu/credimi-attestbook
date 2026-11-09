@@ -139,7 +139,7 @@ Added by the Phase 6 security audit ([issue #52](https://github.com/ForkbombEu/c
 | §15 control | Implementation boundary | Tests | Status |
 | --- | --- | --- | --- |
 | SSRF protection; safe URL validation | `src/import/url.ts` (https-only, literal classification, every DNS answer public), pinned-address transport | `src/import/url.test.ts`, `src/import/http.test.ts`, `src/import/http-transport.test.ts`, `src/discovery/discover.test.ts` | implemented |
-| Network timeouts; response-size limits | shared import fetch/transport (10 s request, 15 s total, 2 MiB cap) | `src/import/http.test.ts`, `src/import/transport.test.ts`, `src/import/http-transport.test.ts` | implemented |
+| Network timeouts; response-size limits | shared import fetch/transport (10 s request, 15 s total, 2 MiB cap) | `src/import/http.test.ts`, `src/import/http-transport.test.ts` | implemented |
 | JSON parsing limits; JSON Schema reference controls | `src/import/json.ts`, `src/import/preview.ts`, `src/validation/schema.ts` (refs rejected, depth 64) | `src/import/json.test.ts`, `src/import/preview.test.ts`, `src/validation/schema.test.ts` | implemented |
 | Safe handling of recursive references | reference keywords rejected before Ajv; OWF `extends` depth 10 | `src/validation/schema.test.ts` (cyclic `$ref`/`$dynamicRef`/`$recursiveRef`), `src/standards/references.test.ts` | implemented |
 | Resource-consumption limits | schema sandbox, capture limits, registry batch bounds, 4 MiB HTTP body | `src/validation/schema-sandbox.test.ts`, `src/capture/security.test.ts`, `src/app.validation.test.ts`; rate limiting/concurrency are recorded open findings F1 | partial (F1) |

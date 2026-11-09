@@ -220,7 +220,7 @@ describe('capture explorer correlation', () => {
     expect(times).toEqual([...times].sort((left, right) => left - right))
   })
 
-  test('keeps evidence and correlations in memory only, not across instances', async () => {
+  test('keeps evidence and correlations instance-local with no shared store', async () => {
     const validation = fakeValidation()
     const first = explorerWith(validation)
     await first.correlate('mock-capture-capture-issuer-3', {
@@ -231,8 +231,10 @@ describe('capture explorer correlation', () => {
     })
     expect((await first.get('mock-capture-capture-issuer-3'))?.validation).not.toBeNull()
 
-    // A fresh explorer is a fresh process boundary: no capture evidence or
-    // correlation was persisted anywhere for it to reload.
+    // The explorer is constructed without a database or filesystem dependency,
+    // so a second instance has no shared store from which to reload the first
+    // instance's evidence or correlation. This asserts instance isolation; the
+    // no-persistence claim itself rests on the dependency-free constructor.
     const second = explorerWith(validation)
     const detail = await second.get('mock-capture-capture-issuer-3')
     expect(detail?.validation).toBeNull()
