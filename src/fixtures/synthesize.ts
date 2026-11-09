@@ -89,6 +89,19 @@ const MAX_SYNTHESIS_STRING_LENGTH = 256
 const MAX_SYNTHESIS_NODES = 4_096
 /** Structural node bound before a caller-supplied schema is compiled in-process. */
 const MAX_SCHEMA_NODES = 4_096
+
+/** Ajv options shared by the real evaluator and the evaluator self-probes. */
+const FIXTURE_AJV_OPTIONS = {
+  allErrors: false,
+  strict: false,
+  strictSchema: true,
+  validateFormats: false,
+  allowUnionTypes: true,
+  // Treat only own properties as claims. Without this a plain object always
+  // "has" __proto__ through its prototype, so a payload missing that own
+  // claim would still be reported as valid.
+  ownProperties: true,
+} as const
 /** Maximum number of negative cases returned in one response. */
 const MAX_NEGATIVE_CASES = 32
 /** Hard cap when a negative string case has to be longer than the payload value. */
@@ -1047,6 +1060,80 @@ function declaresProtoKey(value: unknown, depth = 0): boolean {
   return Object.values(value).some((entry) => declaresProtoKey(entry, depth + 1))
 }
 
+/** Every property name the document uses in properties/required/dependent*, at any depth. */
+export function collectDeclaredNames(document: unknown): string[] {
+  const names = new Set<string>()
+  const stack: unknown[] = [document]
+  while (stack.length > 0) {
+    const current = stack.pop()
+    if (Array.isArray(current)) {
+      for (const entry of current as unknown[]) {
+        stack.push(entry)
+      }
+      continue
+    }
+    if (!isRecord(current)) {
+      continue
+    }
+    if (isRecord(current.properties)) {
+      for (const name of Object.keys(current.properties)) {
+        names.add(name)
+      }
+    }
+    if (isRecord(current.dependentSchemas)) {
+      for (const name of Object.keys(current.dependentSchemas)) {
+        names.add(name)
+      }
+    }
+    if (Array.isArray(current.required)) {
+      for (const name of current.required) {
+        if (typeof name === 'string') {
+          names.add(name)
+        }
+      }
+    }
+    if (isRecord(current.dependentRequired)) {
+      for (const [key, value] of Object.entries(current.dependentRequired)) {
+        names.add(key)
+        if (Array.isArray(value)) {
+          for (const name of value) {
+            if (typeof name === 'string') {
+              names.add(name)
+            }
+          }
+        }
+      }
+    }
+    stack.push(...Object.values(current))
+  }
+  return [...names].sort()
+}
+
+/** Names whose required, properties or dependentRequired checks the evaluator does not enforce. */
+export function findUnenforcedNames(names: readonly string[]): string[] {
+  const ajv = new Ajv2020(FIXTURE_AJV_OPTIONS)
+  const own = (name: string, value: unknown): Record<string, unknown> =>
+    Object.fromEntries([[name, value]])
+  const blind: string[] = []
+  for (const name of names) {
+    const trigger = name === 't' ? 'u' : 't'
+    try {
+      const accepted =
+        ajv.compile({ type: 'object', required: [name] })({}) ||
+        ajv.compile({ type: 'object', properties: own(name, false) })(own(name, 0)) ||
+        ajv.compile({ type: 'object', dependentRequired: own(trigger, [name]) })(own(trigger, 0)) ||
+        ajv.compile({ type: 'object', dependentRequired: own(name, [trigger]) })(own(name, 0))
+      if (accepted) {
+        blind.push(name)
+      }
+    } catch {
+      // A probe that cannot even compile is itself an evaluator gap: fail closed.
+      blind.push(name)
+    }
+  }
+  return blind
+}
+
 function schemaNodeCount(value: unknown, limit: number): number {
   let count = 0
   const stack: unknown[] = [value]
@@ -1100,18 +1187,17 @@ function compileJsonSchema(pending: PendingSchemaDocument):
         'The supplied JSON Schema declares a key named "__proto__", which the pinned Ajv 8.20.0 evaluator does not check; the document was not applied.',
     }
   }
+  const unenforced = findUnenforcedNames(collectDeclaredNames(document))
+  if (unenforced.length > 0) {
+    return {
+      ok: false,
+      diagnostic: `The supplied JSON Schema uses property names the pinned Ajv 8.20.0 evaluator does not enforce (${unenforced
+        .map((name) => JSON.stringify(name))
+        .join(', ')}); the document was not applied.`,
+    }
+  }
   try {
-    const validate = new Ajv2020({
-      allErrors: false,
-      strict: false,
-      strictSchema: true,
-      validateFormats: false,
-      allowUnionTypes: true,
-      // Treat only own properties as claims. Without this a plain object always
-      // "has" __proto__ through its prototype, so a payload missing that own
-      // claim would still be reported as valid.
-      ownProperties: true,
-    }).compile(document)
+    const validate = new Ajv2020(FIXTURE_AJV_OPTIONS).compile(document)
     return {
       ok: true,
       compiled: { pending, reference: pending.reference, validate },

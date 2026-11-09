@@ -17,7 +17,13 @@ import type { SchemaSandboxLimits } from '../validation/schema-sandbox'
 import { PID_TYPE_METADATA_TEXT, sha256Sri, TEST_VCT } from '../validation/test-support'
 
 import { IssuerFixtureGenerator, IssuerFixtureUnavailableError } from './generate'
-import { findEvaluatorBlindSpot, type CompiledJsonSchema, type SynthEntity } from './synthesize'
+import {
+  collectDeclaredNames,
+  findEvaluatorBlindSpot,
+  findUnenforcedNames,
+  type CompiledJsonSchema,
+  type SynthEntity,
+} from './synthesize'
 import { ISSUER_FIXTURE_KIND } from './types'
 
 const SCHEMA_URI = 'https://schemas.example.test/pid-claims.json'
@@ -617,15 +623,7 @@ describe('IssuerFixtureGenerator', () => {
     const setupFixture = setup({
       documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
     })
-    let error: unknown
-    try {
-      await setupFixture.generator.generate(setupFixture.request())
-    } catch (caught) {
-      error = caught
-    }
-    expect((error as { readonly code?: string }).code).toBe('invalid_input')
-    expect((error as Error).message).toContain('required')
-    expect((error as Error).message).toContain('/address/')
+    await expectInvalidInput(() => setupFixture.generator.generate(setupFixture.request()))
   })
 
   test('refuses an override for a schema whose nested required claim has an empty name', async () => {
@@ -646,16 +644,11 @@ describe('IssuerFixtureGenerator', () => {
     const setupFixture = setup({
       documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
     })
-    let error: unknown
-    try {
-      await setupFixture.generator.generate(
+    await expectInvalidInput(() =>
+      setupFixture.generator.generate(
         setupFixture.request({ overrides: [{ path: '/address', value: { city: 'x' } }] }),
-      )
-    } catch (caught) {
-      error = caught
-    }
-    expect((error as { readonly code?: string }).code).toBe('invalid_input')
-    expect((error as Error).message).toContain('required')
+      ),
+    )
   })
 
   test('refuses a schema whose top-level required claim has an empty name', async () => {
@@ -730,6 +723,145 @@ describe('IssuerFixtureGenerator', () => {
 
     expect(result.payload).toEqual({ b: 'fixture', note: null })
     expect(result.payloadValidation.status).toBe('PASS')
+  })
+
+  test('detects property names the evaluator does not enforce', () => {
+    expect(findUnenforcedNames(['a', '', '__proto__', 'constructor', 't']).sort()).toEqual(
+      ['', '__proto__'].sort(),
+    )
+
+    const names = collectDeclaredNames({
+      properties: { x: { additionalProperties: { required: [''] } } },
+      dependentRequired: { p: ['q'] },
+    })
+    for (const expected of ['x', '', 'p', 'q']) {
+      expect(names).toContain(expected)
+    }
+  })
+
+  test('refuses an additionalProperties schema with an unenforced required name', async () => {
+    const inner = {
+      type: 'object',
+      required: ['', 'city'],
+      properties: { '': { type: 'string' }, city: { type: 'string' } },
+    }
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['b'],
+      properties: {
+        b: {
+          type: 'object',
+          required: ['k'],
+          properties: { k: { type: 'string' } },
+          additionalProperties: inner,
+        },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    await expectInvalidInput(() =>
+      setupFixture.generator.generate(
+        setupFixture.request({
+          overrides: [{ path: '/b', value: { k: 'x', extra: { city: 'x' } } }],
+        }),
+      ),
+    )
+  })
+
+  test('refuses a skipped optional property with an unenforced required name', async () => {
+    const inner = {
+      type: 'object',
+      required: ['', 'city'],
+      properties: { '': { type: 'string' }, city: { type: 'string' } },
+      not: { type: 'null' },
+    }
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['b'],
+      properties: {
+        b: {
+          type: 'object',
+          required: ['k'],
+          properties: {
+            k: { type: 'string' },
+            opt: inner,
+          },
+        },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    await expectInvalidInput(() =>
+      setupFixture.generator.generate(
+        setupFixture.request({
+          overrides: [{ path: '/b', value: { k: 'x', opt: { city: 'x' } } }],
+        }),
+      ),
+    )
+  })
+
+  test('refuses a dependentRequired entry with an unenforced name', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['b'],
+      properties: {
+        b: {
+          type: 'object',
+          required: ['k'],
+          properties: {
+            k: { type: 'string' },
+            opt: { type: 'object', dependentRequired: { t: [''] } },
+          },
+        },
+      },
+    })
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: OTHER_SCHEMA_URI, content: schema }],
+    })
+    await expectInvalidInput(() =>
+      setupFixture.generator.generate(
+        setupFixture.request({
+          overrides: [{ path: '/b', value: { k: 'x', opt: { t: 1 } } }],
+        }),
+      ),
+    )
+  })
+
+  test('reports an unenforced-name document as not applied when another document grounds it', async () => {
+    const inner = {
+      type: 'object',
+      required: ['', 'city'],
+      properties: { '': { type: 'string' }, city: { type: 'string' } },
+    }
+    const unenforced = JSON.stringify({
+      type: 'object',
+      required: ['b'],
+      properties: {
+        b: {
+          type: 'object',
+          required: ['k'],
+          properties: { k: { type: 'string' } },
+          additionalProperties: inner,
+        },
+      },
+    })
+    const setupFixture = setup({
+      supportedFormats: ['dc+sd-jwt', 'mso_mdoc'],
+      documents: [
+        { format: 'dc+sd-jwt', uri: SCHEMA_URI, content: CLAIMS_SCHEMA_TEXT },
+        { format: 'mso_mdoc', uri: OTHER_SCHEMA_URI, content: unenforced },
+      ],
+    })
+    const result = await setupFixture.generator.generate(setupFixture.request())
+
+    expect(result.payloadValidation.status).toBe('PASS')
+    const reference = result.schemaReferences.find(
+      (candidate) => candidate.uri === OTHER_SCHEMA_URI,
+    )
+    expect(reference).toMatchObject({ kind: 'json_schema', applied: false })
+    expect(reference?.diagnostic).toContain('does not enforce')
   })
 
   test('intersects enums with object values independently of member order', async () => {

@@ -277,6 +277,38 @@ describe('POST /api/v1/issuers/fixtures', () => {
     expect(parsed.error.code).toBe('invalid_request')
   })
 
+  test('rejects a document using an unenforced property name in a nested subschema', async () => {
+    const inner = {
+      type: 'object',
+      required: ['', 'city'],
+      properties: { '': { type: 'string' }, city: { type: 'string' } },
+    }
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['b'],
+      properties: {
+        b: {
+          type: 'object',
+          required: ['k'],
+          properties: { k: { type: 'string' } },
+          additionalProperties: inner,
+        },
+      },
+    })
+    const setupFixture = setup({ schemaContent: schema })
+    const response = await post(
+      setupFixture.app,
+      body(setupFixture, {
+        overrides: [{ path: '/b', value: { k: 'x', extra: { city: 'x' } } }],
+      }),
+    )
+
+    expect(response.status).toBe(400)
+    const parsed = (await response.json()) as { error: { code: string } }
+    assertSchema('ErrorEnvelope', parsed)
+    expect(parsed.error.code).toBe('invalid_request')
+  })
+
   test('rejects an undeclared __proto__ key in an HTTP override value', async () => {
     const schema = JSON.stringify({
       type: 'object',
