@@ -8,7 +8,7 @@ but nothing here declares an integration to be working. The Phase 1 plan
 ([`docs/implementation-plan.md`](implementation-plan.md)) treats these as Phase 4 work.
 
 **Ticket:** [#4 — Design standalone architecture, data model and capture contracts](https://github.com/ForkbombEu/credimi-attestbook/issues/4) · **Consolidated by:** [#25](https://github.com/ForkbombEu/credimi-attestbook/issues/25)
-**Implemented slice:** [issue #46](https://github.com/ForkbombEu/credimi-attestbook/issues/46) implements the versioned envelope, bounded normalization, secure references, integrity, provenance and redaction in `src/capture/`; the implemented contract (which supersedes §3 as the concrete version 1 field set) is documented in [`docs/capture.md`](capture.md). Push/pull transport, mock adapters and correlation UIs remain later issues.
+**Implemented slices:** [issue #46](https://github.com/ForkbombEu/credimi-attestbook/issues/46) implements the versioned envelope, bounded normalization, secure references, integrity, provenance and redaction in `src/capture/`; the implemented contract (which supersedes §3 as the concrete version 1 field set) is documented in [`docs/capture.md`](capture.md) §2–§6. [Issue #47](https://github.com/ForkbombEu/credimi-attestbook/issues/47) implements the push/pull adapter contracts and a deterministic offline mock source in `src/capture/adapters/`, documented in [`docs/capture.md`](capture.md) §7. No live transport, real connector, persistence or correlation UI is implemented; those remain later issues.
 **Companion:** [`docs/architecture.md`](architecture.md) (modules, validation engine, security outline)
 **Related:** [`docs/standards.md`](standards.md) · [`docs/requirements.md`](requirements.md) · [`docs/traceability.md`](traceability.md)
 **Authoritative spec:** [`docs/specification.md`](specification.md) §11 (FR-015 … FR-019)
@@ -165,28 +165,37 @@ Only an HTTP adapter and a mock adapter are anticipated for Phase 4; real
 
 ## 8. Mock strategy
 
-For integration testing **before** real capture components exist, a **mock capture adapter**
-is provided, clearly identified as such (FR-018, UI-006, AC-13):
+For integration testing **before** real capture components exist, a **mock capture source**
+is implemented by [issue #47](https://github.com/ForkbombEu/credimi-attestbook/issues/47) in
+`src/capture/adapters/`, clearly identified as such (FR-018, AC-13):
 
-- `MockCaptureSource` emits deterministic fixture artifacts covering the artifact types in
-  §3: issuer metadata, credential offer, issued credential, presentation request,
-  presentation submission, verification outcome, error response.
-- Fixtures are **vendored locally** with explicit "captured on `<timestamp>`, from `<source>`"
-  provenance; no live capture endpoint is called in unit/CI tests (same offline principle as
-  the catalog importer, [#3](https://github.com/ForkbombEu/credimi-attestbook/issues/3) §7).
-- The mock exercises the **full pipeline** (import → normalize → redact → validate →
-  correlate) but is labeled `mock` in every result so it is never mistaken for a real
-  capture integration.
+- `MockCaptureSource` implements both the pull and the push contract and emits deterministic
+  synthetic fixtures covering the artifact types in §3: issuer metadata, credential offer,
+  issued credential, presentation request, presentation submission, verification outcome and
+  error response.
+- Fixtures are **vendored locally** in `src/capture/adapters/fixtures.ts`, carry `mock` and
+  `synthetic` metadata, and are normalized through the same bounded pipeline as any
+  untrusted submission. No live capture endpoint is called and the tests assert that the
+  mock source makes no network request (the same offline principle as the catalog importer,
+  [#3](https://github.com/ForkbombEu/credimi-attestbook/issues/3) §7).
+- The mock exercises import → normalize, and the redaction projection is available from the
+  envelope slice; validate → correlate remains
+  [#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48). Every result is labelled
+  `transport: "mock"` so it can never be mistaken for a real capture integration.
 - Test matrix from spec §16 "Capture tests": valid artifact, missing artifact, malformed
   artifact, redacted artifact, unsupported protocol, correlation identifiers, mock
-  capture-issuer input, mock capture-verifier input.
+  capture-issuer input, mock capture-verifier input; #47 adds push/pull paging, idempotency,
+  authorization and transport-error tests.
 
 ## 9. What is and is not claimed
 
-- **Proposed and designed:** envelope, contracts, redaction, correlation, push/pull,
-  mock strategy.
+- **Implemented:** the envelope, bounded normalization, redaction, push/pull adapter
+  contracts and the deterministic offline mock source (`src/capture/`, `src/capture/adapters/`).
+- **Designed but not implemented:** correlation with validation results
+  ([#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48)), persistence and
+  external artifact storage.
 - **Not implemented, not claimed operational:** any real `capture-issuer` /
-  `capture-verifier` integration, capture transport, or capture-backed validation. These
+  `capture-verifier` integration, live capture transport, or capture-backed validation. These
   remain Phase 4 work (spec §11.4) gated on the components' actual contracts.
 - **Not a broker:** no message queue or event bus is part of this design.
 
@@ -200,8 +209,8 @@ recorded as open findings in [`docs/implementation-plan.md`](implementation-plan
 | --- | --- | --- |
 | CD-1 | Exact `CaptureArtifact` field set and JSON Schema (the envelope in §3 is a candidate, not frozen) | FR-015 |
 | CD-2 | Default redaction policy depth (which attributes are sensitive by default) and the placeholder representation | FR-015, spec §15 |
-| CD-3 | Pull schedule vs on-demand only, and how a `CaptureSource` is authenticated | FR-018 |
-| CD-4 | Whether push ingestion is synchronous or async-by-default | FR-018 |
+| CD-3 | Pull schedule vs on-demand only, and how a `CaptureSource` is authenticated | FR-018 — #47 provisionally implements on-demand pull with a hashed bearer credential for the mock source; a real source's authentication and polling schedule remain open |
+| CD-4 | Whether push ingestion is synchronous or async-by-default | FR-018 — #47 exposes an asynchronous push contract; a future HTTP ingestion route and any job model remain open |
 | CD-5 | Correlation-id ownership convention with Credimi (who mints `correlationId`) | FR-019 |
 | CD-6 | External artifact storage/access model (`artifactRef`) and its access-control boundary | FR-015 |
 
