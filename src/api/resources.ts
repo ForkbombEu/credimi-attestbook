@@ -15,6 +15,12 @@ import type {
   ImportDiagnostic,
   ImportedSchemaReference,
 } from '../import'
+import type {
+  CaptureCorrelationResult,
+  CaptureExplorerDetail,
+  CaptureExplorerPage,
+  CaptureExplorerSummary,
+} from '../capture'
 import type { IssuerDiscoveryResult } from '../discovery'
 import type { IssuerFixtureResult } from '../fixtures'
 import { isJsonObject, isJsonValue } from '../fixtures/sandbox'
@@ -33,6 +39,10 @@ import type { VerifierConstraintsResult } from '../verifier'
 
 import {
   attestationDetailSchema,
+  captureCorrelationResultSchema,
+  captureExplorerDetailSchema,
+  captureExplorerPageSchema,
+  captureExplorerSummarySchema,
   credentialValidationResultSchema,
   draftRulebookSchema,
   importPreviewSchema,
@@ -366,6 +376,37 @@ export function toImportResultResource(result: ImportResult) {
  */
 export function toCredentialValidationResource(result: CredentialValidationResult) {
   return credentialValidationResultSchema.parse(result)
+}
+
+/**
+ * Projections of the mock-backed capture explorer (#48). The explorer already
+ * returns metadata-only read models: an inline artifact is represented only by
+ * its redacted default-policy projection, never by the segregated raw bytes.
+ * Parsing with the shared schemas turns a projection drift into a server error.
+ */
+export function toCaptureExplorerSummaryResource(summary: CaptureExplorerSummary) {
+  return captureExplorerSummarySchema.parse(summary)
+}
+
+export function toCaptureExplorerDetailResource(detail: CaptureExplorerDetail) {
+  return captureExplorerDetailSchema.parse(detail)
+}
+
+export function toCaptureExplorerPageResource(page: CaptureExplorerPage) {
+  return captureExplorerPageSchema.parse({
+    data: page.captures.map((capture) => toCaptureExplorerSummaryResource(capture)),
+    pagination: { limit: page.limit, offset: page.offset, total: page.total },
+  })
+}
+
+export function toCaptureCorrelationResource(result: CaptureCorrelationResult) {
+  return captureCorrelationResultSchema.parse({
+    captureId: result.captureId,
+    correlationId: result.correlationId,
+    testExecutionRef: result.testExecutionRef,
+    rulebook: result.rulebook,
+    validation: result.validation,
+  })
 }
 
 /**

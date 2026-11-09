@@ -314,3 +314,188 @@ export interface DraftValidationReport {
   readonly diagnostics: readonly DraftDiagnostic[]
   readonly limitations: readonly string[]
 }
+
+// ------------------------------------------------- capture explorer (#48)
+//
+// Wire types of the mock-backed capture explorer API. They mirror the public
+// projections in `src/api/schemas.ts`: a capture is normalized evidence with
+// its correlation identifiers, the declared redaction, the exact pinned
+// rulebook version a validation ran against and explicit evidence gaps. An
+// inline artifact is represented only by the redacted default-policy
+// projection; the raw artifact never reaches the browser.
+
+export type CaptureSourceComponent = 'capture-issuer' | 'capture-verifier'
+
+export type CaptureProtocol = 'openid4vci' | 'openid4vp'
+
+export type CaptureCredentialFormat =
+  'dc+sd-jwt' | 'mso_mdoc' | 'jwt_vc_json' | 'jwt_vc_json-ld' | 'ldp_vc'
+
+export type CaptureInteractionType = 'issuance' | 'presentation' | 'error'
+
+export type CaptureArtifactType =
+  | 'issuer-metadata'
+  | 'credential-offer'
+  | 'issued-credential'
+  | 'presentation-request'
+  | 'presentation-submission'
+  | 'verification-outcome'
+  | 'error-response'
+
+export type CaptureRedactionStatus = 'none' | 'partial' | 'full'
+
+export type CaptureEvidenceGapCode =
+  | 'external_artifact_not_fetched'
+  | 'artifact_redacted_by_source'
+  | 'no_test_execution_reference'
+  | 'no_rulebook_binding'
+  | 'validation_not_run'
+  | 'validation_not_applicable'
+
+export type CaptureTimelineEventKind = 'captured' | 'received' | 'bound' | 'validated'
+
+export interface CaptureSourceSummary {
+  readonly sourceId: string
+  readonly component: CaptureSourceComponent
+  readonly transport: 'mock'
+  readonly description: string
+}
+
+export interface CaptureProvenanceSummary {
+  readonly sourceComponent: CaptureSourceComponent
+  readonly sourceVersion: string | null
+  readonly capturedAt: string
+  readonly capturedAtMs: number
+  readonly receivedAt: string
+  readonly receivedAtMs: number
+}
+
+export interface CaptureParty {
+  readonly role: 'issuer' | 'verifier'
+  readonly identifier: string
+  readonly name: string | null
+}
+
+export interface CaptureIntegrity {
+  readonly algorithm: 'sha256'
+  readonly digest: string
+  readonly verified: boolean
+}
+
+export interface CaptureRedaction {
+  readonly status: CaptureRedactionStatus
+  readonly policyRef: string | null
+  readonly redactedPaths: readonly string[]
+  readonly redactedDigest: string | null
+}
+
+export interface CaptureArtifactSummary {
+  readonly availability: 'inline' | 'external'
+  readonly mediaType: string
+  readonly byteLength: number | null
+  readonly uri: string | null
+}
+
+export interface CaptureRulebookBinding {
+  readonly rulebookId: string
+  readonly rulebookName: string
+  readonly version: string
+  readonly contentDigest: string
+  readonly digestVerified: true
+  readonly specVersion: string
+  readonly rulebookStatus: PublicationStatus
+  readonly attestationType: string
+  readonly boundAt: string
+}
+
+export interface CaptureValidationDimensionSummary {
+  readonly id: ValidationDimensionId
+  readonly status: ValidationStatus
+  readonly applicable: boolean
+  readonly executed: boolean
+}
+
+export interface CaptureValidationSummary {
+  readonly validationId: string
+  readonly validatedAt: string
+  readonly overallStatus: ValidationStatus
+  readonly violations: number
+  readonly limitations: number
+  readonly dimensions: readonly CaptureValidationDimensionSummary[]
+}
+
+export interface CaptureEvidenceGap {
+  readonly code: CaptureEvidenceGapCode
+  readonly message: string
+}
+
+export interface CaptureExplorerSummary {
+  readonly captureId: string
+  readonly correlationId: string
+  readonly kind: 'attestbook.capture-artifact@1'
+  readonly envelopeVersion: 1
+  readonly source: CaptureSourceSummary
+  readonly provenance: CaptureProvenanceSummary
+  readonly interactionType: CaptureInteractionType
+  readonly protocol: CaptureProtocol
+  readonly credentialFormat: CaptureCredentialFormat
+  readonly artifactType: CaptureArtifactType
+  readonly party: CaptureParty | null
+  readonly testExecutionRef: string | null
+  readonly integrity: CaptureIntegrity
+  readonly declaredRedaction: CaptureRedaction
+  readonly artifact: CaptureArtifactSummary
+  readonly rulebook: CaptureRulebookBinding | null
+  readonly validation: CaptureValidationSummary | null
+  readonly evidenceGaps: readonly CaptureEvidenceGap[]
+  readonly evidenceComplete: boolean
+}
+
+export interface CaptureArtifactProjection {
+  readonly mediaType: string
+  readonly encoding: 'utf8' | 'base64'
+  readonly byteLength: number
+  readonly digest: string
+  readonly redaction: CaptureRedaction
+  /** Parsed redacted JSON document, or `null` for an opaque artifact. */
+  readonly document: unknown
+  readonly diagnostics: readonly {
+    readonly code: string
+    readonly message: string
+    readonly path?: string
+  }[]
+}
+
+export interface CaptureTimelineEvent {
+  readonly kind: CaptureTimelineEventKind
+  readonly at: string
+  readonly label: string
+  readonly detail: string
+}
+
+export interface CaptureExplorerDetail extends CaptureExplorerSummary {
+  readonly metadata: Readonly<Record<string, string | number | boolean | null>>
+  readonly artifactProjection: CaptureArtifactProjection | null
+  readonly validationResult: CredentialValidationResult | null
+  readonly timeline: readonly CaptureTimelineEvent[]
+  readonly limitations: readonly string[]
+}
+
+export interface CaptureExplorerPage {
+  readonly data: readonly CaptureExplorerSummary[]
+  readonly pagination: Pagination
+}
+
+export interface CorrelateCaptureRequest {
+  readonly rulebookId: string
+  readonly rulebookVersion: string
+  readonly attestationType: string
+}
+
+export interface CaptureCorrelationResult {
+  readonly captureId: string
+  readonly correlationId: string
+  readonly testExecutionRef: string | null
+  readonly rulebook: CaptureRulebookBinding
+  readonly validation: CredentialValidationResult
+}

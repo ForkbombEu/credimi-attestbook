@@ -56,6 +56,16 @@ Implemented by #47 (section 7):
 - pull pagination with opaque cursors and a bounded page size, and push idempotency over the
   exact submitted bytes that retains only the accepted submission hash.
 
+Implemented by [#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48) (section 9):
+
+- a mock-backed capture explorer read model that joins a normalized artifact with the
+  source-declared redaction, the opaque correlation and test-execution references and, once
+  recorded, the exact pinned rulebook version and the structural validation result (FR-019);
+- explicit evidence gaps for external, source-redacted, unbound and unvalidated evidence, and
+  an authenticated in-memory validation correlation that refuses evidence it cannot validate
+  honestly;
+- the `/captures` explorer read routes and the UI-006 capture explorer UI.
+
 Deliberately **not** implemented in #46 or #47:
 
 - any HTTP route, CLI command or background poller, and any connection to a real
@@ -67,8 +77,9 @@ Deliberately **not** implemented in #46 or #47:
 - fetching an `artifactRef`. No network request is made by this module. A future fetcher
   must reuse the import pipeline's URL validation, DNS resolution and pinned-address checks
   (`src/import/url.ts`), not resolve the reference itself;
-- binding an artifact to a rulebook version or executing validation
-  ([#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48));
+- binding an artifact collected outside the mock source to a rulebook version, fetching an
+  external reference, or persisting a correlation. #48 implements the mock-backed explorer and
+  the pinned-rulebook correlation for a captured issued credential (section 9);
 - signing, encrypting, decrypting or otherwise authenticating capture evidence; nothing here
   claims a capture artifact is authentic, complete or protocol-conformant;
 - an operational capture integration. The envelope and adapter contracts are internal
@@ -273,7 +284,51 @@ values, 384 KiB per JSON string, 256 KiB inline artifact, 2,048-character refere
 redacted paths. `resolveCaptureLimits` rejects invalid overrides; the normalizer's clock and
 limits are injectable for deterministic tests.
 
-## 9. Tests
+## 9. Capture explorer and pinned-rulebook correlation
+
+[Issue #48](https://github.com/ForkbombEu/credimi-attestbook/issues/48) implements UI-006 and
+FR-019 as a **mock-backed** read model in `src/capture/explorer.ts` (`CaptureExplorer`), with
+the read routes in `src/api/routes.ts` and the UI in `ui/src/CapturesPage.tsx` and
+`ui/src/CaptureDetailPage.tsx`.
+
+- `CaptureExplorer` lazily pulls every page from the configured `CapturePullAdapter`s,
+  deduplicates by `captureId` and keeps the normalized metadata envelopes plus the segregated
+  inline artifacts in memory. The server builds it from deterministic `MockCaptureSource`s for
+  both components, and every entry carries `source.transport: "mock"`; no live
+  `capture-issuer`/`capture-verifier` endpoint is contacted.
+- A read model never returns the raw artifact. Inline evidence is represented by the redacted
+  default-policy projection (`artifactProjection`) with the projection status, policy
+  reference, redacted JSON Pointers, redacted digest and diagnostics. The source-declared
+  redaction stays separate (`declaredRedaction`), and an external `artifactRef` is not fetched.
+- Missing or unavailable evidence is explicit. `evidenceGaps` names
+  `external_artifact_not_fetched`, `artifact_redacted_by_source`,
+  `no_test_execution_reference`, `no_rulebook_binding`, `validation_not_run` and
+  `validation_not_applicable`. An absent field is never treated as a pass.
+- `POST /api/v1/captures/{captureId}/validate`, authenticated with a provider bearer token,
+  accepts `{ rulebookId, rulebookVersion, attestationType }`, runs the **real** structural
+  credential engine on the capture's segregated inline artifact and records the correlation.
+  The token is required because the recorded correlation is visible to every reader, and the
+  binding does not carry the acting provider id. The binding is the exact
+  `rulebook.id`/`name`/`version`/`contentDigest`/`specVersion`/`status`, the selected attestation
+  type and the engine's verified digest. The response and the detail read carry back the
+  caller-owned `captureId`, `correlationId` and `testExecutionRef` without rewriting them
+  (FR-019; CD-5 remains open: AttestBook does not mint a correlation id).
+- Validation is refused with `409 conflict` when the artifact is external (not fetched) or is
+  not an `issued-credential` (no credential for the engine). A source-redacted refusal remains
+  as a defensive check, but the version 1 normalizer currently makes it unreachable: it rejects
+  an inline artifact that already declares redaction, and an external artifact is refused
+  before the check. The engine's own `400`/`404` for a malformed request or an unknown
+  rulebook/version/attestation type is preserved. A correlation never mutates a pinned version
+  or its artifact.
+- The evidence timeline orders the source-asserted `capturedAt`, the AttestBook `receivedAt`,
+  the correlation `boundAt` and the validation `validatedAt` by their own timestamps. The test
+  execution reference stays opaque: AttestBook does not query Credimi or orchestrate an
+  execution.
+- The correlation is in memory for the server process only. It writes no registry data and is
+  not a durable run history. A captured presentation submission is not unpacked into a
+  credential, and no live capture component is integrated.
+
+## 10. Tests
 
 The specification §16 capture matrix is covered by `src/capture/`:
 
@@ -292,8 +347,9 @@ The specification §16 capture matrix is covered by `src/capture/`:
 | Push/pull contracts | `adapters/contracts.test.ts` — a non-mock pull/push adapter driven only through the published interfaces |
 | Transport errors | `adapters/transport.test.ts` — unavailable, timeout, invalid response, oversized response, cursor and page-size rejection, no network request |
 | Authorization | `adapters/authorization.test.ts` — hashed credential acceptance, fail-closed default, constant-time helper, no credential echo, cross-source rejection |
+| Capture explorer and correlation (FR-019/UI-006) | `explorer.test.ts` — mock list/paging, redacted-only projection, external and missing evidence gaps, end-to-end correlation of the segregated artifact, rejection of external/non-credential evidence, request parsing and the timeline; `api/captures.test.ts` — real validation-engine correlation against a seeded pinned version, digest linkage, safe `409`/`404`/`400`/`502`/`503` responses, unchanged snapshot bytes and response schema validation; `ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`, `ui/src/capture.test.ts` — explorer states, explicit gaps, redacted projection, eligibility refusals, correlation flow and axe-core; `ui/e2e/captures.spec.ts` — browser tests against the real seeded API, including a real signed credential correlation, redaction and responsive checks |
 
-## 10. Explicit limitations
+## 11. Explicit limitations
 
 - No live capture transport or real component integration is implemented: only the mock
   adapter exists, and no capture artifact in this slice comes from a live interaction. The
@@ -317,3 +373,7 @@ The specification §16 capture matrix is covered by `src/capture/`:
   authorized reference).
 - No signing, encryption, selective-disclosure recovery or protocol conformance claim is
   made. Missing or undisclosed claims remain `NOT_TESTED` for later validation, not failures.
+- The capture explorer is mock-backed and in-memory. It shows deterministic local fixtures,
+  never a live capture, and a correlation is lost on restart. Only a captured
+  `issued-credential` inline artifact can be validated; a presentation submission is not
+  unpacked, and redacted/external evidence is reported instead of validated.

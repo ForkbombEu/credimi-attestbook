@@ -6,8 +6,9 @@ currently contains the Phase 0 research and architecture documents, the Phase 1 
 scaffold, the persistent provider/rulebook registry slice, the bounded URL/JSON rulebook
 import slice, SD-JWT VC structural validation with dimension-aware evidence, the
 versioned REST/OpenAPI contract over those services and the standalone UI: a searchable
-rulebook catalog, rulebook detail/version history, a credential validation playground and a
-rulebook draft editor (UI-001/UI-002/UI-005 and the working-copy slice of UI-003).
+rulebook catalog, rulebook detail/version history, a credential validation playground, a
+rulebook draft editor (UI-001/UI-002/UI-005 and the working-copy slice of UI-003) and a
+mock-backed capture explorer with pinned-rulebook correlation (UI-006, FR-019).
 
 It is independent of Credimi's runtime: it does not require Temporal, StepCI, PocketBase, a
 particular wallet, issuer or verifier, or any mandatory external service. See
@@ -37,7 +38,8 @@ bun run dev
 ```
 
 `bun run dev` rebuilds on change and listens on `http://localhost:3000`, serving the built
-UI at `/`, `/rulebooks/<id>`, `/rulebooks/new`, `/rulebooks/<id>/edit` and `/playground`, with
+UI at `/`, `/rulebooks/<id>`, `/rulebooks/new`, `/rulebooks/<id>/edit`, `/playground` and
+`/captures`, with
 the versioned API under `/api/v1`. Run
 `bun run build:ui` after UI changes, or use `bun run dev:ui` for Vite hot reload on port 5173
 with `/api` proxied to the Bun server. The health check is:
@@ -57,7 +59,7 @@ bun run typecheck     # server tsc --noEmit only
 bun run typecheck:ui  # UI, Vitest and Playwright config typecheck only
 bun run test          # Bun server test runner only
 bun run test:ui       # Vitest UI unit, component and axe-core tests
-bun run test:e2e      # Playwright catalog, detail and playground tests against the real API
+bun run test:e2e      # Playwright catalog, detail, playground and capture tests against the real API
 bun run acceptance    # Phase 1 end-to-end workflow; writes dimension-aware evidence
 bun run openapi:check # generated OpenAPI 3.1 document validation
 bun run docs:check    # documentation consistency, plain Node
@@ -97,9 +99,10 @@ bun run docs:check    # documentation consistency, plain Node
   [`docs/verifier.md`](verifier.md);
 - `src/capture/` — the versioned capture artifact envelope: bounded untrusted-input
   validation, secure external references, SHA-256 integrity, preserved provenance and
-  correlation, segregated raw evidence and path-preserving redaction, plus typed push/pull
-  adapter contracts and a deterministic offline mock source (only transport: `mock`); see
-  [`docs/capture.md`](capture.md);
+  correlation, segregated raw evidence and path-preserving redaction, typed push/pull
+  adapter contracts, a deterministic offline mock source (only transport: `mock`) and the
+  mock-backed explorer read model that correlates a captured issued credential with a pinned
+  rulebook version; see [`docs/capture.md`](capture.md) §9;
 - `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
   the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
   routes Hono registered, success/error contract tests for every exposed resource, and
@@ -109,8 +112,9 @@ bun run docs:check    # documentation consistency, plain Node
   400/404/413/503 cases and non-disclosure of credential material;
 - `src/sqlite-smoke.test.ts` — Bun's built-in SQLite supports WAL and foreign keys, closing
   the Phase 0 verification gate for the persistence decision (D-7);
-- `ui/src/` — catalog, detail and playground data logic, API client and React component tests,
-  including loading, error, empty, search/filter and axe-core accessibility states;
+- `ui/src/` — catalog, detail, playground and capture-explorer data logic, API client and
+  React component tests, including loading, error, empty, search/filter and axe-core
+  accessibility states;
 - `ui/e2e/` — Playwright browser tests against the real registry and API with seeded data,
   a full axe-core scan and a narrow-viewport layout check. See [`docs/ui.md`](docs/ui.md);
 - `src/acceptance/` — the Phase 1 end-to-end acceptance workflow: TS11 import, version
@@ -257,8 +261,18 @@ cursors, `captureId` idempotency, hashed bearer-credential authorization that fa
 and simulated transport faults for deterministic error tests. It contacts no network endpoint
 and labels every result `transport: "mock"`. This is not a live
 `capture-issuer`/`capture-verifier` integration: real connectors must wait for those
-components' actual APIs, and storage, signing and rulebook correlation remain later issues.
-See [`docs/capture.md`](capture.md).
+components' actual APIs.
+
+`src/capture/explorer.ts` is the FR-019/UI-006 read model over that mock evidence. It joins
+one normalized artifact with its source-declared redaction, the opaque correlation and test
+execution references and, once recorded, the exact pinned rulebook version and digest plus the
+structural validation findings. The explorer never returns the raw inline artifact — the API
+exposes only the redacted default-policy projection — and it names external, source-redacted,
+unbound and unvalidated evidence as explicit gaps instead of treating absence as a pass. The
+pinned-rulebook correlation runs the real structural engine on a captured issued credential and
+refuses evidence it cannot validate honestly. Storage, fetching, persistence and a live
+component integration remain later issues. See [`docs/capture.md`](capture.md) §9 and
+[`docs/ui.md`](ui.md).
 
 ## Safe URL and JSON import
 

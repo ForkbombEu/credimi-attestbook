@@ -12,13 +12,20 @@ import { useCallback, useEffect, useState } from 'react'
 export type Route =
   | { readonly name: 'catalog' }
   | { readonly name: 'playground' }
+  | { readonly name: 'captures' }
+  | { readonly name: 'capture'; readonly captureId: string }
   | { readonly name: 'rulebook'; readonly rulebookId: string }
   | { readonly name: 'editor'; readonly rulebookId: string }
   | { readonly name: 'editor-new' }
 
 export const CATALOG_PATH = '/'
 export const PLAYGROUND_PATH = '/playground'
+export const CAPTURES_PATH = '/captures'
 export const NEW_RULEBOOK_PATH = '/rulebooks/new'
+
+export function capturePath(captureId: string): string {
+  return `${CAPTURES_PATH}/${encodeURIComponent(captureId)}`
+}
 
 export function rulebookPath(rulebookId: string): string {
   return `/rulebooks/${encodeURIComponent(rulebookId)}`
@@ -37,8 +44,20 @@ export function parseRoute(pathname: string): Route {
   if (path === PLAYGROUND_PATH) {
     return { name: 'playground' }
   }
+  if (path === CAPTURES_PATH) {
+    return { name: 'captures' }
+  }
   if (path === NEW_RULEBOOK_PATH) {
     return { name: 'editor-new' }
+  }
+  const captureMatch = /^\/captures\/([^/]+)$/.exec(path)
+  if (captureMatch?.[1] !== undefined) {
+    try {
+      const captureId = decodeURIComponent(captureMatch[1])
+      return captureId === '' ? { name: 'captures' } : { name: 'capture', captureId }
+    } catch {
+      return { name: 'captures' }
+    }
   }
   const editorMatch = /^\/rulebooks\/([^/]+)\/edit$/.exec(path)
   if (editorMatch?.[1] !== undefined) {

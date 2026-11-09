@@ -5,8 +5,10 @@
 [issue #37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (UI-002),
 [issue #38](https://github.com/ForkbombEu/credimi-attestbook/issues/38) (UI-005), the
 draft-editor slice of [issue #40](https://github.com/ForkbombEu/credimi-attestbook/issues/40)
-(UI-003) and the lifecycle/comparison slice of
-[issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) (UI-003). It delivers
+(UI-003), the lifecycle/comparison slice of
+[issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) (UI-003) and the
+mock-backed capture explorer of [issue #48](https://github.com/ForkbombEu/credimi-attestbook/issues/48)
+(UI-006, FR-019). It delivers
 a responsive, searchable catalog of rulebooks, a rulebook detail view with attestation types,
 schema references, provenance, standards-compatibility disclosure, version history and
 deterministic version comparison, a credential validation playground that calls the real
@@ -17,8 +19,8 @@ not add the import UI or a dedicated publication-export view; the extra publicat
 endpoints delivered by #42 are public API reads (the detail view keeps its exact-snapshot
 export link), and later follow-ups cover an import UI.
 
-**Authoritative spec:** [`docs/specification.md`](specification.md) §14 (UI-001/UI-002/UI-005)
-and §2.2 (independent standalone UI).
+**Authoritative spec:** [`docs/specification.md`](specification.md) §14
+(UI-001/UI-002/UI-005/UI-006), §11 (FR-019) and §2.2 (independent standalone UI).
 **Architecture:** [`docs/architecture.md`](architecture.md) §5 (the web UI is a client of
 the public API, not a bypass) and §6.
 **Decisions:** [`docs/implementation-plan.md`](implementation-plan.md) D-8/D-17
@@ -92,6 +94,22 @@ Implemented by these slices:
     excluded so two labels with equal authored content compare as identical;
   - a table of path, change kind and before/after values, with explicit empty, loading and
     retryable error states;
+- a mock-backed capture explorer at `/captures` and `/captures/<captureId>` (#48, UI-006):
+  - the list shows one row per normalized capture with its source component and `mock`
+    transport label, interaction and protocol, artifact type and credential format, capture and
+    receipt times, correlation id, opaque test-execution reference, pinned rulebook version and
+    validation status, and explicit evidence gaps;
+  - the detail shows the normalized metadata, the source-declared redaction, the inline
+    artifact only as its redacted default-policy projection (or an explicit "not fetched"
+    notice for an external reference), the ordered evidence timeline and the explorer's
+    limitations;
+  - an authenticated validation form pins the capture to a real rulebook version and attestation
+    type and runs the structural engine on the segregated inline artifact, then shows the linked
+    findings. The provider bearer token lives only in the app's React memory for the page
+    session. External and non-credential evidence (and, defensively, source-declared redaction)
+    state why it cannot be validated;
+  - every view says that the evidence is mock-backed and that no live capture component is
+    operational;
 - a draft lifecycle and publication panel on `/rulebooks/{id}/edit` (#41):
   - the version history with status and digest, newest first;
   - authenticated `Freeze as draft version` with a typed label, `Refresh` of a draft
@@ -167,17 +185,21 @@ The browser is a client of the public API only:
 9. on `/rulebooks/{id}/edit`: `GET /api/v1/rulebooks/{id}/draft` reads the editable document,
    live validation uses `POST /api/v1/rulebooks/validate-draft`, and `Save draft` performs one
    authenticated `PUT /api/v1/rulebooks/{id}/draft`;
-10. the lifecycle panel reads `GET /api/v1/rulebooks/{id}/versions` and
+10. on `/captures`: `GET /api/v1/captures?limit=100&offset=0`; the detail reads
+    `GET /api/v1/captures/{captureId}` and, when a correlation is run,
+    the authenticated `POST /api/v1/captures/{captureId}/validate` with the selected rulebook,
+    version, attestation type and the provider bearer token;
+11. the lifecycle panel reads `GET /api/v1/rulebooks/{id}/versions` and
     `GET /api/v1/rulebooks/{id}/versions/{version}/publication-readiness`, and performs the
     authenticated `POST /api/v1/rulebooks/{id}/versions`, `.../{version}/refresh` and
     `.../{version}/publish` transitions;
-11. the comparison panel calls
+12. the comparison panel calls
     `GET /api/v1/rulebooks/{id}/versions/{version}/compare?to={version}`; the result is
     rendered as returned and never re-derived client-side.
 
 The client router uses real paths with the History API. The Bun server serves the built
-entry document for `/`, `/rulebooks/*` and `/playground`; `/api/*` stays separate and unknown
-non-UI paths keep the JSON not-found envelope. A deep link or a browser reload therefore
+entry document for `/`, `/rulebooks/*`, `/playground` and `/captures/*`; `/api/*` stays
+separate and unknown non-UI paths keep the JSON not-found envelope. A deep link or a browser reload therefore
 reaches the same view. Browser back/forward is handled with a `popstate` listener; in-page
 links push a history entry. Modified clicks (new tab, copy address) keep the native anchor
 behaviour.
@@ -357,9 +379,17 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   keeping it available; immediate JSON-syntax feedback; authorized save with the token;
   missing-token handling without a write; create-and-navigate; read-only published state;
   the memory-only token field; axe-core checks for the editor page;
-- the router: path parsing (including `/playground`, `/rulebooks/new` and
-  `/rulebooks/<id>/edit`), encoded ids, malformed paths, history navigation and modified
-  clicks keeping native anchor behaviour;
+- the mock-backed capture explorer: loading, error and retry, empty and truncation states, the
+  normalized summary columns and evidence gaps, the redacted projection (never the raw claim
+  values), external and non-credential evidence refusals, the correlation form and its
+  complete-selection and required-token rules, a successful
+  correlation rendering the linked findings, safe correlation errors including a rejected
+  token, responsive labels, the shared header navigation and axe-core checks
+  (`ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`,
+  `ui/src/capture.test.ts`);
+- the router: path parsing (including `/playground`, `/captures`, `/captures/<id>`,
+  `/rulebooks/new` and `/rulebooks/<id>/edit`), encoded ids, malformed paths, history
+  navigation and modified clicks keeping native anchor behaviour;
 - an end-to-end component navigation test from the catalog to a detail page and back, from
   the catalog to the new-rulebook editor, and a direct deep-link render of both editors;
 - axe-core accessibility checks for the catalog results/error states and the detail page and
@@ -396,6 +426,13 @@ Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, `ui/e2e/editor
   run before it;
 - full axe-core scans and 390 px viewport checks for the catalog, detail, playground and
   editor views.
+
+The capture explorer is covered by `ui/e2e/captures.spec.ts`: the eight seeded mock captures,
+the mock labelling and explicit gaps, the redacted projection of one JSON fixture (and the
+absence of its raw claim values), the external-reference and non-credential refusals, a real
+correlation of the seeded signed SD-JWT VC against the `Validator Sandbox Rulebook` with the
+structural findings and the exact pinned version, the required-token refusal, full axe-core
+scans of the list and detail, and a 390 px no-horizontal-overflow check.
 
 CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test:e2e`. The
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves
@@ -469,6 +506,28 @@ baseline is `327a5a2` (`main` before the slice):
   the `Draft lifecycle and publication` panel, the `0.1` version row and the readiness
   checks for that draft.
 
+The pull request for the capture-explorer slice carries the required before/after captures at
+1280 px and the same light theme, against the same seeded API state. The baseline is `ebd09cb`
+(`main` before the slice):
+
+- [before: `captures-before-catalog.png`](ui/captures-before-catalog.png) — the baseline
+  catalog's shared header has no capture-explorer entry;
+- [before: `captures-before-404.png`](ui/captures-before-404.png) — the same baseline
+  requesting `/captures`: the real server returns the JSON not-found envelope;
+- [after: `captures-after-catalog.png`](ui/captures-after-catalog.png) — this slice: the header
+  links to the new view;
+- [after: `captures-after-list.png`](ui/captures-after-list.png) — the mock-labelled capture
+  list with every artifact type, its source, correlation and test-execution references, and
+  the explicit evidence gaps;
+- [after: `captures-after-detail-before-validation.png`](ui/captures-after-detail-before-validation.png)
+  — one capture's normalized metadata, full-redaction evidence notice, explicit gaps and
+  timeline before any correlation;
+- [after: `captures-after-detail.png`](ui/captures-after-detail.png) — the same capture after
+  correlating the real signed SD-JWT VC with the `Validator Sandbox Rulebook` `1.0`, showing
+  the pinned digest, the structural findings and the recorded validation in the timeline;
+- [after, narrow viewport: `captures-after-mobile.png`](ui/captures-after-mobile.png) — the same
+  explorer list at 390 px with labelled cards and no horizontal scrolling.
+
 The catalog and detail slices' captures remain in the same directory
 ([`catalog-before.png`](ui/catalog-before.png),
 [`catalog-after.png`](ui/catalog-after.png),
@@ -531,5 +590,10 @@ The catalog and detail slices' captures remain in the same directory
   server's stale-snapshot, duplicate-label and immutability conflicts, and publish stays
   disabled until readiness passes for that exact draft version, but there is still no
   optimistic-concurrency token for the working copy itself.
-- No dark theme or offline cache; routing covers the catalog, detail, playground, new-draft
-  and edit-draft views, and any other path falls back to the catalog.
+- The capture explorer is deliberately mock-backed and in-memory: it shows deterministic local
+  fixtures, never a live `capture-issuer`/`capture-verifier` interaction, and a recorded
+  correlation is lost on restart. External artifact references are not fetched, a captured
+  presentation submission is not unpacked into a credential, and only the latest correlation is
+  kept per capture. The explorer page shows the first 100 captures.
+- No dark theme or offline cache; routing covers the catalog, detail, playground, capture
+  explorer, new-draft and edit-draft views, and any other path falls back to the catalog.

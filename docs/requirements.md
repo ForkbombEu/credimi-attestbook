@@ -42,11 +42,11 @@ split from the closed duplicates #15–#19.
 | FR-012 | PASS / FAIL / NOT_TESTED / NOT_APPLICABLE / INCONCLUSIVE results | Phase 1: #33 | Conservative overall aggregation (D-8), enforced per dimension |
 | FR-013 | Issuer test fixtures | Phase 3: #44 | Unsigned payloads from integrity-verified JSON Schema constraints; no signing or issuance |
 | FR-014 | Verifier test fixtures and policies | Phase 3: #45 | Implemented in #45 for typed attribute/format constraints and partial OpenID4VP DCQL mappings; presentation request generation, proofs and protocol conformance are reported unsupported |
-| FR-015 | Capture artifact model | Phase 0 contracts: [`docs/capture-integration.md`](capture-integration.md); Phase 4: #46 (envelope, normalization, secure references, integrity, redaction) | Implemented in #46 for the versioned envelope and normalization ([`docs/capture.md`](capture.md)); #47 adds the push/pull adapter contracts and mock source; correlation UI #48 is not implemented; no live capture integration |
+| FR-015 | Capture artifact model | Phase 0 contracts: [`docs/capture-integration.md`](capture-integration.md); Phase 4: #46 (envelope, normalization, secure references, integrity, redaction) | Implemented in #46 for the versioned envelope and normalization ([`docs/capture.md`](capture.md)); #47 adds the push/pull adapter contracts and mock source; #48 adds the mock-backed explorer that displays only the redacted projection and explicitly reports unavailable evidence; no live capture integration |
 | FR-016 | `capture-issuer` integration | Phase 4: #47 (mock adapter and authorization boundary) | Mock-only: a deterministic capture-issuer source exercises normalization and the push/pull contracts; no real endpoint is integrated and the integration is not claimed operational |
 | FR-017 | `capture-verifier` integration | Phase 4: #47 (mock adapter and authorization boundary) | Mock-only: a deterministic capture-verifier source exercises normalization and the push/pull contracts; no real endpoint is integrated and the integration is not claimed operational |
 | FR-018 | Capture integration contracts (push/pull, mock adapter) | Phase 0 contracts; Phase 4: #46 (normalizer contract), #47 (push/pull and mock adapters) | The transport-agnostic normalizer is implemented in #46; #47 implements typed push/pull adapter contracts, credential authorization, transport-error codes, bounded paging/idempotency and a deterministic offline mock source; no live transport and no broker |
-| FR-019 | Correlation and traceability across rulebook, capture and validation | Phase 0 contracts; Phase 4: #48 | Stable ids, pinned version + digest |
+| FR-019 | Correlation and traceability across rulebook, capture and validation | Phase 0 contracts; Phase 4: #48 (mock-backed explorer and pinned-rulebook correlation) | Stable ids, pinned version + digest; a recorded correlation carries the caller-owned `correlationId`/`testExecutionRef` and the exact rulebook version, digest and attestation type; no correlation id is minted and no live test execution is queried |
 | FR-020 | Credimi test orchestration via API | Phase 5: #49 | No Temporal/StepCI/PocketBase dependency |
 | FR-021 | Headless Wallet testing workflow | Phase 5: #50 | AttestBook validates, does not orchestrate |
 | FR-022 | Continuous conformance: deterministic, reproducible, machine-readable | Phase 1 supports the evidence subset (#33, #34); Phase 5: #51 | No conformance claim |
@@ -60,7 +60,7 @@ split from the closed duplicates #15–#19.
 | UI-003 | Rulebook editor, live validation, diff, draft management, publication | Phase 2: #40 (editor and live validation), #41 (diff/lifecycle), #42 (publication) |
 | UI-004 | Import interface: URL/file, preview, diagnostics, conflict resolution, sync settings | Phase 2+ follow-up (not in #40–#42); API import lands in #30/#31 |
 | UI-005 | Credential playground: input/upload, rulebook/type selection, validation, violations, export | Phase 1: #38 |
-| UI-006 | Capture explorer (mock-backed until real contracts exist) | Phase 4: #48 |
+| UI-006 | Capture explorer (mock-backed until real contracts exist) | Phase 4: #48 (implemented as a clearly labelled mock-backed `/captures` explorer) |
 
 ### 1.3 Acceptance criteria
 
@@ -78,8 +78,8 @@ split from the closed duplicates #15–#19.
 | AC-10 | Issuer consumes definitions through a documented API | Phase 3: #43, #44 |
 | AC-11 | Verifier consumes constraints through a documented API | Phase 3: #45 |
 | AC-12 | Architecture supports capture without redesigning the validation engine | Phase 0 contracts; Phase 4: #46, #47, #48 |
-| AC-13 | Mock capture artifacts validate through the public API | Phase 4: #47 |
-| AC-14 | Capture evidence correlates with validation results | Phase 4: #48 |
+| AC-13 | Mock capture artifacts validate through the public API | Phase 4: #47, #48 (a captured issued credential runs the real structural engine through the capture correlation route) |
+| AC-14 | Capture evidence correlates with validation results | Phase 4: #48 (implemented for a captured issued credential against a pinned rulebook version) |
 | AC-15 | Credimi consumes results without database access | Phase 5: #49 |
 | AC-16 | Rulebook, cryptographic, protocol and interoperability results remain distinguishable | Phase 1: #33 |
 | AC-17 | Unsupported functionality explicitly reported | Phase 1: #32, #33 |

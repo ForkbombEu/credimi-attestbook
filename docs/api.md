@@ -70,10 +70,11 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.5.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.6.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
-  export operations added by #42, issuer discovery added by #43 and issuer fixture
-  generation added by #44); it is separate from the package version reported by `/health`.
+  export operations added by #42, issuer discovery added by #43, issuer fixture generation
+  added by #44 and the mock-backed capture explorer added by #48); it is separate from the
+  package version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -110,6 +111,9 @@ token in the `Authorization: Bearer <token>` header. All operations are synchron
 | `POST` | `/api/v1/imports` | yes | `200` | Import compatible entries as drafts, reporting per-entry dispositions. |
 | `POST` | `/api/v1/issuers/discover` | yes | `200` | Bounded OpenID4VCI issuer metadata discovery with candidate rulebook associations, ambiguity and unmatched reporting. |
 | `POST` | `/api/v1/credentials/validate` | no | `200` | Structural credential validation with per-dimension evidence. |
+| `GET` | `/api/v1/captures` | no | `200` | Mock-backed page of normalized capture evidence with correlation identifiers and explicit evidence gaps. |
+| `GET` | `/api/v1/captures/{captureId}` | no | `200` | One capture with its redacted artifact projection, evidence timeline and the validation linked to its pinned rulebook version. |
+| `POST` | `/api/v1/captures/{captureId}/validate` | yes | `200` | Correlate a captured issued credential with a pinned rulebook version and record the structural validation result. |
 
 Representations are the public projection of the services: rulebook `provenance`,
 `metadata` and `importKey`, attestation/schema-reference `metadata` and version `provenance`
@@ -456,6 +460,75 @@ cryptographic/trust/protocol/interoperability dimensions as `NOT_TESTED`.
 The route writes nothing and performs no network request. The contract, supported extraction
 subset and non-claims are documented in [`docs/verifier.md`](verifier.md).
 
+### 3.8 Capture explorer and pinned-rulebook correlation
+
+`GET /api/v1/captures` is the read model behind UI-006 and FR-019. It is **mock-backed**: the
+server seeds it from the deterministic local `MockCaptureSource`s, every entry carries
+`source.transport: "mock"`, and no live `capture-issuer`/`capture-verifier` endpoint is
+contacted. Pagination is `limit` (default 50, maximum 100) and `offset`.
+
+A list entry is the normalized metadata envelope joined with the exact rulebook version of a
+recorded validation and with explicit gaps:
+
+```json
+{
+  "captureId": "e2e-issued-credential-capture",
+  "correlationId": "credimi-e2e-correlation-48",
+  "source": { "sourceId": "mock-capture-issuer", "component": "capture-issuer", "transport": "mock", "description": "…" },
+  "provenance": { "capturedAt": "2026-11-05T09:48:23Z", "receivedAt": "…" },
+  "interactionType": "issuance",
+  "protocol": "openid4vci",
+  "credentialFormat": "dc+sd-jwt",
+  "artifactType": "issued-credential",
+  "testExecutionRef": "credimi-e2e-execution-48",
+  "declaredRedaction": { "status": "none", "policyRef": null, "redactedPaths": [], "redactedDigest": null },
+  "artifact": { "availability": "inline", "mediaType": "application/vc+sd-jwt", "byteLength": 2048, "uri": null },
+  "rulebook": null,
+  "validation": null,
+  "evidenceGaps": [
+    { "code": "no_rulebook_binding", "message": "…" },
+    { "code": "validation_not_run", "message": "…" }
+  ],
+  "evidenceComplete": false
+}
+```
+
+`GET /api/v1/captures/{captureId}` adds the redacted projection (`artifactProjection`), the
+source metadata, the ordered `timeline` and the explicit `limitations`. The raw inline
+artifact is **never** returned: `artifactProjection.document` is the default-policy redaction
+of the JSON artifact (path-preserving `[redacted]` placeholders), and an external reference is
+reported with `availability: "external"` and no projection. The stable gap codes are
+`external_artifact_not_fetched`, `artifact_redacted_by_source`,
+`no_test_execution_reference`, `no_rulebook_binding`, `validation_not_run` and
+`validation_not_applicable`; an absent field is never a pass.
+
+`POST /api/v1/captures/{captureId}/validate` takes the pinned selection:
+
+```json
+{ "rulebookId": "…", "rulebookVersion": "1.0", "attestationType": "…" }
+```
+
+It runs the **real** structural credential engine on the capture's segregated inline artifact
+and records the correlation. The response is the engine's `CredentialValidationResult` plus
+the exact binding (`rulebook.id`, `name`, `version`, `contentDigest`, `digestVerified`,
+`specVersion`, `status`), the attestation type and the AttestBook `boundAt`, together with the
+caller-owned `captureId`, `correlationId` and `testExecutionRef` preserved verbatim (FR-019;
+AttestBook still does not mint a correlation id, CD-5). The operation writes no registry data,
+does not change a pinned snapshot and is not a durable run history. It requires a provider
+bearer token because it records server state that every reader sees; the correlation binding
+does not carry the acting provider id.
+
+Evidence that cannot be validated honestly is refused with `409 conflict` and a safe message:
+an external reference (not fetched) and a non-`issued-credential` artifact type. The
+source-redacted refusal remains a defensive check that the version 1 normalizer currently makes
+unreachable, because it rejects an inline artifact that already declares redaction and an
+external artifact is refused before that check. A malformed request body or query is
+`400 invalid_request`; an unknown capture or unknown rulebook/version/attestation type is
+`404 not_found`; a capture-source transport failure is `502 capture_fetch_failed`. A
+structural validation status never implies cryptographic, issuer-trust, protocol or
+interoperability success. The contract and non-claims are documented in
+[`docs/capture.md`](capture.md) §9.
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -494,7 +567,12 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Issuer fixtures | fixture sandbox at its concurrency limit or unavailable on this platform | `503` | `fixture_unavailable` |
 | Verifier constraints | malformed request, foreign/unpinned schema document, integrity mismatch, invalid JSON, exceeded inspection bound or unsupported format | `400` | `invalid_request` |
 | Verifier constraints | rulebook, version, attestation type or stored snapshot does not exist | `404` | `not_found` |
-| API wiring | registry, validation, issuer discovery, issuer fixtures or verifier policy resolver not configured | `503` | `registry_unavailable` / `validation_unavailable` |
+| Capture explorer | malformed page bound or correlation body | `400` | `invalid_request` |
+| Capture explorer | missing, unknown or revoked bearer token on capture correlation | `401` | `unauthorized` |
+| Capture explorer | capture, pinned rulebook, version or attestation type does not exist | `404` | `not_found` |
+| Capture explorer | external reference not fetched or non-credential artifact type | `409` | `conflict` |
+| Capture explorer | capture-source transport failure | `502` | `capture_fetch_failed` |
+| API wiring | registry, validation, issuer discovery, issuer fixtures, verifier policy resolver or capture explorer not configured | `503` | `registry_unavailable` / `validation_unavailable` / `capture_unavailable` |
 | API | unexpected failure | `500` | `internal_error` |
 
 Unknown routes under any path answer `404` with `not_found` and the same envelope. The
@@ -634,5 +712,10 @@ own component and browser tests described in [`docs/ui.md`](ui.md).
 - Validation results are returned synchronously and are not persisted
   (`GET /api/v1/validations/{id}` does not exist in this slice; the specification lists it as
   a suggested resource, not an implemented one).
-- The TS11 catalogue API and capture routes remain unimplemented and are absent from the
-  OpenAPI document rather than present as placeholders.
+- Capture routes are implemented only for the deterministic mock source. The explorer keeps
+  its normalized evidence and recorded correlations in memory, never fetches an external
+  artifact reference, does not unpack a captured presentation submission and does not persist a
+  run history. A live `capture-issuer`/`capture-verifier` connector remains unimplemented and
+  absent rather than present as a placeholder.
+- The TS11 catalogue API remains unimplemented and is absent from the OpenAPI document rather
+  than present as a placeholder.

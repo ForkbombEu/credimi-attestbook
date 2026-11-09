@@ -731,6 +731,202 @@ export const credentialValidationResponseSchema = z.object({
   data: credentialValidationResultSchema,
 })
 
+// -------------------------------------------------- capture explorer (#48)
+
+export const CAPTURE_SOURCE_COMPONENT_SCHEMA = z.enum(['capture-issuer', 'capture-verifier'])
+export const CAPTURE_PROTOCOL_SCHEMA = z.enum(['openid4vci', 'openid4vp'])
+export const CAPTURE_CREDENTIAL_FORMAT_SCHEMA = z.enum([
+  'dc+sd-jwt',
+  'mso_mdoc',
+  'jwt_vc_json',
+  'jwt_vc_json-ld',
+  'ldp_vc',
+])
+export const CAPTURE_INTERACTION_TYPE_SCHEMA = z.enum(['issuance', 'presentation', 'error'])
+export const CAPTURE_ARTIFACT_TYPE_SCHEMA = z.enum([
+  'issuer-metadata',
+  'credential-offer',
+  'issued-credential',
+  'presentation-request',
+  'presentation-submission',
+  'verification-outcome',
+  'error-response',
+])
+export const CAPTURE_REDACTION_STATUS_SCHEMA = z.enum(['none', 'partial', 'full'])
+export const CAPTURE_EVIDENCE_GAP_CODE_SCHEMA = z.enum([
+  'external_artifact_not_fetched',
+  'artifact_redacted_by_source',
+  'no_test_execution_reference',
+  'no_rulebook_binding',
+  'validation_not_run',
+  'validation_not_applicable',
+])
+export const CAPTURE_TIMELINE_EVENT_KIND_SCHEMA = z.enum([
+  'captured',
+  'received',
+  'bound',
+  'validated',
+])
+
+export const captureSourceSummarySchema = z.object({
+  sourceId: z.string(),
+  component: CAPTURE_SOURCE_COMPONENT_SCHEMA,
+  transport: z.literal('mock'),
+  description: z.string(),
+})
+
+export const captureProvenanceSummarySchema = z.object({
+  sourceComponent: CAPTURE_SOURCE_COMPONENT_SCHEMA,
+  sourceVersion: nullableString,
+  capturedAt: z.string(),
+  capturedAtMs: z.number().int(),
+  receivedAt: z.string(),
+  receivedAtMs: z.number().int(),
+})
+
+export const capturePartySchema = z.object({
+  role: z.enum(['issuer', 'verifier']),
+  identifier: z.string(),
+  name: nullableString,
+})
+
+export const captureIntegritySchema = z.object({
+  algorithm: z.literal('sha256'),
+  digest: z.string(),
+  verified: z.boolean(),
+})
+
+export const captureRedactionSchema = z.object({
+  status: CAPTURE_REDACTION_STATUS_SCHEMA,
+  policyRef: nullableString,
+  redactedPaths: z.array(z.string()),
+  redactedDigest: nullableString,
+})
+
+export const captureArtifactSummarySchema = z.object({
+  availability: z.enum(['inline', 'external']),
+  mediaType: z.string(),
+  byteLength: z.number().int().nonnegative().nullable(),
+  uri: nullableString,
+})
+
+export const captureRulebookBindingSchema = z.object({
+  rulebookId: z.string(),
+  rulebookName: z.string(),
+  version: z.string(),
+  contentDigest: z.string(),
+  digestVerified: z.literal(true),
+  specVersion: z.string(),
+  rulebookStatus: PUBLICATION_STATUS_SCHEMA,
+  attestationType: z.string(),
+  boundAt: z.string(),
+})
+
+export const captureValidationDimensionSummarySchema = z.object({
+  id: VALIDATION_DIMENSION_ID_SCHEMA,
+  status: VALIDATION_STATUS_SCHEMA,
+  applicable: z.boolean(),
+  executed: z.boolean(),
+})
+
+export const captureValidationSummarySchema = z.object({
+  validationId: z.string(),
+  validatedAt: z.string(),
+  overallStatus: VALIDATION_STATUS_SCHEMA,
+  violations: z.number().int().nonnegative(),
+  limitations: z.number().int().nonnegative(),
+  dimensions: z.array(captureValidationDimensionSummarySchema),
+})
+
+export const captureEvidenceGapSchema = z.object({
+  code: CAPTURE_EVIDENCE_GAP_CODE_SCHEMA,
+  message: z.string(),
+})
+
+export const captureExplorerSummarySchema = z.object({
+  captureId: z.string(),
+  correlationId: z.string(),
+  kind: z.literal('attestbook.capture-artifact@1'),
+  envelopeVersion: z.literal(1),
+  source: captureSourceSummarySchema,
+  provenance: captureProvenanceSummarySchema,
+  interactionType: CAPTURE_INTERACTION_TYPE_SCHEMA,
+  protocol: CAPTURE_PROTOCOL_SCHEMA,
+  credentialFormat: CAPTURE_CREDENTIAL_FORMAT_SCHEMA,
+  artifactType: CAPTURE_ARTIFACT_TYPE_SCHEMA,
+  party: capturePartySchema.nullable(),
+  testExecutionRef: nullableString,
+  integrity: captureIntegritySchema,
+  declaredRedaction: captureRedactionSchema,
+  artifact: captureArtifactSummarySchema,
+  rulebook: captureRulebookBindingSchema.nullable(),
+  validation: captureValidationSummarySchema.nullable(),
+  evidenceGaps: z.array(captureEvidenceGapSchema),
+  evidenceComplete: z.boolean(),
+})
+
+export const captureArtifactProjectionSchema = z.object({
+  mediaType: z.string(),
+  encoding: z.enum(['utf8', 'base64']),
+  byteLength: z.number().int().nonnegative(),
+  digest: z.string(),
+  redaction: captureRedactionSchema,
+  document: z.unknown(),
+  diagnostics: z.array(
+    z.object({
+      code: z.string(),
+      message: z.string(),
+      path: z.string().optional(),
+    }),
+  ),
+})
+
+export const captureTimelineEventSchema = z.object({
+  kind: CAPTURE_TIMELINE_EVENT_KIND_SCHEMA,
+  at: z.string(),
+  label: z.string(),
+  detail: z.string(),
+})
+
+export const captureExplorerDetailSchema = captureExplorerSummarySchema.extend({
+  metadata: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])),
+  artifactProjection: captureArtifactProjectionSchema.nullable(),
+  validationResult: credentialValidationResultSchema.nullable(),
+  timeline: z.array(captureTimelineEventSchema),
+  limitations: z.array(z.string()),
+})
+
+export const captureExplorerPageSchema = z.object({
+  data: z.array(captureExplorerSummarySchema),
+  pagination: z.object({
+    limit: z.number().int().nonnegative(),
+    offset: z.number().int().nonnegative(),
+    total: z.number().int().nonnegative(),
+  }),
+})
+
+export const captureExplorerDetailResponseSchema = z.object({
+  data: captureExplorerDetailSchema,
+})
+
+export const correlateCaptureRequestSchema = z.object({
+  rulebookId: z.string(),
+  rulebookVersion: z.string(),
+  attestationType: z.string(),
+})
+
+export const captureCorrelationResultSchema = z.object({
+  captureId: z.string(),
+  correlationId: z.string(),
+  testExecutionRef: nullableString,
+  rulebook: captureRulebookBindingSchema,
+  validation: credentialValidationResultSchema,
+})
+
+export const captureCorrelationResponseSchema = z.object({
+  data: captureCorrelationResultSchema,
+})
+
 // ---------------------------------------------------------- issuer fixtures
 
 export const generateIssuerFixtureRequestSchema = z.object({
@@ -1005,6 +1201,10 @@ export const OPENAPI_COMPONENTS = {
   ValidateCredentialRequest: validateCredentialRequestSchema,
   CredentialValidationResult: credentialValidationResultSchema,
   CredentialValidationResponse: credentialValidationResponseSchema,
+  CaptureExplorerListResponse: captureExplorerPageSchema,
+  CaptureExplorerDetailResponse: captureExplorerDetailResponseSchema,
+  CorrelateCaptureRequest: correlateCaptureRequestSchema,
+  CaptureCorrelationResponse: captureCorrelationResponseSchema,
   GenerateIssuerFixtureRequest: generateIssuerFixtureRequestSchema,
   IssuerFixture: issuerFixtureSchema,
   IssuerFixtureResponse: issuerFixtureResponseSchema,
@@ -1028,6 +1228,7 @@ const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
   'ImportRequest',
   'DiscoverIssuerRequest',
   'ValidateCredentialRequest',
+  'CorrelateCaptureRequest',
   'GenerateIssuerFixtureRequest',
   'ResolveVerifierConstraintsRequest',
 ])
@@ -1070,6 +1271,10 @@ export type GenerateIssuerFixtureRequestResource = z.infer<
   typeof generateIssuerFixtureRequestSchema
 >
 export type CredentialValidationResource = z.infer<typeof credentialValidationResultSchema>
+export type CaptureExplorerSummaryResource = z.infer<typeof captureExplorerSummarySchema>
+export type CaptureExplorerDetailResource = z.infer<typeof captureExplorerDetailSchema>
+export type CaptureExplorerPageResource = z.infer<typeof captureExplorerPageSchema>
+export type CaptureCorrelationResource = z.infer<typeof captureCorrelationResultSchema>
 export type VerifierConstraintsResource = z.infer<typeof verifierConstraintsResultSchema>
 export type ResolveVerifierConstraintsRequestResource = z.infer<
   typeof resolveVerifierConstraintsRequestSchema

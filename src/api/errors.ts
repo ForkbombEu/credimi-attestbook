@@ -10,6 +10,7 @@
 // Messages come from the services and never contain bearer tokens, raw
 // payloads, credential material or remote document bytes.
 
+import { isCaptureAdapterError } from '../capture/adapters'
 import { isImportError } from '../import/errors'
 import type { ImportError, ImportErrorCode } from '../import/errors'
 import { isRegistryError } from '../registry/errors'
@@ -32,6 +33,8 @@ export const API_ERROR_CODES = [
   'payload_too_large',
   'import_fetch_failed',
   'import_rejected',
+  'capture_fetch_failed',
+  'capture_unavailable',
   'registry_unavailable',
   'validation_unavailable',
   'fixture_unavailable',
@@ -138,6 +141,24 @@ export function toApiError(error: unknown): {
       status: error.status,
       body: errorEnvelope(error.code, error.message, error.details),
     }
+  }
+
+  if (isCaptureAdapterError(error)) {
+    // Only the transport failures are the caller's concern; a cursor,
+    // authorization or idempotency failure inside an adapter is a server
+    // fault and falls through to the generic internal error.
+    if (
+      error.code === 'source_unavailable' ||
+      error.code === 'source_timeout' ||
+      error.code === 'invalid_source_response' ||
+      error.code === 'response_too_large'
+    ) {
+      return {
+        status: 502,
+        body: errorEnvelope('capture_fetch_failed', error.message, { reason: error.code }),
+      }
+    }
+    return null
   }
 
   if (isImportError(error)) {

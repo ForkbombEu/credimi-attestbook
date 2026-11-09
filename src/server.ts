@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 
 import { createApp } from './app'
+import { createMockCaptureExplorer } from './capture'
 import { loadConfig } from './config'
 import { openDatabase } from './db/database'
 import { applyMigrations } from './db/migrations'
@@ -23,10 +24,14 @@ const schemaSandbox = {
 }
 const validation = new CredentialValidator({ source: registry, sandbox: schemaSandbox })
 const issuerFixtures = new IssuerFixtureGenerator({ source: registry, sandbox: schemaSandbox })
+// UI-006 is deliberately mock-backed: the explorer is seeded from the
+// deterministic local mock source and labels every capture `transport: mock`.
+const captures = createMockCaptureExplorer({ validation })
 const app = createApp({
   registry,
   validation,
   issuerFixtures,
+  captures,
   ...(existsSync(UI_DIST_PATH) ? { uiRoot: UI_DIST_PATH } : {}),
 })
 

@@ -2,6 +2,7 @@ import { describe, expect, test, vi } from 'vitest'
 
 import {
   CatalogApiError,
+  createHttpCaptureApi,
   createHttpCatalogApi,
   createHttpEditorApi,
   createHttpValidationApi,
@@ -9,6 +10,7 @@ import {
   versionContentPath,
   type FetchLike,
 } from './api'
+import { makeBoundCaptureDetail, makeCaptureCorrelation, makeCaptureDetail } from './test/captures'
 import { makeValidationResult, PROVIDERS } from './test/fixtures'
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -315,6 +317,102 @@ describe('createHttpEditorApi', () => {
     )
     await expect(api.replaceDraft('rulebook-1', request, 'att_secret')).rejects.toMatchObject({
       status: 409,
+    })
+  })
+})
+
+describe('createHttpCaptureApi', () => {
+  test('lists the mock-backed captures with the capped page', async () => {
+    const detail = makeCaptureDetail()
+    const fetchImpl = vi.fn<FetchLike>(() =>
+      Promise.resolve(
+        jsonResponse({
+          data: [detail],
+          pagination: { limit: 100, offset: 0, total: 1 },
+        }),
+      ),
+    )
+    const api = createHttpCaptureApi(fetchImpl)
+
+    const page = await api.listCaptures()
+    expect(page.pagination.total).toBe(1)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/v1/captures?limit=100&offset=0',
+      expect.objectContaining({ headers: { accept: 'application/json' } }),
+    )
+  })
+
+  test('reads one capture and encodes its identifier', async () => {
+    const detail = makeCaptureDetail()
+    const fetchImpl = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({ data: detail })))
+    const api = createHttpCaptureApi(fetchImpl)
+
+    expect(await api.getCapture('capture/with space')).toEqual(detail)
+    expect(fetchImpl.mock.calls[0]?.[0]).toBe('/api/v1/captures/capture%2Fwith%20space')
+  })
+
+  test('posts the correlation request and returns the linked result', async () => {
+    const detail = makeBoundCaptureDetail()
+    const correlation = makeCaptureCorrelation(detail)
+    const fetchImpl = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({ data: correlation })))
+    const api = createHttpCaptureApi(fetchImpl)
+
+    const result = await api.correlateCapture(
+      'capture-1',
+      {
+        rulebookId: 'rulebook-pid',
+        rulebookVersion: '1.0',
+        attestationType: 'Person Identification Data',
+      },
+      'att_capture_token',
+    )
+    expect(result).toEqual(correlation)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/v1/captures/capture-1/validate',
+      expect.objectContaining({
+        method: 'POST',
+        headers: {
+          accept: 'application/json',
+          'content-type': 'application/json',
+          authorization: 'Bearer att_capture_token',
+        },
+        body: JSON.stringify({
+          rulebookId: 'rulebook-pid',
+          rulebookVersion: '1.0',
+          attestationType: 'Person Identification Data',
+        }),
+      }),
+    )
+    const [url, init] = fetchImpl.mock.calls[0] ?? []
+    expect(String(url)).not.toContain('att_capture_token')
+    expect(init?.body).not.toContain('att_capture_token')
+  })
+
+  test('surfaces the safe API error message and status', async () => {
+    const fetchImpl = vi.fn<FetchLike>(() =>
+      Promise.resolve(
+        jsonResponse(
+          { error: { code: 'conflict', message: 'The capture artifact is external.' } },
+          409,
+        ),
+      ),
+    )
+    const api = createHttpCaptureApi(fetchImpl)
+
+    await expect(
+      api.correlateCapture(
+        'capture-1',
+        {
+          rulebookId: 'rulebook-pid',
+          rulebookVersion: '1.0',
+          attestationType: 'PID',
+        },
+        'att_capture_token',
+      ),
+    ).rejects.toMatchObject({
+      name: 'CatalogApiError',
+      status: 409,
+      message: 'The capture artifact is external.',
     })
   })
 })

@@ -139,6 +139,9 @@ export function createApp(options: AppOptions = {}): Hono {
     app.get('/rulebooks/*', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/playground', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/playground/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
+    app.get('/captures', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
+    app.get('/captures/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
+    app.get('/captures/*', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.use('/assets/*', uiAssetHandler(uiRoot))
   }
 
