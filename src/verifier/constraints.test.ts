@@ -760,6 +760,69 @@ describe('VerifierPolicyResolver', () => {
     })
   })
 
+  test('reports object-level constraints on array items', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        l: {
+          type: 'array',
+          items: {
+            type: 'object',
+            maxProperties: 2,
+            minProperties: 1,
+            properties: { x: { type: 'string' } },
+          },
+        },
+      },
+    }
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: SCHEMA_URI, content: JSON.stringify(schema) }],
+    })
+    const result = setupFixture.resolver.resolve(setupFixture.request())
+
+    expect(findAttribute(result, '/l/*')).toMatchObject({
+      types: ['object'],
+      constraints: { type: 'object', maxProperties: 2, minProperties: 1 },
+      claimPath: ['l', null],
+    })
+    expect(findAttribute(result, '/l/*/x')).toMatchObject({ constraints: { type: 'string' } })
+
+    const dcql = formatPolicy(result, 'dc+sd-jwt').dcql
+    expect(dcql.credentialQuery).toMatchObject({
+      claims: [{ path: ['l'] }, { path: ['l', null, 'x'] }],
+    })
+    const valueKeywords = dcql.unsupported
+      .filter((entry) => entry.code === 'value_constraint_not_expressible')
+      .map((entry) => entry.keyword)
+    expect(valueKeywords).toContain('maxProperties')
+    expect(valueKeywords).toContain('minProperties')
+  })
+
+  test('merges object-level item constraints across allOf branches', () => {
+    const schema = {
+      type: 'object',
+      properties: {
+        l: {
+          type: 'array',
+          items: {
+            allOf: [
+              { type: 'object', properties: { x: { type: 'string' } } },
+              { maxProperties: 3 },
+            ],
+          },
+        },
+      },
+    }
+    const setupFixture = setup({
+      documents: [{ format: 'dc+sd-jwt', uri: SCHEMA_URI, content: JSON.stringify(schema) }],
+    })
+    const result = setupFixture.resolver.resolve(setupFixture.request())
+    expect(findAttribute(result, '/l/*')).toMatchObject({
+      types: ['object'],
+      constraints: { type: 'object', maxProperties: 3 },
+    })
+  })
+
   test('reports additionalProperties on an object without declared properties', () => {
     const schema = {
       type: 'object',

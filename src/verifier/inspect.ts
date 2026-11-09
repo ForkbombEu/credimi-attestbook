@@ -602,25 +602,25 @@ function inspectChildren(
   }
 
   const itemSegments = [...segments, '*']
-  const itemBranches = itemSchemas.flatMap((schema) => collectConstraintBranches(schema, state))
-  if (!itemBranches.some(hasObjectMembers)) {
-    const constraints = mergeConstraintSchemas(itemSchemas, state)
-    if (Object.keys(constraints.values).length > 0 || constraints.unresolved.size > 0) {
-      if (state.attributes.length >= MAX_VERIFIER_ATTRIBUTES) {
-        throw invalidInput(`${state.source} exceeds the typed attribute bound`)
-      }
-      state.attributes.push({
-        pointer: pointerFromSegments(itemSegments),
-        name: '*',
-        required: false,
-        types: typesFromConstraints(constraints.values, constraints.unresolved),
-        constraints: constraints.values,
-        unsupportedConstraints: toUnsupportedConstraints(constraints.unresolved),
-        sources: [state.source],
-        claimPath: claimPathFromSegments(itemSegments),
-        claimPathSupported: true,
-      })
+  // An item location is handled like a property location: report the item's own
+  // merged constraints, then inspect whatever it contains. An object-typed item
+  // therefore gets both its `*` attribute and its nested property attributes.
+  const constraints = mergeConstraintSchemas(itemSchemas, state)
+  if (Object.keys(constraints.values).length > 0 || constraints.unresolved.size > 0) {
+    if (state.attributes.length >= MAX_VERIFIER_ATTRIBUTES) {
+      throw invalidInput(`${state.source} exceeds the typed attribute bound`)
     }
+    state.attributes.push({
+      pointer: pointerFromSegments(itemSegments),
+      name: '*',
+      required: false,
+      types: typesFromConstraints(constraints.values, constraints.unresolved),
+      constraints: constraints.values,
+      unsupportedConstraints: toUnsupportedConstraints(constraints.unresolved),
+      sources: [state.source],
+      claimPath: claimPathFromSegments(itemSegments),
+      claimPathSupported: true,
+    })
   }
 
   inspectChildren(itemSchemas, state, itemSegments, depth + 1)

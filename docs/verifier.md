@@ -148,7 +148,9 @@ Property schemas from sibling `allOf` branches are merged before their children 
 so a `required` flag, nested `properties` or nested `items` declared in one branch is combined
 with the constraints of the other branches into one attribute. Array items are followed
 recursively, including items of items; a constraint on an item's item is never dropped
-silently.
+silently. An array item that is itself an object gets its own `*` attribute carrying its
+object-level constraints (for example `type`, `minProperties`, `maxProperties`) in addition to
+one attribute for each of its nested properties.
 
 Everything else that can change an instance is reported, not ignored. The reported set
 includes `$ref`, `$dynamicRef`, `$recursiveRef`, `oneOf`, `anyOf`, `not`, `if`/`then`/`else`,
@@ -279,6 +281,10 @@ invalid_request`; a missing rulebook, version or attestation type is `404 not_fo
 - Multiple documents may declare the same pointer. Their attributes are returned separately
   with per-document `sources`; this slice does not compute a normative intersection across
   documents.
+- Extracted constraints declared on the schema document root itself (for example
+  `minProperties` on the top-level object) are not returned as an attribute; unresolved root
+  keywords are still reported as object limitations. A boolean `items: false`/`items: true`
+  value does not produce an item attribute and is not currently reported.
 - Type Metadata references are reported and not converted into guessed constraints, because
   Type Metadata declares claims and display data but not value constraints.
 - The DCQL fragment omits `meta` for `dc+sd-jwt`/`mso_mdoc` because the pinned snapshot has no
