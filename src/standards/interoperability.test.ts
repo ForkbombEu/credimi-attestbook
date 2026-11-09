@@ -26,6 +26,7 @@ import {
   detectProfile,
   parseSchemaMetaDocument,
   signSchemaMetaJws,
+  validateSchemaMetaDocument,
   verifySchemaMetaJws,
 } from './index'
 import {
@@ -181,6 +182,10 @@ describe(`ETSI EN 319 482-3 ${ETSI_SCHEMA_VERSION} model compatibility`, () => {
       etsiProblems(owfDocument).some((problem) => problem.includes('verificationMethod')),
     ).toBe(true)
 
+    const withUnknown = { ...etsiSchemaMeta(), unexpected_member: true }
+    expect(parseSchemaMetaDocument(withUnknown).ok).toBe(true)
+    expect(validateSchemaMetaDocument(withUnknown).ok).toBe(false)
+
     const extended = etsiSchemaMeta({
       issuanceProfile: { batchIssuanceAllowed: true },
       schemaURIs: [
@@ -321,6 +326,9 @@ describe('captured external catalogue interoperability', () => {
     ).toBe(true)
     expect(fixtureSha256('fides-schemas-2026-11-09.jwt')).toBe(
       '3f7386fd70448b018d46b59021ea6143945af8a34c849d961bd98b7f97be76f5',
+    )
+    expect(fixtureSha256('fides-jwks-2026-11-09.json')).toBe(
+      '179a682d5a7c42ae0db6a462f9d77e18ce2841dd06cbd1f428c5e0da5e2fc871',
     )
 
     const payload = JSON.parse(Buffer.from(payloadPart, 'base64url').toString('utf8')) as {

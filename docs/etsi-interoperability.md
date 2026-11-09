@@ -70,9 +70,10 @@ Schema)**. The relevant requirements are:
   methods, response envelope or signing profile) — see §4.
 
 One draft-internal difference is worth naming: E.1 lists `trustedAuthorities` as **0..1**,
-but the E.2 JSON Schema does not encode `maxItems: 1`. This assessment applies the stricter
-data model (at most one authority) and records the schema annotation as a draft defect, not
-as permission for an unbounded array.
+but the E.2 JSON Schema does not encode `maxItems: 1`. No adapter or test enforces the
+data-model limit today; this assessment adopts the stricter 0..1 reading for any future
+ETSI profile and records the schema annotation as a draft defect, not as permission for an
+unbounded array.
 
 ## 3. Compatibility matrix
 
@@ -297,7 +298,9 @@ non-URL `id`.
 
 ## 9. Follow-up work (not delivered here)
 
-The assessment found work that belongs in separate tickets, not this one:
+The assessment found work that belongs in separate tickets, not this one. Repository
+policy requires issues to be opened from a person's account, so they are recorded here for
+the repository owner to open; the automated agent does not open issues as itself.
 
 1. Decide whether to add an `etsi@0.0.7` wire profile and how to represent a minimal
    `etsi_tl` authority without OWF's `verificationMethod` (for example a distinct adapter
