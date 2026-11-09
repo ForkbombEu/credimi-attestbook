@@ -216,11 +216,14 @@ describe('authenticated rulebook import', () => {
     expect(result.rulebooks).toHaveLength(2)
 
     const rows = fixture.database
-      .query<{
-        action: string
-        actor_provider_id: string | null
-        detail_json: string
-      }>('SELECT action, actor_provider_id, detail_json FROM audit_log ORDER BY id')
+      .query<
+        {
+          action: string
+          actor_provider_id: string | null
+          detail_json: string
+        },
+        []
+      >('SELECT action, actor_provider_id, detail_json FROM audit_log ORDER BY id')
       .all()
 
     const creates = rows.filter((row) => row.action === 'rulebook.create')
