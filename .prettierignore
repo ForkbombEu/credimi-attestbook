@@ -4,6 +4,11 @@ docs/
 research/
 scripts/
 
+# Captured interoperability fixtures stay byte-for-byte identical to the
+# recorded external responses and draft schema; their SHA-256 digests are
+# asserted by src/standards/interoperability.test.ts.
+src/standards/test/interop-fixtures/
+
 # Generated and vendor content.
 dist/
 coverage/

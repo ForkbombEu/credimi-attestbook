@@ -567,9 +567,10 @@ Unresolved:
 - **Which revision is OWF targeting?** The package does not say. Is its model a
   later EC TS11 draft, ETSI EN 319 482-3 v0.0.6, or an OWF-specific profile?
   This should be clarified upstream.
-- **What does ETSI EN 319 482-3 draft v0.0.6 require?** NOT_TESTED here; [issue #2](https://github.com/ForkbombEu/credimi-attestbook/issues/2)
-  owns the standards comparison. The public ETSI draft directory did not
-  expose 482-3 on the audit date.
+- **What does ETSI EN 319 482-3 draft v0.0.6 require?** NOT_TESTED here; the public ETSI
+  draft directory did not expose 482-3 on the audit date. The later public **v0.0.7
+  (2026-11)** is read for issue #54 and compared in
+  [`docs/etsi-interoperability.md`](etsi-interoperability.md); v0.0.6 remains unread.
 - **Is `issuanceProfile` normative?** It is absent from the TS11 v1.0.1
   normative schema; no clause is cited in the package README.
 - **Which model should AttestBook expose?** Resolved by D-2 and D-4: TS11 v1.0.1 is the
@@ -805,6 +806,14 @@ ARF §5.6.3 states registration of QEAA/PuB-EAA attestation schemes is **"not ma
 
 The ETSI **EN 319 482** series is titled **"Electronic Signatures and Trust Infrastructures (ESI); Additional wallet interfaces"** (verified from the public drafts of Parts 4 and 6). The issue references **EN 319 482-3 draft v0.0.6 (27 October 2026)** as the future standard to compare against TS11.
 
+> **Status update (2026-11-09, issue #54):** ETSI's open draft directory now publishes
+> **EN 319 482-3 draft v0.0.7 (2026-11)**, titled "Part 3: Interfaces and formats for the
+> catalogue of Attestation Rulebooks and attributes". That revision is readable and its
+> `SchemaMeta` model (SCH-AD-6.4, Annex E) is compared clause by clause in
+> [`docs/etsi-interoperability.md`](etsi-interoperability.md), with executable evidence in
+> `src/standards/interoperability.test.ts`. Draft **v0.0.6 remains unread**, so no
+> v0.0.6 → v0.0.7 delta is claimed. The Phase 0 statements below are retained as history.
+
 **What could be verified:**
 
 - The series exists and is in draft. Parts 4 ("Specification of Wallet-to-Wallet interactions", v0.0.3, 2026-08) and 6 ("Data Portability and Download (export)", v0.0.3, 2026-09) are publicly downloadable from ETSI's open draft directory and are in "call for comments".
@@ -845,7 +854,7 @@ AttestBook's validation engine must therefore report schema/attestation-constrai
 8. Unsupported / ambiguous / draft / unverified requirements
 ------------------------------------------------------------
 
-1. **ETSI EN 319 482-3 draft v0.0.6** — restricted, content unverified (see §6). Cannot yet be cited clause-by-clause.
+1. **ETSI EN 319 482-3 draft v0.0.6** — never retrievable, so its content remains unverified. The later public draft **v0.0.7 (2026-11)** is now read and compared in [`docs/etsi-interoperability.md`](etsi-interoperability.md); v0.0.7 itself is work in progress, not a published EN. No v0.0.6 → v0.0.7 delta is claimed.
 2. **ARF vs TS11 registration obligation** — ARF §5.6.3 ("not mandatory") vs TS11 §4.2 ("SHALL be published") vs §4.1 ("SHOULD register"). Ambiguous; do not encode a single hard rule.
 3. **`attestationLoS` → issuer/verifier enforcement** — TS11 gives the enum and points to OpenID4VCI Annex D.2 for the issuance process, but AttestBook's role in *enforcing* LoS at validation time is not defined by TS11; treat as product-level/out-of-scope.
 4. **`TrustAuthority` value semantics** — TS11 defines the field but delegates actual trust resolution to ETSI Trusted Lists / LoTE / OpenID Federation; AttestBook must not claim to perform trust validation solely from this field.
@@ -876,7 +885,7 @@ Assumptions recorded for this phase:
 
 - "EC TS11 v1.0.1 (January 2026)" in issue #2 maps to the document's own version table: v1.0.1 dated 2026-01-30 (editorial: licensing/reuse clarification).
 - "ARF 3.0" maps to the `v3.0.0` tag of `eudi-doc-architecture-and-reference-framework`.
-- "ETSI EN 319 482-3 draft v0.0.6 (27 October 2026)" is taken from issue #2 as the target draft identifier; its content was not retrievable.
+- "ETSI EN 319 482-3 draft v0.0.6 (27 October 2026)" is taken from issue #2 as the target draft identifier; its content was not retrievable. The public **v0.0.7 (2026-11)** read for issue #54 is a different revision; no delta is claimed.
 
 Open questions resolved by decisions D-9 to D-12 in
 [`docs/implementation-plan.md`](implementation-plan.md) §3:

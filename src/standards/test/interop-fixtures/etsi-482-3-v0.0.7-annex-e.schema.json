@@ -1,0 +1,157 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://data.europa.eu/eudi/schemas/attestation-schema-metadata.json",
+  "title": "SchemaMeta",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "id",
+    "version",
+    "rulebookURI",
+    "rulebookIntegrity",
+    "attestationLoS",
+    "bindingType",
+    "schemaURIs"
+  ],
+  "properties": {
+    "id": {
+      "description": "Identifier assigned to the metadata.",
+      "type": "string",
+      "format": "uri"
+    },
+    "iat": {
+      "description": "Optional issued-at timestamp.",
+      "type": "number"
+    },
+    "version": {
+      "description": "Version of the attestation schema.",
+      "type": "string"
+    },
+    "rulebookURI": {
+      "description": "URI of the corresponding Attestation Rulebook.",
+      "type": "string",
+      "format": "uri"
+    },
+    "rulebookIntegrity": {
+      "description": "Integrity value for the referenced Rulebook.",
+      "type": "string"
+    },
+    "trustedAuthorities": {
+      "description": "Applicable trust frameworks or trust anchors.",
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/trustAuthority"
+      }
+    },
+    "attestationLoS": {
+      "description": "Required level of security for issuance.",
+      "type": "string",
+      "enum": [
+        "iso_18045_high",
+        "iso_18045_moderate",
+        "iso_18045_enhanced-basic",
+        "iso_18045_basic"
+      ]
+    },
+    "bindingType": {
+      "description": "Required binding mechanism.",
+      "type": "string",
+      "enum": ["claim", "key", "biometric", "none"]
+    },
+    "schemaURIs": {
+      "description": "Format-specific schema references.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/schemaURI"
+      }
+    }
+  },
+  "$defs": {
+    "formatIdentifier": {
+      "type": "string",
+      "enum": ["dc+sd-jwt", "mso_mdoc"]
+    },
+    "sdJwtVCMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["vct"],
+      "properties": {
+        "vct": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "mdocMeta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["doctype_value"],
+      "properties": {
+        "doctype_value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "schemaURI": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["formatIdentifier", "uri", "integrity", "meta"],
+          "properties": {
+            "formatIdentifier": {
+              "const": "dc+sd-jwt"
+            },
+            "uri": {
+              "type": "string",
+              "format": "uri"
+            },
+            "integrity": {
+              "type": "string"
+            },
+            "meta": {
+              "$ref": "#/$defs/sdJwtVCMeta"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["formatIdentifier", "uri", "integrity", "meta"],
+          "properties": {
+            "formatIdentifier": {
+              "const": "mso_mdoc"
+            },
+            "uri": {
+              "type": "string",
+              "format": "uri"
+            },
+            "integrity": {
+              "type": "string"
+            },
+            "meta": {
+              "$ref": "#/$defs/mdocMeta"
+            }
+          }
+        }
+      ]
+    },
+    "trustAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["frameworkType", "value"],
+      "properties": {
+        "frameworkType": {
+          "type": "string",
+          "enum": ["etsi_tl"]
+        },
+        "value": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

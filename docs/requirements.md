@@ -236,6 +236,7 @@ total import cost; do not log raw metadata responses, tokens, or embedded URIs.
 | R6.2 version-aware | Sphereon | v1.0 + 1.15 builders/clients; 1.0 and legacy shape tests | IMPLEMENTED for supported shapes (#43) |
 | R6.3 extraction | spec FR-006 | format/type/schema extraction tests | IMPLEMENTED (#43) |
 | R6.4 association | spec FR-006 | pinned-version, ambiguous and unmatched tests | PARTIAL: manual mapping not implemented |
+| ETSI v0.0.7 migration assessment | spec §3, Phase 6 | [`docs/etsi-interoperability.md`](etsi-interoperability.md); `src/standards/interoperability.test.ts` | ASSESSED (#54): comparison and gaps recorded; no ETSI profile implemented |
 
 The normative-clause and requirements-to-test mappings are in
 [`docs/traceability.md`](traceability.md); the implementation decisions and Phase 1 order
