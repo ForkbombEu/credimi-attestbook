@@ -73,3 +73,34 @@ export {
   type CaptureRedactionMode,
   type CaptureRedactionPolicy,
 } from './redaction'
+
+// Push/pull transport adapter contracts and the deterministic mock source
+// (FR-018, issue #47). Only the mock transport is implemented; no live
+// capture-issuer/capture-verifier connector exists.
+export {
+  CAPTURE_ADAPTER_TRANSPORTS,
+  CAPTURE_MOCK_FAULTS,
+  CaptureAdapterError,
+  DEFAULT_MAX_ACCEPTED_CAPTURES,
+  DEFAULT_MOCK_BATCH_SIZE,
+  MAX_CAPTURE_CREDENTIAL_LENGTH,
+  MockCaptureSource,
+  captureAdapterError,
+  hashCaptureCredential,
+  isCaptureAdapterError,
+  isCaptureCredentialHash,
+  mockCaptureEnvelopes,
+  verifyCaptureCredential,
+  verifyCaptureCredentialHash,
+  type CaptureAdapterErrorCode,
+  type CaptureAdapterTransport,
+  type CaptureMockFault,
+  type CapturePullAdapter,
+  type CapturePullRequest,
+  type CapturePullResult,
+  type CapturePushAdapter,
+  type CapturePushResult,
+  type CapturePushSubmission,
+  type CaptureSource,
+  type MockCaptureSourceOptions,
+} from './adapters'

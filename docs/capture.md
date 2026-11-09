@@ -2,20 +2,24 @@
 
 **Status:** Phase 4 implementation of the capture-envelope slice by
 [issue #46](https://github.com/ForkbombEu/credimi-attestbook/issues/46) (specification
-FR-015 and FR-018). It defines the versioned AttestBook envelope, validates untrusted
-submissions and produces a metadata-only artifact with the raw evidence segregated. It is
-**not** a live `capture-issuer`/`capture-verifier` integration, and no capture component is
-claimed operational.
+FR-015 and FR-018) and of the adapter-contract slice by
+[issue #47](https://github.com/ForkbombEu/credimi-attestbook/issues/47) (FR-016–FR-018). It
+defines the versioned AttestBook envelope, validates untrusted submissions and produces a
+metadata-only artifact with the raw evidence segregated, and exposes typed push/pull adapter
+contracts with a deterministic local mock source. It is **not** a live
+`capture-issuer`/`capture-verifier` integration: the only implemented transport is `mock`,
+and no capture component is claimed operational.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) §11 (FR-015, FR-018) and
 §15 (security requirements)
-**Requirements:** [`docs/requirements.md`](requirements.md) FR-015, FR-018; AC-12
+**Requirements:** [`docs/requirements.md`](requirements.md) FR-015–FR-018; AC-12, AC-13
 **Related:** [`docs/capture-integration.md`](capture-integration.md) (Phase 0 contract
 proposal), [`docs/architecture.md`](architecture.md) §3/§7/§8/§11,
 [`docs/security.md`](security.md) (untrusted-input controls),
 [`docs/traceability.md`](traceability.md)
 **Implementation:** `src/capture/` (`types.ts`, `normalize.ts`, `reference.ts`,
-`redaction.ts`, `json.ts`, `limits.ts`, `errors.ts`)
+`redaction.ts`, `json.ts`, `limits.ts`, `errors.ts`) and `src/capture/adapters/`
+(`types.ts`, `errors.ts`, `credentials.ts`, `fixtures.ts`, `mock.ts`)
 
 ## 1. Scope and boundaries
 
@@ -39,11 +43,27 @@ Implemented by #46:
 - a default redaction policy for partial and full redaction of a JSON artifact, with
   path-preserving placeholders and explicit fallback to full redaction for opaque content.
 
-Deliberately **not** in #46:
+Implemented by #47 (section 7):
 
-- any HTTP route, push/pull transport, mock adapter or real `capture-issuer`/
-  `capture-verifier` connector — [#47](https://github.com/ForkbombEu/credimi-attestbook/issues/47);
-- persistence or external artifact storage, and its access-control boundary (CD-6);
+- transport-agnostic `CaptureSource`, `CapturePullAdapter` and `CapturePushAdapter`
+  contracts, with typed pull requests/results and push submissions/results;
+- a deterministic `MockCaptureSource` that implements both contracts over synthetic local
+  fixtures for every version 1 artifact type, labelled `transport: "mock"` on every result;
+- an authorization boundary at the adapter: hashed bearer credentials compared in constant
+  time, failing closed, with missing and unknown credentials indistinguishable;
+- stable transport, authorization and idempotency failure codes, with simulated transport
+  faults for deterministic tests;
+- pull pagination with opaque cursors and a bounded page size, and push idempotency over the
+  exact submitted bytes that retains only the accepted submission hash.
+
+Deliberately **not** implemented in #46 or #47:
+
+- any HTTP route, CLI command or background poller, and any connection to a real
+  `capture-issuer`/`capture-verifier` endpoint. The issue that owns this slice requires the
+  components' actual APIs to be confirmed before they are integrated, so only the mock
+  transport exists;
+- persistence or external artifact storage, and its access-control boundary (CD-6). The mock
+  source keeps only an in-memory idempotency map of capture ids to digests;
 - fetching an `artifactRef`. No network request is made by this module. A future fetcher
   must reuse the import pipeline's URL validation, DNS resolution and pinned-address checks
   (`src/import/url.ts`), not resolve the reference itself;
@@ -51,8 +71,8 @@ Deliberately **not** in #46:
   ([#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48));
 - signing, encrypting, decrypting or otherwise authenticating capture evidence; nothing here
   claims a capture artifact is authentic, complete or protocol-conformant;
-- an operational capture integration. The envelope is an internal AttestBook contract, not a
-  TS11 normative structure.
+- an operational capture integration. The envelope and adapter contracts are internal
+  AttestBook contracts, not TS11 normative structures.
 
 ## 2. Envelope version 1
 
@@ -194,7 +214,58 @@ into a loggable/exportable projection. It never touches the metadata envelope.
   only an external reference may carry a `partial`/`full` status without this normalizer
   seeing the raw bytes.
 
-## 7. Limits
+## 7. Push and pull adapter contracts
+
+Both transports consume the same normalized envelope; only the trigger differs. The
+contracts live in `src/capture/adapters/types.ts` and are the extension seam for a later
+transport-specific connector. The only implemented transport kind is `mock`.
+
+| Contract | Responsibility |
+| --- | --- |
+| `CaptureSource` | A configured origin: opaque `sourceId`, capture component, `transport` (`mock` only) and a provenance `description`. It carries no credential. |
+| `CapturePullAdapter` | `pull(request)` retrieves one page of artifacts; the request has an optional opaque cursor and page size, the result has the normalized artifacts, `nextCursor` and the AttestBook `receivedAt`. |
+| `CapturePushAdapter` | `push(submission)` accepts one untrusted JSON submission (`authorization`, `mediaType`, exact bytes); the result has the normalized artifact, a `duplicate` flag and `receivedAt`. |
+
+`MockCaptureSource` implements both interfaces. It serves the deterministic synthetic
+fixtures in `src/capture/adapters/fixtures.ts` (four capture-issuer and three
+capture-verifier artifacts, covering every version 1 artifact type), normalizes each through
+the same `CaptureNormalizer` as any untrusted submission, contacts no network endpoint and
+labels its source `transport: "mock"`. It is validated eagerly at construction: a configured
+fixture the real pipeline would reject aborts construction instead of being served.
+
+Adapter behaviour:
+
+- **Authorization.** An adapter is configured with SHA-256 hashes of accepted bearer
+  credentials, never raw secrets. A push presents its credential; a pull uses the credential
+  AttestBook holds for the source, whose hash the mock retains instead of the raw value. Both
+  fail closed when no hash is configured, compare in constant time through the credential
+  hash, and answer missing and unknown credentials with the same `unauthorized` code and
+  message, so there is no credential-validity oracle. A presented credential longer than
+  4,096 characters is rejected before hashing. An authenticated push is additionally scoped
+  to the adapter's capture component: an artifact whose `sourceComponent` differs is rejected
+  as `forbidden`; another source's credential is simply `unauthorized`.
+- **Pull paging.** `nextCursor` is opaque and only valid for the source that issued it.
+  Invalid, stale or foreign cursors are `cursor_expired`. A request may ask for fewer
+  artifacts, but never more than the configured `maxBatchSize`; a non-positive or
+  non-integer `maxArtifacts` is `invalid_request`.
+- **Push idempotency.** The fingerprint is the SHA-256 of the exact submitted bytes,
+  consistent with the repository's exact-bytes digest decision. Re-submitting the same
+  `captureId` with byte-identical bytes returns the normalized result with `duplicate: true`.
+  The same `captureId` with any byte difference — an envelope field such as `correlationId`,
+  `testExecutionRef` or `capturedAt`, an `artifactRef`, or the artifact itself — is
+  `duplicate_conflict`. The mock keeps only the capture id and that hash in memory, bounded by
+  `maxAcceptedCaptures` (default 1024); a full store rejects a new capture with
+  `capture_store_full` instead of growing without limit. Raw submission and artifact bytes
+  are not retained. A real adapter must persist idempotency keys.
+- **Transport errors.** `source_unavailable`, `source_timeout`, `invalid_source_response` and
+  `response_too_large` are stable adapter codes. The mock reproduces each with a queued
+  simulation fault (`faults` or `simulateFault`), which exists for deterministic tests and is
+  not a network failure.
+- **Media type.** A push must carry `application/json`, `text/json` or a `+json` media type;
+  anything else is `unsupported_media_type`. Normalization failures keep their `CaptureError`
+  code and are not rewritten as adapter failures.
+
+## 8. Limits
 
 `DEFAULT_CAPTURE_LIMITS` bounds one submission: 512 KiB envelope, 24 JSON levels, 4,096 JSON
 values, 384 KiB per JSON string, 256 KiB inline artifact, 2,048-character reference URI,
@@ -202,7 +273,7 @@ values, 384 KiB per JSON string, 256 KiB inline artifact, 2,048-character refere
 redacted paths. `resolveCaptureLimits` rejects invalid overrides; the normalizer's clock and
 limits are injectable for deterministic tests.
 
-## 8. Tests
+## 9. Tests
 
 The specification §16 capture matrix is covered by `src/capture/`:
 
@@ -217,11 +288,19 @@ The specification §16 capture matrix is covered by `src/capture/`:
 | Mock capture-issuer input | `envelope.test.ts` — `issuerEnvelope` fixture |
 | Mock capture-verifier input | `envelope.test.ts` — `verifierEnvelope` fixture |
 | Security controls | `security.test.ts` — reference SSRF targets, no secret echo, prototype members, size bounds |
+| Mock capture sources | `adapters/mock.test.ts` — every version 1 artifact type, inline segregation, external unverified, paging, idempotency, component scope; `adapters/contracts.test.ts` — interfaces usable by a non-mock adapter |
+| Push/pull contracts | `adapters/contracts.test.ts` — a non-mock pull/push adapter driven only through the published interfaces |
+| Transport errors | `adapters/transport.test.ts` — unavailable, timeout, invalid response, oversized response, cursor and page-size rejection, no network request |
+| Authorization | `adapters/authorization.test.ts` — hashed credential acceptance, fail-closed default, constant-time helper, no credential echo, cross-source rejection |
 
-## 9. Explicit limitations
+## 10. Explicit limitations
 
-- No capture transport, mock adapter or real component integration is implemented here;
-  those are #47. No capture artifact in this slice comes from a live interaction.
+- No live capture transport or real component integration is implemented: only the mock
+  adapter exists, and no capture artifact in this slice comes from a live interaction. The
+  real `capture-issuer`/`capture-verifier` wire contracts must be confirmed before one is
+  added.
+- The mock source's paging cursor and idempotency map are in memory and are not a
+  persistence, deduplication or authorization design for a deployed service.
 - An external reference's digest and the artifact behind it are not verified; a future
   fetcher must enforce SSRF-safe resolution, authentication and size limits.
 - Partial redaction is a member-name allow-list, not a semantic classifier. Unknown or

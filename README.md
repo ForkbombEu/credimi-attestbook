@@ -97,7 +97,8 @@ bun run docs:check    # documentation consistency, plain Node
   [`docs/verifier.md`](verifier.md);
 - `src/capture/` — the versioned capture artifact envelope: bounded untrusted-input
   validation, secure external references, SHA-256 integrity, preserved provenance and
-  correlation, segregated raw evidence and path-preserving redaction; see
+  correlation, segregated raw evidence and path-preserving redaction, plus typed push/pull
+  adapter contracts and a deterministic offline mock source (only transport: `mock`); see
   [`docs/capture.md`](capture.md);
 - `src/api/` — the versioned REST/OpenAPI contract: generated-document validation against
   the official OpenAPI 3.1 schema, an exact comparison of documented operations with the
@@ -247,9 +248,17 @@ echo artifact bytes; the caller's `capturedAt` text and correlation identifiers 
 verbatim and normalization adds only `receivedAt`. SHA-256 integrity covers the exact raw
 bytes (recomputed for inline evidence, explicitly unverified for external references), and
 partial/full redaction keeps only an allow-listed set of non-personal protocol members while
-replacing every other scalar with path-preserving placeholders. This is
-not a live `capture-issuer`/`capture-verifier` integration: transport, storage, signing and
-rulebook correlation remain later issues. See [`docs/capture.md`](capture.md).
+replacing every other scalar with path-preserving placeholders.
+
+`src/capture/adapters/` exposes the push and pull contracts around that envelope
+(`CaptureSource`, `CapturePullAdapter`, `CapturePushAdapter`) and one implementation,
+`MockCaptureSource`: deterministic synthetic fixtures for every artifact type, opaque paging
+cursors, `captureId` idempotency, hashed bearer-credential authorization that fails closed,
+and simulated transport faults for deterministic error tests. It contacts no network endpoint
+and labels every result `transport: "mock"`. This is not a live
+`capture-issuer`/`capture-verifier` integration: real connectors must wait for those
+components' actual APIs, and storage, signing and rulebook correlation remain later issues.
+See [`docs/capture.md`](capture.md).
 
 ## Safe URL and JSON import
 

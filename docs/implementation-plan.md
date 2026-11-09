@@ -78,8 +78,12 @@ the two without a current migrated issue are marked explicitly.
   (FR-015–FR-019, UI-006) — Phase 4, issues
   [#46](https://github.com/ForkbombEu/credimi-attestbook/issues/46),
   [#47](https://github.com/ForkbombEu/credimi-attestbook/issues/47) and
-  [#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48). Phase 0 only fixes the
-  contracts in [`docs/capture-integration.md`](capture-integration.md).
+  [#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48). Delivered:
+  #46 shipped the versioned envelope, normalization, secure references, integrity and
+  redaction; #47 delivered the typed push/pull adapter contracts and a deterministic offline
+  mock source ([`docs/capture.md`](capture.md)). Real `capture-issuer`/`capture-verifier`
+  connectors (gated on their actual APIs), persistence and the correlated capture explorer
+  (#48) remain unimplemented.
 - Credimi orchestration, headless-wallet workflow and continuous conformance
   (FR-020–FR-022) — Phase 5, issues
   [#49](https://github.com/ForkbombEu/credimi-attestbook/issues/49),
@@ -460,8 +464,8 @@ dimension as PASS.
 | AC-09 create/edit/publish a rulebook | Phase 2 | #40, #41, #42 |
 | AC-10 issuer consumes definitions via API | Phase 3 | #43, #44 |
 | AC-11 verifier consumes constraints via API | Phase 3 | #45 |
-| AC-12 capture design needs no validation-engine redesign | Phase 4 | #46 (envelope/normalization implemented; see capture.md), #47, #48; contracts in capture-integration.md |
-| AC-13 mock capture artifacts validate | Phase 4 | #47 |
+| AC-12 capture design needs no validation-engine redesign | Phase 4 | #46 (envelope/normalization implemented; see capture.md), #47 (push/pull adapter contracts and mock source implemented; the validation engine is untouched), #48; contracts in capture-integration.md |
+| AC-13 mock capture artifacts validate | Phase 4 | #47: the deterministic mock source normalizes every version 1 artifact type; its artifacts are validated only as untrusted capture evidence, not yet against a rulebook (#48) |
 | AC-14 capture evidence correlates with results | Phase 4 | #48 |
 | AC-15 Credimi consumes results without DB access | Phase 5 | #49 |
 | AC-16 dimensions remain distinguishable | Phase 1 | #33 |
@@ -470,8 +474,9 @@ dimension as PASS.
 
 Specification §16 test categories (standards, registry, validation, capture, integration)
 map to the layers above. Capture tests are executed for the envelope/normalization slice in #46
-(`src/capture/*.test.ts`); transport, mock-adapter and correlation tests arrive with #47 and
-#48. The matrix in [`docs/traceability.md`](traceability.md) remains the normative-to-test
+(`src/capture/*.test.ts`) and for the push/pull contracts, mock source, authorization and
+transport-error handling in #47 (`src/capture/adapters/*.test.ts`); correlation tests arrive
+with #48. The matrix in [`docs/traceability.md`](traceability.md) remains the normative-to-test
 record.
 
 ## 11. Open findings carried forward
@@ -493,7 +498,7 @@ a later issue can act on them; they do not block autonomous Phase 1 work.
 | TS11 catalogue authorisation mechanism is unspecified (§5.2.2) | Provisional product auth only (D-10). | #35; re-check TS11 |
 | `isLOTE` vs `isLoTE` spelling and future `etsi_lote` value | Preserve both/unknown values as extensible data (D-5). | #27 |
 | mdoc/mDL, browser, Deno and ARM behaviour are untested | Explicit `NOT_TESTED` / documented limitation (D-17, R-5, R-12). | Later format/runtime issue |
-| Capture decisions CD-1, CD-2, CD-3, CD-4, CD-5, CD-6 (field set, redaction depth, pull schedule, sync/async push, correlation ownership, artifact storage) | CD-1 (field set), CD-2 (default redaction: a preserved-member allow-list with full fallback) and CD-6 (reference-only external storage, not fetched) are provisionally settled for envelope version 1 by #46 in [`docs/capture.md`](capture.md); CD-3, CD-4 and CD-5 still need the transport and correlation work in #47/#48. | #46, #47, #48 |
+| Capture decisions CD-1, CD-2, CD-3, CD-4, CD-5, CD-6 (field set, redaction depth, pull schedule, sync/async push, correlation ownership, artifact storage) | CD-1 (field set), CD-2 (default redaction: a preserved-member allow-list with full fallback) and CD-6 (reference-only external storage, not fetched) are provisionally settled for envelope version 1 by #46 in [`docs/capture.md`](capture.md); #47 provisionally settles CD-3 for the mock source (on-demand pull, hashed bearer credential) and CD-4 as an asynchronous push contract, while a real source's authentication/polling schedule and a future HTTP ingestion route remain open. CD-5 (correlation-id ownership) still needs the correlation work in #48. | #46, #47, #48 |
 | PostgreSQL, semantic canonicalization, TS11 catalogue API and OID4VCI version target | Not needed for the Phase 1 MVP; later decisions with their own issues. | Future issues |
 
 ## 12. Assumptions and non-claims
