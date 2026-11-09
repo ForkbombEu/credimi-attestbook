@@ -115,8 +115,8 @@ describe('write operation security surface', () => {
       'replaceRulebookDraft',
     ])
 
-    // Draft validation, fixture generation and credential validation are read-only
-    // POSTs and stay public.
+    // Draft validation, fixture generation, verifier constraints and credential
+    // validation are read-only POSTs and stay public.
     const publicPosts = API_ROUTES.filter(
       (route) => route.method === 'post' && !route.security,
     ).map((route) => route.operationId)
@@ -124,6 +124,7 @@ describe('write operation security surface', () => {
       'validateRulebookDraft',
       'generateIssuerFixture',
       'validateCredential',
+      'resolveVerifierConstraints',
     ])
   })
 

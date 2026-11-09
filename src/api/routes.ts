@@ -32,6 +32,11 @@ import type {
 } from '../registry/types'
 import { parseRulebookVersionDocument, type RulebookVersionDocument } from '../registry/versioning'
 import { CREDENTIAL_VALIDATION_PATH, type CredentialValidationService } from '../validation'
+import {
+  VERIFIER_CONSTRAINTS_PATH,
+  VerifierPolicyResolver,
+  type VerifierPolicyService,
+} from '../verifier'
 
 import { apiError } from './errors'
 import type { OpenApiComponentName } from './schemas'
@@ -50,6 +55,7 @@ import {
   toRulebookResource,
   toRulebookVersionResource,
   toSchemaReferenceResource,
+  toVerifierConstraintsResource,
   toVersionDiffResource,
 } from './resources'
 
@@ -86,6 +92,7 @@ export type ApiOperationId =
   | 'discoverIssuer'
   | 'generateIssuerFixture'
   | 'validateCredential'
+  | 'resolveVerifierConstraints'
 
 export interface ApiParameterSpec {
   readonly name: string
@@ -120,7 +127,14 @@ export interface ApiRouteSpec {
   readonly summary: string
   readonly description: string
   readonly tag:
-    'service' | 'providers' | 'rulebooks' | 'versions' | 'imports' | 'issuers' | 'credentials'
+    | 'service'
+    | 'providers'
+    | 'rulebooks'
+    | 'versions'
+    | 'imports'
+    | 'issuers'
+    | 'credentials'
+    | 'verifiers'
   /** `true` marks a bearer-authenticated write operation. */
   readonly security: boolean
   readonly request?: ApiRequestBodySpec
@@ -745,6 +759,32 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
       ...errors(400, 404, 413, 500, 503),
     ],
   },
+  {
+    operationId: 'resolveVerifierConstraints',
+    method: 'post',
+    path: VERIFIER_CONSTRAINTS_PATH,
+    summary: 'Expose rulebook constraints and partial OpenID4VP-aware mappings',
+    description:
+      'Returns the typed attribute and format constraints of one pinned rulebook version, plus the verifier-policy interfaces AttestBook can map them to. The caller supplies the exact JSON Schema document bytes; each document must match its reference URI and sha256 SRI value before its constraints are inspected. The OpenID4VP DCQL mapping is an explicitly partial query fragment: the result is not a presentation request, carries no proof and reports every unsupported mapping instead of fabricating one.',
+    tag: 'verifiers',
+    security: false,
+    request: {
+      schema: 'ResolveVerifierConstraintsRequest',
+      mediaType: 'application/json',
+      required: true,
+      description:
+        'Pinned rulebook version, attestation type, optional format and the exact schema documents.',
+    },
+    responses: [
+      {
+        status: 200,
+        description:
+          'Typed verifier constraints, partial OpenID4VP DCQL mappings, unsupported mappings, diagnostics and limitations.',
+        schema: 'VerifierConstraintsResponse',
+      },
+      ...errors(400, 404, 413, 500, 503),
+    ],
+  },
 ]
 
 /** Narrow import seam so tests can double the pipeline without a network. */
@@ -759,6 +799,7 @@ export interface ApiDependencies {
   readonly importer?: ImportService
   readonly issuerDiscovery?: IssuerDiscoveryService
   readonly issuerFixtures?: IssuerFixtureService
+  readonly verifierPolicy?: VerifierPolicyService
 }
 
 export type ApiHandler = (context: Context) => Response | Promise<Response>
@@ -815,6 +856,17 @@ function requireIssuerDiscovery(
       503,
       'registry_unavailable',
       'The issuer discovery pipeline is not configured on this server.',
+    )
+  }
+  return service
+}
+
+function requireVerifierPolicy(service: VerifierPolicyService | undefined): VerifierPolicyService {
+  if (service === undefined) {
+    throw apiError(
+      503,
+      'registry_unavailable',
+      'The verifier policy resolver is not configured on this server.',
     )
   }
   return service
@@ -1475,6 +1527,15 @@ function generateIssuerFixtureHandler(service: IssuerFixtureService | undefined)
   }
 }
 
+function resolveVerifierConstraintsHandler(service: VerifierPolicyService | undefined): ApiHandler {
+  return async (context) => {
+    const verifierPolicy = requireVerifierPolicy(service)
+    const body = await readJsonBody(context)
+    const result = verifierPolicy.resolve(body)
+    return context.json({ data: toVerifierConstraintsResource(result) }, 200)
+  }
+}
+
 function validateCredentialHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const validation = requireValidation(dependencies)
@@ -1525,6 +1586,11 @@ export function createApiHandlers(
     (dependencies.registry === undefined
       ? undefined
       : new IssuerFixtureGenerator({ source: dependencies.registry }))
+  const verifierPolicy =
+    dependencies.verifierPolicy ??
+    (dependencies.registry === undefined
+      ? undefined
+      : new VerifierPolicyResolver({ source: dependencies.registry }))
 
   return {
     getHealth: healthHandler(),
@@ -1552,6 +1618,7 @@ export function createApiHandlers(
     discoverIssuer: discoverIssuerHandler(issuerDiscovery),
     generateIssuerFixture: generateIssuerFixtureHandler(issuerFixtures),
     validateCredential: validateCredentialHandler(dependencies),
+    resolveVerifierConstraints: resolveVerifierConstraintsHandler(verifierPolicy),
   }
 }
 
