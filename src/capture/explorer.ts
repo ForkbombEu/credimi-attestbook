@@ -224,6 +224,12 @@ export interface CaptureCorrelationInput {
   readonly rulebookId: string
   readonly rulebookVersion: string
   readonly attestationType: string
+  /**
+   * Optional pinned snapshot digest. When supplied, a validation result whose
+   * digest differs is refused before the recorded correlation is changed, so a
+   * stale pin can never overwrite correct evidence with different bytes.
+   */
+  readonly rulebookDigest: string | null
 }
 
 /** Default page size of the capture list. */
@@ -280,7 +286,20 @@ export function parseCaptureCorrelationInput(value: unknown): CaptureCorrelation
       'attestationType',
       MAX_ATTESTATION_TYPE_LENGTH,
     ),
+    rulebookDigest: parseOptionalRulebookDigest(value.rulebookDigest),
   }
+}
+
+const CAPTURE_RULEBOOK_DIGEST_PATTERN = /^[0-9a-f]{64}$/
+
+function parseOptionalRulebookDigest(value: unknown): string | null {
+  if (value === undefined || value === null) {
+    return null
+  }
+  if (typeof value !== 'string' || !CAPTURE_RULEBOOK_DIGEST_PATTERN.test(value)) {
+    throw invalidInput('rulebookDigest must be a lowercase hex SHA-256 digest')
+  }
+  return value
 }
 
 interface CaptureExplorerRecord {
@@ -398,6 +417,14 @@ export class CaptureExplorer {
       attestationType: request.attestationType,
       credential: text,
     })
+    // A stale pin must not replace a correct correlation. The validation run
+    // itself writes nothing, so refusing here leaves the previous binding and
+    // validation result untouched.
+    if (request.rulebookDigest !== null && result.rulebook.digest !== request.rulebookDigest) {
+      throw conflict(
+        'The rulebook version snapshot digest no longer matches the requested rulebookDigest; nothing was recorded.',
+      )
+    }
     const boundAt = this.now()
     if (Number.isNaN(boundAt.getTime())) {
       throw new Error('the capture explorer clock returned an invalid date')

@@ -225,18 +225,36 @@ describe('catalogue and version reads', () => {
     expect(requestUrl(firstCall(calls)).pathname).toBe('/api/v1/rulebooks/rulebook%2Fwith%20spaces')
   })
 
-  test('sends the configured bearer token only when one is configured', async () => {
-    const withToken = fakeFetch(() => jsonResponse(RULEBOOK_PAGE))
+  test('scopes the configured bearer token to authenticated operations', async () => {
+    const readFetch = fakeFetch(() => jsonResponse(RULEBOOK_PAGE))
     await new CredimiAdapter({
       baseUrl: BASE_URL,
       token: 'provider-token',
-      fetch: withToken.fetch,
+      fetch: readFetch.fetch,
     }).listRulebooks()
-    expect(authorizationOf(firstCall(withToken.calls))).toBe('Bearer provider-token')
+    expect(authorizationOf(firstCall(readFetch.calls))).toBeNull()
+    expect(firstCall(readFetch.calls).init.redirect).toBe('error')
 
-    const withoutToken = fakeFetch(() => jsonResponse(RULEBOOK_PAGE))
-    await new CredimiAdapter({ baseUrl: BASE_URL, fetch: withoutToken.fetch }).listRulebooks()
-    expect(authorizationOf(firstCall(withoutToken.calls))).toBeNull()
+    const correlateFetch = fakeFetch(() =>
+      errorResponse(401, 'unauthorized', 'The bearer token is missing.'),
+    )
+    const error = await rejection(
+      new CredimiAdapter({
+        baseUrl: BASE_URL,
+        token: 'provider-token',
+        retries: 0,
+        fetch: correlateFetch.fetch,
+      }).correlateCapture({ captureId: 'capture-1', pin: PIN }),
+    )
+
+    expect(error.code).toBe('unauthorized')
+    expect(authorizationOf(firstCall(correlateFetch.calls))).toBe('Bearer provider-token')
+    expect(requestBody(firstCall(correlateFetch.calls))).toEqual({
+      rulebookId: PIN.rulebookId,
+      rulebookVersion: PIN.version,
+      attestationType: PIN.attestationType,
+      rulebookDigest: PIN.contentDigest,
+    })
   })
 
   test('resolves a pin from the authoritative version record', async () => {

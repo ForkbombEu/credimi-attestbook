@@ -913,6 +913,11 @@ export const correlateCaptureRequestSchema = z.object({
   rulebookId: z.string(),
   rulebookVersion: z.string(),
   attestationType: z.string(),
+  /** Optional pinned snapshot digest; a mismatch is refused before recording. */
+  rulebookDigest: z
+    .string()
+    .regex(/^[0-9a-f]{64}$/)
+    .optional(),
 })
 
 export const captureCorrelationResultSchema = z.object({

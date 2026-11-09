@@ -577,6 +577,7 @@ export class CredimiAdapter {
         rulebookId: pin.rulebookId,
         rulebookVersion: pin.version,
         attestationType: pin.attestationType,
+        rulebookDigest: pin.contentDigest,
       },
       'capture correlation',
     )
@@ -627,9 +628,8 @@ export class CredimiAdapter {
 
   private async requestOnce<T>(options: RequestOptions<T>): Promise<T> {
     const headers: Record<string, string> = { accept: 'application/json' }
-    const token = options.token ?? this.token
-    if (token !== undefined) {
-      headers.authorization = `Bearer ${token}`
+    if (options.token !== undefined) {
+      headers.authorization = `Bearer ${options.token}`
     }
     let encodedBody: string | undefined
     if (options.body !== undefined) {

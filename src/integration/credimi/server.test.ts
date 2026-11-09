@@ -239,6 +239,24 @@ describe('capture evidence correlation', () => {
     expect(page.data.some((capture) => capture.captureId === CAPTURE_ID)).toBe(true)
   })
 
+  test('refuses a stale pinned digest without replacing the recorded correlation', async () => {
+    const { client, seeded } = await setup({ token: true })
+    const pin = await client.pinRulebook({
+      rulebookId: seeded.rulebookId,
+      version: seeded.version,
+      attestationType: seeded.attestationName,
+    })
+    const first = await client.correlateCapture({ captureId: CAPTURE_ID, pin })
+    const stalePin: CredimiRulebookPin = { ...pin, contentDigest: '0'.repeat(64) }
+
+    const error = await rejection(client.correlateCapture({ captureId: CAPTURE_ID, pin: stalePin }))
+
+    expect(error).toMatchObject({ code: 'conflict', status: 409 })
+    const detail = await client.getCapture(CAPTURE_ID)
+    expect(detail.rulebook?.contentDigest).toBe(seeded.digest)
+    expect(detail.validationResult?.validationId).toBe(first.validation.validationId)
+  })
+
   test('reports a rejected bearer token from the server', async () => {
     const { client, seeded } = await setup()
     const pin = await client.pinRulebook({
@@ -268,6 +286,39 @@ describe('real-socket failure and timeout handling', () => {
     servers.push(slowServer)
     const client = new CredimiAdapter({
       baseUrl: `http://127.0.0.1:${slowServer.port}`,
+      timeoutMs: 25,
+      retries: 0,
+    })
+
+    const error = await rejection(client.listRulebooks())
+
+    expect(error).toMatchObject({ code: 'timeout', retryable: true })
+  })
+
+  test('aborts a request while the response body is still streaming', async () => {
+    const encoder = new TextEncoder()
+    const streamServer = Bun.serve({
+      hostname: '127.0.0.1',
+      port: 0,
+      fetch: () => {
+        const stream = new ReadableStream<Uint8Array>({
+          async start(controller) {
+            try {
+              controller.enqueue(encoder.encode('{"data":'))
+              await Bun.sleep(250)
+              controller.enqueue(encoder.encode('[]}'))
+              controller.close()
+            } catch {
+              // The client aborted; the test server has nothing else to do.
+            }
+          },
+        })
+        return new Response(stream, { headers: { 'content-type': 'application/json' } })
+      },
+    })
+    servers.push(streamServer)
+    const client = new CredimiAdapter({
+      baseUrl: `http://127.0.0.1:${streamServer.port}`,
       timeoutMs: 25,
       retries: 0,
     })

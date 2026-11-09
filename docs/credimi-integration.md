@@ -79,6 +79,9 @@ pin:
 - Every validation and capture-correlation request names `rulebookId`, the exact
   `rulebookVersion` and the `attestationType`. There is no version range and no implicit
   upgrade.
+- A capture correlation carries the pinned `contentDigest` as `rulebookDigest`. The server
+  compares it with the snapshot it just validated and answers `409 conflict` **before**
+  recording, so a stale pin cannot overwrite an existing correlation with different bytes.
 - The adapter verifies the evidence the server returns against the pin: the rulebook
   identifier, version, snapshot digest and attestation type must all match, and the evidence
   must carry `digestVerified: true`. Any difference raises `pin_mismatch`; the response is
@@ -165,11 +168,14 @@ Authorization: Bearer <provider token>
 {
   "rulebookId": "0f8fad5b-d9cb-469f-a165-70867728950e",
   "rulebookVersion": "1.0",
-  "attestationType": "PID"
+  "attestationType": "PID",
+  "rulebookDigest": "<the pin's contentDigest>"
 }
 ```
 
-The response is the recorded correlation:
+If `rulebookDigest` is supplied and the version snapshot no longer has that digest, the server
+refuses with `409 conflict` before changing the recorded correlation. The response is the
+recorded correlation:
 
 ```json
 {
@@ -222,7 +228,7 @@ or a response body.
 | `unauthorized` | HTTP 401 from AttestBook. | No |
 | `forbidden` | HTTP 403. | No |
 | `not_found` | HTTP 404 (unknown rulebook, version, attestation type or capture). | No |
-| `conflict` | HTTP 409 (for example validation of evidence AttestBook refuses). | No |
+| `conflict` | HTTP 409 (evidence AttestBook refuses, or a stale `rulebookDigest` refused before recording). | No |
 | `invalid_input` | HTTP 400/422 with AttestBook's typed error envelope. | No |
 | `payload_too_large` | HTTP 413. | No |
 | `unavailable` | HTTP 429/502/503/504 — a transient server condition. | Yes |
