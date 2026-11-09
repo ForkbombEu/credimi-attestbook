@@ -22,7 +22,10 @@ enforcement), D-14 (SD-JWT VC + Ajv) and D-17 (structural scope only).
 published or draft rulebook version**. The engine:
 
 1. reads the rulebook and version from the registry and recomputes the SHA-256 of the stored
-   snapshot bytes; a mismatch aborts the run as an internal integrity failure;
+   snapshot bytes; a mismatch aborts the run as an internal integrity failure. For an
+   immutable (published or historical) version a bounded in-process cache may skip the
+   SQLite blob read and JSON parse of an already verified snapshot; the digest and version
+   identity are still checked on every run ([`docs/validation-performance.md`](validation-performance.md));
 2. resolves the selected attestation type from that snapshot, not from the current draft;
 3. recognises the credential format from the artifact (or an explicit caller hint);
 4. parses a real SD-JWT VC with the pinned `@sd-jwt/core` 0.24.1 parser, including disclosure
@@ -208,6 +211,13 @@ validation, a limit hit produces `NOT_TESTED` evidence with `schema_evaluation_t
 is checked before and after disclosures are unpacked. Each JSON Schema document is compiled with a fresh Ajv instance so caller-supplied
 `$id` state cannot leak between requests.
 
+The immutable-snapshot cache is itself bounded: at most 64 parsed snapshots and 16 MiB of
+snapshot bytes by default (`VALIDATION_CACHE_MAX_ENTRIES`,
+`VALIDATION_CACHE_MAX_MB`), with deterministic least-recently-used eviction. A snapshot
+larger than the whole byte budget is not cached. The cache stores owned copies and is
+per process; it never changes persisted artifacts
+([`docs/validation-performance.md`](validation-performance.md) §2–§3).
+
 ## 8. Verification
 
 Tests execute the real pinned libraries and a real migrated SQLite registry:
@@ -230,6 +240,14 @@ Tests execute the real pinned libraries and a real migrated SQLite registry:
 - `src/validation/engine.test.ts` — pinned version/digest evidence, dimension statuses,
   applicability/execution flags, evidence details, limitations, unsupported formats, key
   binding, digest-tamper abort, version pinning;
+- `src/validation/snapshot-cache.test.ts` — cache defaults, hit/miss accounting, byte
+  ownership, deterministic LRU eviction by entries and bytes, oversized-entry skipping,
+  clear semantics, invalid limits and the immutable-status predicate;
+- `src/validation/performance.test.ts` — one content read for repeated immutable
+  validations, draft bypass, fresh lifecycle metadata on a cache hit, cached-digest tamper
+  rejection, bounded multi-version caching, cached/uncached evidence equality, a stable
+  conformance reference across runs and the representative-snapshot performance budgets
+  ([`docs/validation-performance.md`](validation-performance.md));
 - `src/validation/schema-dimension.test.ts` — an unverifiable integrity pin with nothing
   applied is `NOT_TESTED`/unexecuted (also end to end), partial application stays executed
   `INCONCLUSIVE`, and a non-applied `FAIL` remains an executed conclusion;
@@ -254,8 +272,9 @@ evidence: caller-supplied dimension results are ignored, so an untested dimensio
 made to PASS. The FR-021 comparison slice ([`docs/headless-wallet-comparison.md`](headless-wallet-comparison.md))
 accepts a caller-supplied external wallet observation in a *separate* report; it never feeds
 that observation into this engine, never changes an AttestBook dimension status and never
-derives an overall validation PASS from it. Validation options (FR-009) are not accepted yet,
-draft versions are publicly
+derives an overall validation PASS from it. The immutable-snapshot cache is an in-process
+performance optimisation, not a second source of truth: validation options (FR-009) are not
+accepted yet, draft versions are publicly
 readable by design (writes are authenticated and provider-scoped; see
 [`docs/security.md`](security.md)), and a supplied schema document that
 belongs to the attestation but not to the credential's format is ignored rather than reported.

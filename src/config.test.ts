@@ -7,6 +7,8 @@ import {
   DEFAULT_SCHEMA_SANDBOX_CONCURRENCY,
   DEFAULT_SCHEMA_SANDBOX_MAX_RSS_MB,
   DEFAULT_SCHEMA_SANDBOX_TIMEOUT_MS,
+  DEFAULT_VALIDATION_CACHE_MAX_ENTRIES,
+  DEFAULT_VALIDATION_CACHE_MAX_MB,
   loadConfig,
 } from './config'
 
@@ -17,6 +19,8 @@ const DEFAULTS = {
   schemaSandboxTimeoutMs: DEFAULT_SCHEMA_SANDBOX_TIMEOUT_MS,
   schemaSandboxMaxRssMb: DEFAULT_SCHEMA_SANDBOX_MAX_RSS_MB,
   schemaSandboxConcurrency: DEFAULT_SCHEMA_SANDBOX_CONCURRENCY,
+  validationCacheMaxEntries: DEFAULT_VALIDATION_CACHE_MAX_ENTRIES,
+  validationCacheMaxMb: DEFAULT_VALIDATION_CACHE_MAX_MB,
 }
 
 describe('loadConfig', () => {
@@ -33,6 +37,8 @@ describe('loadConfig', () => {
         SCHEMA_SANDBOX_TIMEOUT_MS: '1500',
         SCHEMA_SANDBOX_MAX_RSS_MB: '128',
         SCHEMA_SANDBOX_CONCURRENCY: '1',
+        VALIDATION_CACHE_MAX_ENTRIES: '8',
+        VALIDATION_CACHE_MAX_MB: '4',
       }),
     ).toEqual({
       hostname: '127.0.0.1',
@@ -41,6 +47,8 @@ describe('loadConfig', () => {
       schemaSandboxTimeoutMs: 1500,
       schemaSandboxMaxRssMb: 128,
       schemaSandboxConcurrency: 1,
+      validationCacheMaxEntries: 8,
+      validationCacheMaxMb: 4,
     })
   })
 
@@ -70,6 +78,10 @@ describe('loadConfig', () => {
     ['SCHEMA_SANDBOX_MAX_RSS_MB', '12.5'],
     ['SCHEMA_SANDBOX_CONCURRENCY', '0'],
     ['SCHEMA_SANDBOX_CONCURRENCY', 'x'],
+    ['VALIDATION_CACHE_MAX_ENTRIES', '0'],
+    ['VALIDATION_CACHE_MAX_ENTRIES', '2.5'],
+    ['VALIDATION_CACHE_MAX_MB', '0'],
+    ['VALIDATION_CACHE_MAX_MB', 'x'],
   ])('rejects invalid %s=%p', (name, value) => {
     expect(() => loadConfig({ [name]: value })).toThrow(`invalid ${name}`)
   })

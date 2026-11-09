@@ -208,3 +208,72 @@ export function seedPublishedRulebook(
     token,
   }
 }
+
+/** Largest attestation-type count the registry accepts for one rulebook. */
+export const REPRESENTATIVE_TYPE_COUNT = 64
+
+/** One schema reference per supported format, at the registry's per-type cap. */
+export const REPRESENTATIVE_FORMATS_PER_TYPE = 16
+
+/** Padding that drives each reference URI close to the registry's 2,048 cap. */
+export const REPRESENTATIVE_URI_PADDING = 1_900
+
+function representativeSchemaUri(typeIndex: number, formatIndex: number): string {
+  return `https://example.org/rulebook/${typeIndex}/${formatIndex}/${'x'.repeat(REPRESENTATIVE_URI_PADDING)}`
+}
+
+/**
+ * Seeds a rulebook at the registry's structural bounds (64 attestation types,
+ * 16 schema references each, near-maximum reference URIs). The resulting
+ * snapshot is roughly 2 MiB, which the performance budget and benchmark use as
+ * the representative worst case. All references belong to one attestation type
+ * so a request can select `PID` without supplying schema documents.
+ */
+export function seedRepresentativeRulebook(database: Database, registry: Registry): SeededRulebook {
+  const provider = provisionProvider(database, {
+    name: 'Representative provider',
+    publicationAuthority: 'authority-representative',
+  })
+  const token = provider.token.secret
+  const formats = Array.from({ length: REPRESENTATIVE_FORMATS_PER_TYPE }, (_, index) =>
+    index === 0 ? 'dc+sd-jwt' : `format-${index}`,
+  )
+  const attestations = Array.from({ length: REPRESENTATIVE_TYPE_COUNT }, (_, index) => ({
+    name: index === 0 ? 'PID' : `Type-${index}`,
+    attestationLoS: 'iso_18045_high',
+    bindingType: 'key',
+    supportedFormats: formats,
+  }))
+
+  const rulebook = registry.createRulebook(token, {
+    name: 'Representative rulebook',
+    description: 'Performance fixture at the registry structural bounds',
+    applicableSpec: 'ts11@1.0.1',
+    attestations,
+  })
+  const created = registry.listAttestations(rulebook.id)
+  for (const [typeIndex, attestation] of created.entries()) {
+    for (let formatIndex = 0; formatIndex < formats.length; formatIndex += 1) {
+      registry.addSchemaReference(token, rulebook.id, {
+        formatIdentifier: formats[formatIndex] as string,
+        uri: representativeSchemaUri(typeIndex, formatIndex),
+        attestationId: attestation.id,
+      })
+    }
+  }
+
+  const version = registry.createRulebookVersion(token, rulebook.id, { version: '1.0' })
+  registry.publishRulebookVersion(token, rulebook.id, '1.0')
+
+  return {
+    rulebookId: rulebook.id,
+    rulebookName: 'Representative rulebook',
+    attestationName: 'PID',
+    version: version.version,
+    digest: version.contentDigest,
+    schemaUri: representativeSchemaUri(0, 0),
+    schemaContent: PID_TYPE_METADATA_TEXT,
+    integrity: sha256Sri(PID_TYPE_METADATA_TEXT),
+    token,
+  }
+}

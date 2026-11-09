@@ -7,7 +7,7 @@ import { openDatabase } from './db/database'
 import { applyMigrations } from './db/migrations'
 import { IssuerFixtureGenerator } from './fixtures'
 import { Registry } from './registry'
-import { CredentialValidator } from './validation'
+import { CredentialValidator, RulebookSnapshotCache } from './validation'
 
 /** Vite writes the built web UI here; `bun run build` produces it. */
 const UI_DIST_PATH = './dist/ui'
@@ -22,7 +22,14 @@ const schemaSandbox = {
   maxRssBytes: config.schemaSandboxMaxRssMb * 1024 * 1024,
   maxConcurrent: config.schemaSandboxConcurrency,
 }
-const validation = new CredentialValidator({ source: registry, sandbox: schemaSandbox })
+const validation = new CredentialValidator({
+  source: registry,
+  sandbox: schemaSandbox,
+  snapshotCache: new RulebookSnapshotCache({
+    maxEntries: config.validationCacheMaxEntries,
+    maxBytes: config.validationCacheMaxMb * 1024 * 1024,
+  }),
+})
 const issuerFixtures = new IssuerFixtureGenerator({ source: registry, sandbox: schemaSandbox })
 // UI-006 is deliberately mock-backed: the explorer is seeded from the
 // deterministic local mock source and labels every capture `transport: mock`.

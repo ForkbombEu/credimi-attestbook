@@ -108,9 +108,12 @@ the two without a current migrated issue are marked explicitly.
   policy, explicit SSRF/recursion/audit verification and the residual-risk and remediation
   register ([`docs/security-threat-model.md`](security-threat-model.md)); the audit leaves
   HTTP rate limiting, token expiry/rotation and denied-attempt audit open as stated findings.
-  #53 (performance/caching) and
+  #53 shipped the representative performance baseline and CI budgets, the bounded
+  immutable-rulebook snapshot cache that never skips digest or version-identity checks,
+  reproducible cold/warm evidence tests and a development benchmark
+  ([`docs/validation-performance.md`](validation-performance.md), spec §17 and Phase 6).
   [#54](https://github.com/ForkbombEu/credimi-attestbook/issues/54) (ETSI migration and
-  external interoperability) remain.
+  external interoperability) remains.
 - mdoc/mDL validation. Phase 1 recognises the format from metadata but reports it
   `NOT_TESTED`; no fake parser and no implied support (FR-011).
 - Real cryptographic, trust, protocol or interoperability validation of credentials.
