@@ -1,11 +1,13 @@
 # AttestBook API security model — authentication, provider authorization and secret handling
 
 **Status:** Phase 1 implementation and verification of the write-API security model for
-[issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35). It documents what the
-server enforces, not a future design. It is **not** a TS11 normative authorisation mechanism:
-TS11 §5.2.2 leaves that unspecified, so AttestBook uses the provisional product model of
-decision D-10. The broader threat model, SSRF recursion and artifact-retention work are
-tracked separately by [issue #52](https://github.com/ForkbombEu/credimi-attestbook/issues/52).
+[issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35), reviewed by the Phase 6
+security audit in [issue #52](https://github.com/ForkbombEu/credimi-attestbook/issues/52). It
+documents what the server enforces, not a future design. It is **not** a TS11 normative
+authorisation mechanism: TS11 §5.2.2 leaves that unspecified, so AttestBook uses the
+provisional product model of decision D-10. The cross-cutting threat model, SSRF/recursion
+verification, retention policy and residual-risk register are in
+[`docs/security-threat-model.md`](security-threat-model.md).
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) §13 (public API) and §15
 (security requirements).
@@ -192,10 +194,12 @@ trail is not exposed over HTTP; it is read by operators from the database.
   lifecycle events, not rejected requests.
 - **Transport security is deployment-owned.** AttestBook serves HTTP; a deployment must
   terminate TLS in front of it. Bearer tokens are not meaningful over plaintext transport.
-- **The broader threat model is separate.** SSRF and schema recursion hardening, artifact
-  retention and a full security test matrix are tracked by issue #52; this document covers the
+- **The cross-cutting audit is separate.** SSRF and schema recursion, artifact retention,
+  the full security test matrix and the residual-risk register are recorded in
+  [`docs/security-threat-model.md`](security-threat-model.md); this document covers the
   write-API authentication, provider authorization, error and secret-handling model asked for
-  by issue #35.
+  by issue #35. The audit leaves three limitations open and explicit: no HTTP rate limiting,
+  no token expiry/rotation and no audit row for denied attempts.
 
 ## 9. Verification
 
@@ -226,10 +230,11 @@ trail is not exposed over HTTP; it is read by operators from the database.
 ## 10. References
 
 - [Specification §13 and §15](specification.md)
+- [Security threat model, retention policy and Phase 6 audit](security-threat-model.md)
 - [API contract and error table](api.md)
 - [Issuer discovery contract](discovery.md)
 - [Registry authorization and ownership](registry.md)
 - [Architecture §6](architecture.md)
 - [Decision D-10](implementation-plan.md)
-- [Issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) and the follow-up
-  security work in [issue #52](https://github.com/ForkbombEu/credimi-attestbook/issues/52)
+- [Issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) and the Phase 6
+  audit in [issue #52](https://github.com/ForkbombEu/credimi-attestbook/issues/52)

@@ -434,7 +434,11 @@ and `UPDATE OR REPLACE`); a rejected mutation leaves the database unchanged. Art
 append-only: deleting a draft rulebook removes its draft version rows but does not reclaim
 artifact bytes, because there is no safe way to delete content-addressed bytes in this slice.
 Garbage collection is not implemented; retention is an operator concern until a slice adds it
-explicitly.
+explicitly. The Phase 6 audit records this as an accepted retention decision: published and
+historical bytes are retained indefinitely for reproducibility, unreferenced draft artifacts
+are not reclaimed, and any future collector may delete only artifacts referenced by no
+version row after an explicit window
+([`docs/security-threat-model.md`](security-threat-model.md) §4.2, finding F4).
 
 ### 6.5 Publication export
 

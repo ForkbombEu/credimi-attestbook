@@ -131,6 +131,25 @@ Test categories (spec §16): **standards**, **registry**, **validation**, **capt
 
 * * *
 
+Matrix C — Specification §15 security controls to tests
+-------------------------------------------------------
+
+Added by the Phase 6 security audit ([issue #52](https://github.com/ForkbombEu/credimi-attestbook/issues/52)). The full threat catalogue, retention/redaction policy, resource budgets and residual risks are in [`docs/security-threat-model.md`](security-threat-model.md).
+
+| §15 control | Implementation boundary | Tests | Status |
+| --- | --- | --- | --- |
+| SSRF protection; safe URL validation | `src/import/url.ts` (https-only, literal classification, every DNS answer public), pinned-address transport | `src/import/url.test.ts`, `src/import/http.test.ts`, `src/import/http-transport.test.ts`, `src/discovery/discover.test.ts` | implemented |
+| Network timeouts; response-size limits | shared import fetch/transport (10 s request, 15 s total, 2 MiB cap) | `src/import/http.test.ts`, `src/import/http-transport.test.ts` | implemented |
+| JSON parsing limits; JSON Schema reference controls | `src/import/json.ts`, `src/import/preview.ts`, `src/validation/schema.ts` (refs rejected, depth 64) | `src/import/json.test.ts`, `src/import/preview.test.ts`, `src/validation/schema.test.ts` | implemented |
+| Safe handling of recursive references | reference keywords rejected before Ajv; OWF `extends` depth 10 | `src/validation/schema.test.ts` (cyclic `$ref`/`$dynamicRef`/`$recursiveRef`), `src/standards/references.test.ts` | implemented |
+| Resource-consumption limits | schema sandbox, capture limits, registry batch bounds, 4 MiB HTTP body | `src/validation/schema-sandbox.test.ts`, `src/capture/security.test.ts`, `src/app.validation.test.ts`; rate limiting/concurrency are recorded open findings F1 | partial (F1) |
+| Authentication; authorization; provider ownership | central bearer check plus `requireOwnedRulebook` | `src/api/security.test.ts`, `src/api/routes.test.ts`, `src/registry/authorization.test.ts`, `src/api/publication.test.ts` | implemented |
+| Secret redaction; personal-data minimization | hash-only tokens, no request logging, capture redaction and redacted-only projection, no validation persistence | `src/api/security.test.ts`, `src/capture/redaction.test.ts`, `src/capture/security.test.ts`, `src/capture/explorer.test.ts` | implemented |
+| Secure artifact storage; retention | content-addressed SQLite artifacts; published/historical immutability; capture process-lifetime bounds; retention policy §4 | `src/registry/versions.test.ts`, `src/db/migrations.test.ts`, `src/publication/export.test.ts`, `src/capture/explorer.test.ts` | implemented with accepted residual F4/F5 |
+| Audit logging for publication operations | `audit_log` on every registry mutation, including publication and import-created drafts | `src/api/publication.test.ts`, `src/registry/versions.test.ts`, `src/registry/registry.test.ts`, `src/import/importer.test.ts` | implemented; denied attempts open (F3) |
+
+* * *
+
 Notes and status
 ----------------
 

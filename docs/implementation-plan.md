@@ -104,10 +104,13 @@ the two without a current migrated issue are marked explicitly.
   service, not a second orchestration platform: external orchestration owns recurrence and
   run history.
 - Security hardening, performance/caching and ETSI migration or external interoperability
-  checks — Phase 6, issues
-  [#52](https://github.com/ForkbombEu/credimi-attestbook/issues/52),
-  [#53](https://github.com/ForkbombEu/credimi-attestbook/issues/53) and
-  [#54](https://github.com/ForkbombEu/credimi-attestbook/issues/54).
+  checks — Phase 6. Delivered: #52 shipped the security threat model, retention/redaction
+  policy, explicit SSRF/recursion/audit verification and the residual-risk and remediation
+  register ([`docs/security-threat-model.md`](security-threat-model.md)); the audit leaves
+  HTTP rate limiting, token expiry/rotation and denied-attempt audit open as stated findings.
+  #53 (performance/caching) and
+  [#54](https://github.com/ForkbombEu/credimi-attestbook/issues/54) (ETSI migration and
+  external interoperability) remain.
 - mdoc/mDL validation. Phase 1 recognises the format from metadata but reports it
   `NOT_TESTED`; no fake parser and no implied support (FR-011).
 - Real cryptographic, trust, protocol or interoperability validation of credentials.
