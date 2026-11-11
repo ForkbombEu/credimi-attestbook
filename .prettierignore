@@ -14,3 +14,9 @@ dist/
 coverage/
 node_modules/
 bun.lock
+
+# Installed Credimi brand assets and Impeccable project context
+ui/public/brand/
+.dsh/
+DESIGN.md
+PRODUCT.md

@@ -57,16 +57,16 @@ function staticFileHandler(filePath: string, cacheControl: string) {
 }
 
 /**
- * Serves Vite's content-addressed files under `/assets/*`. The resolved path
- * must stay inside the asset directory; dot segments and backslashes are
- * rejected before the filesystem is touched.
+ * Serves one UI directory tree under a URL prefix. The resolved path must stay
+ * inside that directory; dot segments and backslashes are rejected before the
+ * filesystem is touched.
  */
-function uiAssetHandler(uiRoot: string) {
-  const assetRoot = resolve(uiRoot, 'assets')
+function uiDirectoryHandler(root: string, prefix: string, cacheControl: string) {
+  const directoryRoot = resolve(root)
   return async (context: Context): Promise<Response> => {
     let relative: string
     try {
-      relative = decodeURIComponent(context.req.path.slice('/assets/'.length))
+      relative = decodeURIComponent(context.req.path.slice(prefix.length))
     } catch {
       return context.notFound()
     }
@@ -78,8 +78,8 @@ function uiAssetHandler(uiRoot: string) {
     ) {
       return context.notFound()
     }
-    const filePath = resolve(assetRoot, relative)
-    if (filePath !== assetRoot && !filePath.startsWith(`${assetRoot}${sep}`)) {
+    const filePath = resolve(directoryRoot, relative)
+    if (filePath !== directoryRoot && !filePath.startsWith(`${directoryRoot}${sep}`)) {
       return context.notFound()
     }
 
@@ -91,7 +91,7 @@ function uiAssetHandler(uiRoot: string) {
       status: 200,
       headers: {
         'content-type': file.type === '' ? 'application/octet-stream' : file.type,
-        'cache-control': 'public, max-age=31536000, immutable',
+        'cache-control': cacheControl,
         'x-content-type-options': 'nosniff',
       },
     })
@@ -124,13 +124,13 @@ export function createApp(options: AppOptions = {}): Hono {
 
   if (options.uiRoot !== undefined) {
     const uiRoot = resolve(options.uiRoot)
-    // The entry document and the icon are served from explicit paths; only
-    // Vite's content-addressed assets go through the asset handler, which
-    // refuses to walk outside the build output.
+    // The entry document is served from explicit paths; Vite's content-addressed
+    // assets and the installed Credimi brand directory go through directory
+    // handlers that refuse to walk outside the build output.
     app.get('/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get(
       '/favicon.svg',
-      staticFileHandler(resolve(uiRoot, 'favicon.svg'), 'public, max-age=3600'),
+      staticFileHandler(resolve(uiRoot, 'brand/logos/credimi_logo.svg'), 'public, max-age=3600'),
     )
     // The client router owns `/rulebooks/<id>` and `/playground`. Serving the
     // entry document for those paths makes a deep link and a browser reload
@@ -142,7 +142,18 @@ export function createApp(options: AppOptions = {}): Hono {
     app.get('/captures', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/captures/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/captures/*', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
-    app.use('/assets/*', uiAssetHandler(uiRoot))
+    app.use(
+      '/assets/*',
+      uiDirectoryHandler(
+        resolve(uiRoot, 'assets'),
+        '/assets/',
+        'public, max-age=31536000, immutable',
+      ),
+    )
+    app.use(
+      '/brand/*',
+      uiDirectoryHandler(resolve(uiRoot, 'brand'), '/brand/', 'public, max-age=3600'),
+    )
   }
 
   app.notFound((c) =>
