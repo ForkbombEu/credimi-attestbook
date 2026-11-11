@@ -1,0 +1,13 @@
+{
+  "detector": {
+    "ignoreRules": ["kicker-above-heading"],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "Inter",
+        "reason": "Credimi brand font, declared by DESIGN.md and self-hosted in ui/public/brand/fonts"
+      }
+    ]
+  }
+}

@@ -11,8 +11,15 @@ const app = createApp()
 
 const uiDirectory = mkdtempSync(join(tmpdir(), 'attestbook-ui-'))
 mkdirSync(join(uiDirectory, 'assets'))
+mkdirSync(join(uiDirectory, 'brand', 'fonts'), { recursive: true })
+mkdirSync(join(uiDirectory, 'brand', 'logos'), { recursive: true })
 writeFileSync(join(uiDirectory, 'index.html'), '<!doctype html><title>AttestBook</title>')
-writeFileSync(join(uiDirectory, 'favicon.svg'), '<svg xmlns="http://www.w3.org/2000/svg"></svg>')
+writeFileSync(join(uiDirectory, 'brand', 'style.css'), 'body { color: var(--brand-primary); }')
+writeFileSync(join(uiDirectory, 'brand', 'fonts', 'InterVariable.ttf'), 'font-bytes')
+writeFileSync(
+  join(uiDirectory, 'brand', 'logos', 'credimi_logo.svg'),
+  '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+)
 writeFileSync(join(uiDirectory, 'assets', 'app.js'), 'export const ready = true')
 
 afterAll(() => {
@@ -81,11 +88,17 @@ describe('built web UI', () => {
     expect(await response.text()).toContain('<title>AttestBook</title>')
   })
 
-  test('serves the icon and content-addressed assets with a nosniff header', async () => {
-    const icon = await uiApp.request('/favicon.svg')
-    expect(icon.status).toBe(200)
-    expect(icon.headers.get('content-type')).toContain('image/svg+xml')
-    expect(icon.headers.get('x-content-type-options')).toBe('nosniff')
+  test('serves the Credimi brand assets and content-addressed assets with a nosniff header', async () => {
+    const brandStylesheet = await uiApp.request('/brand/style.css')
+    expect(brandStylesheet.status).toBe(200)
+    expect(brandStylesheet.headers.get('content-type')).toContain('text/css')
+    expect(brandStylesheet.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(await brandStylesheet.text()).toContain('--brand-primary')
+
+    const brandFont = await uiApp.request('/brand/fonts/InterVariable.ttf')
+    expect(brandFont.status).toBe(200)
+    expect(brandFont.headers.get('x-content-type-options')).toBe('nosniff')
+    expect(await brandFont.text()).toBe('font-bytes')
 
     const asset = await uiApp.request('/assets/app.js')
     expect(asset.status).toBe(200)
@@ -139,6 +152,20 @@ describe('built web UI', () => {
           message: 'No route matches the request path.',
         },
       })
+    }
+  })
+
+  test('rejects brand path traversal and missing brand files with the JSON 404', async () => {
+    for (const path of [
+      '/brand/%2e%2e/index.html',
+      '/brand/%2e%2e%2findex.html',
+      '/brand/..%5cindex.html',
+      '/brand/missing.css',
+      '/brand/',
+    ]) {
+      const response = await uiApp.request(path)
+      expect(response.status, path).toBe(404)
+      expect(response.headers.get('content-type')).toContain('application/json')
     }
   })
 

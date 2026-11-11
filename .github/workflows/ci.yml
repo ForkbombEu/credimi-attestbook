@@ -36,6 +36,9 @@ jobs:
       - name: Lint
         run: bun run lint
 
+      - name: Check design anti-patterns (Impeccable)
+        run: bun run lint:design
+
       - name: Typecheck
         run: bun run typecheck
 

@@ -339,13 +339,61 @@ bun run test:ui      # Vitest component, logic and accessibility tests
 bun run test:e2e     # Playwright against the real API with seeded data
 ```
 
-`src/server.ts` serves `dist/ui/index.html` at `/`, `dist/ui/favicon.svg` at that path,
-Vite's content-addressed files under `/assets/*`, and the same entry document for
-`/rulebooks/*` deep links. When `dist/ui` is absent (a source checkout without a UI build),
-the UI routes are not registered, so `/` and `/rulebooks/*` keep the JSON 404 instead of
-serving a broken page. The Dockerfile copies the `ui/` sources before building, so the
-container serves the built UI from the same origin as the API. The browser never uses a
-private backdoor.
+`src/server.ts` serves `dist/ui/index.html` at `/`, Vite's content-addressed
+files under `/assets/*`, the installed Credimi brand directory under `/brand/*`,
+and the same entry document for `/rulebooks/*` deep links. When `dist/ui` is absent (a source checkout without a
+UI build), the UI routes are not registered, so `/` and `/rulebooks/*` keep the
+JSON 404 instead of serving a broken page. The Dockerfile copies the `ui/`
+sources before building, so the container serves the built UI from the same
+origin as the API. The browser never uses a private backdoor.
+
+### Brand assets and design checks
+
+The UI adopts the Credimi Extras Template visual system. Its canonical assets are
+installed byte-for-byte under `ui/public/brand/` and served unchanged at
+`/brand/`:
+
+- `/brand/style.css` — the Credimi brand stylesheet, loaded by `ui/index.html`
+  before the application stylesheet;
+- `/brand/fonts/InterVariable.ttf` and
+  `/brand/fonts/SourceCodeProVariable.ttf` — the self-hosted families with their
+  SIL OFL 1.1 licences;
+- `/brand/logos/*.svg` — the four canonical Credimi logos; the mark is also the
+  favicon, linked directly from `/brand/logos/credimi_logo.svg`.
+
+No web asset is loaded from an external CDN, and the two banners mandated by
+`DESIGN.md` §13 are rendered by the shared layout on every route.
+`ui/src/brand.test.ts` pins the canonical logo and font bytes and fails if any
+stylesheet or entry document starts loading an external asset.
+
+Impeccable provides the design vocabulary and the anti-slop detector. Version
+4.8.2 (engine 0.1.21, Apache-2.0, from
+<https://github.com/pbakaus/impeccable>) is installed for the project under
+`.dsh/skills/impeccable/` (with `PRODUCT.md`, `DESIGN.md` and
+`.impeccable/config.json` as its project context), and
+`bun run lint:design` runs the mechanical detector over `ui/src`. CI runs the
+same command in the `quality` job, so a UI change that trips a design
+anti-pattern does not merge. `.impeccable/config.json` records the two
+deliberate brand exceptions: the overused-font rule for the self-hosted Inter
+brand face, and the generic `kicker-above-heading` rule, because `DESIGN.md` §6
+mandates the Credimi eyebrow pattern above every page heading.
+
+### Visual comparison
+
+`docs/ui/brand/` holds the before/after captures for the brand restyle, taken
+from the seeded end-to-end server at 1440×1000 (and 390×844 for the mobile
+catalog). The baseline is the pre-restyle application; the after set is the
+Credimi-branded application with the same fixtures and viewport:
+
+| View | Before | After |
+| --- | --- | --- |
+| Rulebook catalog | `brand/catalog-before.png` | `brand/catalog-after.png` |
+| Rulebook catalog (mobile) | `brand/catalog-mobile-before.png` | `brand/catalog-mobile-after.png` |
+| Rulebook details | `brand/detail-before.png` | `brand/detail-after.png` |
+| Credential playground | `brand/playground-before.png` | `brand/playground-after.png` |
+| Capture explorer | `brand/captures-before.png` | `brand/captures-after.png` |
+| Draft editor | `brand/editor-before.png` | `brand/editor-after.png` |
+| New-rulebook editor | `brand/editor-new-before.png` | `brand/editor-new-after.png` |
 
 ## 5. Tests and evidence
 
@@ -387,6 +435,10 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   token, responsive labels, the shared header navigation and axe-core checks
   (`ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`,
   `ui/src/capture.test.ts`);
+- the shared chrome: the Credimi Extras top and footer strips (text, the single
+  `https://credimi.io` link with `target="_blank"` and `rel="noopener"`, wordmark
+  alt text, DOM order), the header logo lockup and axe-core checks
+  (`ui/src/components/Layout.test.tsx`);
 - the router: path parsing (including `/playground`, `/captures`, `/captures/<id>`,
   `/rulebooks/new` and `/rulebooks/<id>/edit`), encoded ids, malformed paths, history
   navigation and modified clicks keeping native anchor behaviour;
@@ -403,6 +455,8 @@ Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, `ui/e2e/editor
   rulebook used by the playground, with provider, version, status,
   attestation, source and compatibility content;
 - search, provider and status filters, filtered-empty state and reset;
+- every status chip keeps its label inside the pill on the catalog and the
+  detail version history;
 - delayed-API loading state, injected API error and successful retry;
 - catalog → detail navigation, deep-link reload, back-to-catalog, detail metadata,
   attestations, schema references, provenance, compatibility labels, version history and
