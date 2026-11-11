@@ -24,6 +24,10 @@ at `/brand/` (stylesheet `/brand/style.css`, fonts `/brand/fonts/`, logos
 `/brand/logos/`). `ui/index.html` loads `/brand/style.css` first and the
 application's own stylesheet after it.
 
+References in this document to `brand/`, `directives/HITL.md`, `HITL/…` and
+the undefined-custom-property lint are inherited from the upstream Credimi
+Extras template; this repository does not carry those HITL files.
+
 ---
 
 ## Table of contents

@@ -128,10 +128,6 @@ export function createApp(options: AppOptions = {}): Hono {
     // assets and the installed Credimi brand directory go through directory
     // handlers that refuse to walk outside the build output.
     app.get('/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
-    app.get(
-      '/favicon.svg',
-      staticFileHandler(resolve(uiRoot, 'brand/logos/credimi_logo.svg'), 'public, max-age=3600'),
-    )
     // The client router owns `/rulebooks/<id>` and `/playground`. Serving the
     // entry document for those paths makes a deep link and a browser reload
     // address the same view instead of a JSON 404; the API stays under

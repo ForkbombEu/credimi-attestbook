@@ -88,13 +88,7 @@ describe('built web UI', () => {
     expect(await response.text()).toContain('<title>AttestBook</title>')
   })
 
-  test('serves the icon, the Credimi brand assets and content-addressed assets with a nosniff header', async () => {
-    const icon = await uiApp.request('/favicon.svg')
-    expect(icon.status).toBe(200)
-    expect(icon.headers.get('content-type')).toContain('image/svg+xml')
-    expect(icon.headers.get('x-content-type-options')).toBe('nosniff')
-    expect(await icon.text()).toContain('<svg')
-
+  test('serves the Credimi brand assets and content-addressed assets with a nosniff header', async () => {
     const brandStylesheet = await uiApp.request('/brand/style.css')
     expect(brandStylesheet.status).toBe(200)
     expect(brandStylesheet.headers.get('content-type')).toContain('text/css')

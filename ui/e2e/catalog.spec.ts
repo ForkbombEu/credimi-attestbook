@@ -119,6 +119,20 @@ test.describe('rulebook catalog against the real API', () => {
   })
 })
 
+test('keeps every badge label inside its pill', async ({ page }) => {
+  await page.goto('/')
+  await expect(page.locator('.badge').first()).toBeVisible()
+
+  const overflowing = await page
+    .locator('.badge')
+    .evaluateAll((elements) =>
+      elements
+        .filter((element) => element.scrollHeight > element.clientHeight + 1)
+        .map((element) => element.textContent),
+    )
+  expect(overflowing).toEqual([])
+})
+
 test.describe('responsive catalog', () => {
   test.use({ viewport: { width: 390, height: 844 } })
 
