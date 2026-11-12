@@ -154,9 +154,9 @@ describe('generated OpenAPI document', () => {
     }
   })
 
-  test('protected state-changing operations document the CSRF header', () => {
+  test('cookie-authenticated state-changing operations document the CSRF header', () => {
     for (const route of API_ROUTES.filter(
-      (candidate) => candidate.security && candidate.method !== 'get',
+      (candidate) => (candidate.security || candidate.sessionAuth) && candidate.method !== 'get',
     )) {
       const operation = operationFor(route)
       const parameters = (operation['parameters'] ?? []) as { name?: string; in?: string }[]

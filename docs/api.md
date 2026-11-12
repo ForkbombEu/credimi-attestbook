@@ -760,7 +760,8 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Registry | missing, unknown or revoked token | `401` | `unauthorized` |
 | Administrator login | wrong password or unknown username (indistinguishable) | `401` | `unauthorized` |
 | Administrator session | missing, unknown, expired or revoked session on `/auth/me` or a protected route | `401` | `unauthorized` |
-| Administrator session | cookie-authenticated state change without its `X-CSRF-Token`, or a foreign `Origin`/cross-site `Sec-Fetch-Site` | `403` | `csrf_failed` |
+| Administrator session | cookie-authenticated protected write without its `X-CSRF-Token`, or with a foreign `Origin`/cross-site `Sec-Fetch-Site` | `403` | `csrf_failed` |
+| Administrator session | logout of a live session without its `X-CSRF-Token` (the session is not revoked) | `403` | `csrf_failed` |
 | Administrator login/logout | foreign `Origin` or cross-site `Sec-Fetch-Site` | `403` | `forbidden` |
 | Registry / publish handler | authenticated provider does not own the resource | `403` | `forbidden` |
 | API / registry | resource does not exist | `404` | `not_found` |

@@ -374,9 +374,11 @@ export class AdminAuth {
   }
 
   /**
-   * Constant-time CSRF comparison. A session created before the CSRF binding
-   * existed stores the empty default and therefore never matches, so it must
-   * sign in again before a write: an empty token is never accepted as proof.
+   * Constant-time CSRF comparison. Migration `0005` backfills every session
+   * created before the column existed with a random token that `GET
+   * /api/v1/auth/me` returns, so those sessions keep working. An empty stored
+   * token (only possible if that backfill is skipped) never matches, and an
+   * empty presented value is never accepted as proof.
    */
   private csrfMatches(row: AdminSessionRow, presented: string | null): boolean {
     if (

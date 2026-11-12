@@ -107,7 +107,9 @@ function parameterObject(parameter: {
  * non-GET operation exactly as the route table derives the check.
  */
 function csrfHeaderParameter(route: ApiRouteSpec): JsonObject | null {
-  if (!route.security || route.method === 'get') {
+  // Every state-changing operation that can authenticate with the session
+  // cookie needs CSRF evidence: the protected write routes and logout.
+  if ((!route.security && !route.sessionAuth) || route.method === 'get') {
     return null
   }
   return {
@@ -115,7 +117,7 @@ function csrfHeaderParameter(route: ApiRouteSpec): JsonObject | null {
     in: 'header',
     required: false,
     description:
-      'Required when the request authenticates with the administrator browser-session cookie instead of a bearer token. Value: the `csrfToken` returned by POST /api/v1/auth/login or GET /api/v1/auth/me. A missing or wrong token answers 403 csrf_failed.',
+      'Required when the request authenticates with the administrator browser-session cookie. Value: the `csrfToken` returned by POST /api/v1/auth/login or GET /api/v1/auth/me. A missing or wrong token answers 403 csrf_failed.',
     schema: { type: 'string' },
   }
 }

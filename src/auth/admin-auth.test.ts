@@ -410,6 +410,63 @@ describe('admin session login', () => {
   })
 })
 
+describe('session CSRF binding', () => {
+  test('matches only the token minted with the live session', async () => {
+    const harness = setup()
+    const outcome = await login(harness)
+    if (outcome.kind !== 'authenticated') {
+      throw new Error('expected an authenticated login')
+    }
+
+    expect(harness.auth.verifySessionCsrf(outcome.sessionId, outcome.csrfToken)).toBe('matched')
+
+    for (const candidate of [
+      null,
+      '',
+      'not-the-session-token',
+      'x'.repeat(300),
+      outcome.csrfToken.toUpperCase(),
+    ]) {
+      expect(
+        harness.auth.verifySessionCsrf(outcome.sessionId, candidate),
+        `candidate ${String(candidate)}`,
+      ).toBe('mismatch')
+    }
+
+    expect(harness.auth.verifySessionCsrf('unknown-session', outcome.csrfToken)).toBe(
+      'session_missing',
+    )
+  })
+
+  test('a revoked session no longer verifies its CSRF token', async () => {
+    const harness = setup()
+    const outcome = await login(harness)
+    if (outcome.kind !== 'authenticated') {
+      throw new Error('expected an authenticated login')
+    }
+
+    harness.auth.logout(outcome.sessionId)
+    expect(harness.auth.verifySessionCsrf(outcome.sessionId, outcome.csrfToken)).toBe(
+      'session_missing',
+    )
+  })
+
+  test('resolves the same provider actor as a bearer token', async () => {
+    const harness = setup()
+    const outcome = await login(harness)
+    if (outcome.kind !== 'authenticated') {
+      throw new Error('expected an authenticated login')
+    }
+
+    expect(
+      harness.auth.authenticateSession(outcome.sessionId, {
+        csrfToken: outcome.csrfToken,
+        requireCsrf: true,
+      }),
+    ).toEqual({ providerId: harness.providerId, authMethod: 'session', tokenId: null })
+  })
+})
+
 describe('same-origin request checks', () => {
   test('accepts matching, absent and direct-navigation origins', () => {
     expect(

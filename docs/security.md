@@ -234,7 +234,9 @@ relevant mapping is:
 | --- | --- | --- | --- |
 | Missing, malformed, unknown or revoked bearer token | `401` | `unauthorized` | `WWW-Authenticate: Bearer realm="attestbook"` |
 | Missing, unknown, expired or revoked session cookie | `401` | `unauthorized` | the same uniform body and bearer challenge as a failed token |
-| Cookie-authenticated state change without its CSRF token, or with a foreign `Origin`/cross-site `Sec-Fetch-Site` | `403` | `csrf_failed` | none; nothing is written or revoked |
+| Cookie-authenticated protected write without its CSRF token, or with a foreign `Origin`/cross-site `Sec-Fetch-Site` | `403` | `csrf_failed` | none; nothing is written |
+| Logout of a live session without its CSRF token | `403` | `csrf_failed` | none; the session is not revoked and the cookie is not expired |
+| Cross-origin login or logout (foreign `Origin`/cross-site `Sec-Fetch-Site`) | `403` | `forbidden` | refused before any session is created or revoked |
 | Authenticated but not the owning provider | `403` | `forbidden` | none |
 | Unknown resource (for the owner) | `404` | `not_found` | none |
 | Invalid create/query/body input | `400` | `invalid_request` | none |
@@ -310,6 +312,14 @@ trail is not exposed over HTTP; it is read by operators from the database.
   remote address; in a proxy deployment every browser presents the proxy's address, so the
   twenty-attempt client window is effectively global. `X-Forwarded-For` is deliberately not
   trusted as a limiter key.
+- **A credential revoked during an import fetch is not re-checked.** The actor is resolved once
+  when a protected request enters the route and is passed to the importer, which writes after
+  its bounded outbound fetch. Before issue #89 the importer re-authenticated the raw token at
+  write time, so a token revoked mid-fetch stopped that write; the actor boundary trades that
+  for the request-scoped guarantee. The window is bounded by the fetch timeout (15 s of total
+  redirect budget by default), and a token revoked mid-fetch still stops every subsequent
+  request. Re-validating the credential before the commit would need a revalidation seam on the
+  actor and is deferred.
 - **Provider administration is operator-only.** The API does not expose provider provisioning,
   token issuance for a new provider, or provider deletion.
 - **Denied attempts are not audited.** The audit trail records successful mutations and token
@@ -346,9 +356,15 @@ trail is not exposed over HTTP; it is read by operators from the database.
   same-origin/proxy checks.
 - `src/api/auth.test.ts` exercises the real Hono application: login, the hardened cookie
   attributes (`HttpOnly`, `SameSite`, `Path`, `Max-Age`, conditional `Secure`), `/auth/me`,
-  logout revocation (including its CSRF requirement), expiry, both rate-limited and
-  cross-origin refusals, absence of bearer token issuance, and public reads plus bearer writes
-  staying available without the login configuration.
+  logout revocation, expiry, both rate-limited and cross-origin refusals, absence of bearer
+  token issuance, and public reads plus bearer writes staying available without the login
+  configuration. Its logout CSRF tests pin the negative branch: a missing, wrong or
+  session-foreign `X-CSRF-Token` answers `403 csrf_failed` without revoking the session or
+  expiring the cookie, and a logout with no live session needs no token and answers `204`.
+- `src/auth/admin-auth.test.ts` covers the session CSRF binding directly: only the token
+  minted with the live session matches, empty and over-long values are refused, an unknown or
+  revoked session is `session_missing`, and the session resolves to the same provider actor a
+  bearer token resolves to.
 - `src/api/session-writes.test.ts` covers the dual transport end to end: a session creates,
   edits, versions, publishes, imports and correlates; a cookie write without its CSRF token, a
   wrong or foreign token and a cross-origin write all answer `403 csrf_failed` and write
