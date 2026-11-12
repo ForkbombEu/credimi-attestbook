@@ -1,6 +1,7 @@
 import { existsSync } from 'node:fs'
 
 import { createApp } from './app'
+import { AdminAuth, loadAdminLoginConfig } from './auth'
 import { createMockCaptureExplorer } from './capture'
 import { loadConfig } from './config'
 import { openDatabase } from './db/database'
@@ -17,6 +18,17 @@ const database = openDatabase(config.databasePath)
 applyMigrations(database)
 
 const registry = new Registry({ database })
+// Administrator login is optional: a missing or invalid group leaves it
+// unavailable without stopping the public API or provider bearer writes.
+const adminLoginConfig = loadAdminLoginConfig()
+const adminAuth = new AdminAuth({ database, registry, config: adminLoginConfig })
+if (adminLoginConfig.status !== 'configured') {
+  console.warn(`administrator browser login is unavailable: ${adminLoginConfig.reason}`)
+} else if (registry.getProvider(adminLoginConfig.providerId) === null) {
+  console.warn(
+    'administrator browser login is unavailable: ADMIN_PROVIDER_ID does not identify an existing provider',
+  )
+}
 const schemaSandbox = {
   timeoutMs: config.schemaSandboxTimeoutMs,
   maxRssBytes: config.schemaSandboxMaxRssMb * 1024 * 1024,
@@ -39,6 +51,7 @@ const app = createApp({
   validation,
   issuerFixtures,
   captures,
+  adminAuth,
   ...(existsSync(UI_DIST_PATH) ? { uiRoot: UI_DIST_PATH } : {}),
 })
 

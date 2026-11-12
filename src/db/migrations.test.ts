@@ -44,6 +44,7 @@ describe('registry migrations', () => {
         .all()
         .map((row) => row.name)
       for (const table of [
+        'admin_sessions',
         'artifacts',
         'attestations',
         'audit_log',

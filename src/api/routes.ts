@@ -6,9 +6,19 @@
 // wiring (for example a test application without a registry) answers 503
 // instead of pretending the endpoint works.
 
+import { getConnInfo } from 'hono/bun'
+import { deleteCookie, getCookie, setCookie } from 'hono/cookie'
 import type { Context, Hono } from 'hono'
 
 import packageJson from '../../package.json'
+import {
+  ADMIN_SESSION_COOKIE_NAME,
+  MAX_ADMIN_PASSWORD_LENGTH,
+  MAX_ADMIN_USERNAME_LENGTH,
+  isSameOriginRequest,
+  requestUsesHttps,
+  type AdminAuth,
+} from '../auth'
 import {
   createMockCaptureExplorer,
   DEFAULT_CAPTURE_PAGE_LIMIT,
@@ -90,6 +100,9 @@ const MAX_PAGE_LIMIT = 100
 /** Every operation is identified by a stable id in the OpenAPI document. */
 export type ApiOperationId =
   | 'getHealth'
+  | 'loginAdmin'
+  | 'getAdminSession'
+  | 'logoutAdmin'
   | 'listProviders'
   | 'listRulebooks'
   | 'getRulebook'
@@ -155,6 +168,7 @@ export interface ApiRouteSpec {
   readonly description: string
   readonly tag:
     | 'service'
+    | 'auth'
     | 'providers'
     | 'rulebooks'
     | 'versions'
@@ -164,8 +178,13 @@ export interface ApiRouteSpec {
     | 'conformance'
     | 'captures'
     | 'verifiers'
-  /** `true` marks a bearer-authenticated write operation. */
+  /** `true` marks a bearer-authenticated operation. */
   readonly security: boolean
+  /**
+   * `true` marks an operation authenticated by the administrator browser
+   * session cookie. It is independent of the bearer-token `security` flag.
+   */
+  readonly sessionAuth?: boolean
   readonly request?: ApiRequestBodySpec
   readonly parameters?: readonly ApiParameterSpec[]
   readonly responses: readonly ApiResponseSpec[]
@@ -173,33 +192,47 @@ export interface ApiRouteSpec {
 
 const ERROR_DESCRIPTIONS: Readonly<Record<number, string>> = {
   400: 'Malformed or invalid request; the body is an ErrorEnvelope with a stable code.',
-  401: 'Missing, unknown or revoked bearer token.',
-  403: 'The authenticated provider does not own the resource.',
+  401: 'Missing, unknown, expired or revoked credential.',
+  403: 'The authenticated actor is not allowed to perform this operation.',
   404: 'The requested resource does not exist.',
   409: 'The request conflicts with the current resource state (duplicate label, stale draft snapshot, published immutability).',
   413: 'The request body exceeds the endpoint limit.',
   422: 'The import source is unsafe, malformed, unsupported or not importable.',
+  429: 'Too many failed login attempts; the response carries Retry-After.',
   500: 'Unexpected server failure; no internal details are exposed.',
   502: 'The remote import source could not be fetched.',
   503: 'The required service is not configured on this server.',
 }
 
-function errors(...statuses: readonly number[]): readonly ApiResponseSpec[] {
+function errorSpecs(
+  statuses: readonly number[],
+  bearerChallenge: boolean,
+): readonly ApiResponseSpec[] {
   return statuses.map((status) => ({
     status,
     description: ERROR_DESCRIPTIONS[status] ?? 'Error response.',
     schema: 'ErrorEnvelope',
-    ...(status === 401
+    ...(status === 401 && bearerChallenge
       ? {
           headers: [
             {
               name: 'WWW-Authenticate',
-              description: 'RFC 6750 bearer challenge; sent on every 401 response.',
+              description: 'RFC 6750 bearer challenge; sent on every bearer-path 401 response.',
             },
           ],
         }
       : {}),
   }))
+}
+
+/** Error responses of a bearer-authenticated operation. */
+function errors(...statuses: readonly number[]): readonly ApiResponseSpec[] {
+  return errorSpecs(statuses, true)
+}
+
+/** Error responses of a browser-session operation: no bearer challenge. */
+function sessionErrors(...statuses: readonly number[]): readonly ApiResponseSpec[] {
+  return errorSpecs(statuses, false)
 }
 
 const PATH_ID: ApiParameterSpec = {
@@ -252,6 +285,81 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     responses: [
       { status: 200, description: 'The service is running.', schema: 'HealthResponse' },
       ...errors(500),
+    ],
+  },
+  {
+    operationId: 'loginAdmin',
+    method: 'post',
+    path: '/api/v1/auth/login',
+    summary: 'Start an administrator browser session',
+    description:
+      'Verifies the environment-configured administrator credentials and issues an opaque, HttpOnly browser-session cookie. The administrator is bound to an existing provider; login never creates a provider, never mints or returns a provider bearer token and never stores one in the session. Unknown users and wrong passwords get the same generic 401; repeated failures are rate limited with 429 and Retry-After. Login answers 503 when the administrator configuration is absent, invalid or names a missing provider, while the public API and bearer authentication keep working.',
+    tag: 'auth',
+    security: false,
+    request: {
+      schema: 'AdminLoginRequest',
+      mediaType: 'application/json',
+      required: true,
+      description: 'The configured administrator username and password.',
+    },
+    responses: [
+      {
+        status: 200,
+        description:
+          'The administrator session; the provider public projection and the absolute expiry are returned without any token.',
+        schema: 'AdminSessionResponse',
+        headers: [
+          {
+            name: 'Set-Cookie',
+            description:
+              'Opaque session identifier in an HttpOnly, SameSite=Lax, Path=/ cookie; Secure when served over HTTPS.',
+          },
+        ],
+      },
+      ...sessionErrors(400, 401, 403, 429, 500, 503),
+    ],
+  },
+  {
+    operationId: 'getAdminSession',
+    method: 'get',
+    path: '/api/v1/auth/me',
+    summary: 'Read the current administrator session',
+    description:
+      'Resolves the opaque session cookie to the configured existing provider. A missing, unknown, expired or revoked session answers 401 without advertising a bearer challenge. The response never carries a provider bearer token.',
+    tag: 'auth',
+    security: false,
+    sessionAuth: true,
+    responses: [
+      {
+        status: 200,
+        description: 'The authenticated provider and the session absolute expiry.',
+        schema: 'AdminSessionResponse',
+      },
+      ...sessionErrors(401, 500),
+    ],
+  },
+  {
+    operationId: 'logoutAdmin',
+    method: 'post',
+    path: '/api/v1/auth/logout',
+    summary: 'Revoke the administrator browser session',
+    description:
+      'Revokes the server-side session named by the cookie and expires the cookie. The call is same-origin checked and idempotent: an absent, unknown or already-revoked session still succeeds, and the old identifier can no longer authenticate.',
+    tag: 'auth',
+    security: false,
+    sessionAuth: true,
+    responses: [
+      {
+        status: 204,
+        description: 'The session is revoked and the cookie is expired; there is no response body.',
+        headers: [
+          {
+            name: 'Set-Cookie',
+            description: 'Expires the administrator session cookie.',
+          },
+        ],
+      },
+      ...sessionErrors(403, 500),
     ],
   },
   {
@@ -970,6 +1078,8 @@ export interface ApiDependencies {
   readonly issuerDiscovery?: IssuerDiscoveryService
   readonly issuerFixtures?: IssuerFixtureService
   readonly verifierPolicy?: VerifierPolicyService
+  /** Environment-configured administrator browser login; absent means unavailable. */
+  readonly adminAuth?: AdminAuth
 }
 
 export type ApiHandler = (context: Context) => Response | Promise<Response>
@@ -1321,6 +1431,186 @@ function healthHandler(): ApiHandler {
       },
       200,
     )
+}
+
+/** Origin headers of one request, used by the cookie-auth CSRF checks. */
+function requestOriginContext(context: Context) {
+  return {
+    url: context.req.url,
+    origin: context.req.header('origin'),
+    secFetchSite: context.req.header('sec-fetch-site'),
+    forwardedProto: context.req.header('x-forwarded-proto'),
+    forwardedHost: context.req.header('x-forwarded-host'),
+  }
+}
+
+function requireAdminAuth(dependencies: ApiDependencies): AdminAuth {
+  if (dependencies.adminAuth === undefined) {
+    throw apiError(503, 'auth_unavailable', 'Administrator login is not configured on this server.')
+  }
+  return dependencies.adminAuth
+}
+
+/** Rejects a state-changing cookie request that another site could originate. */
+function assertSameOrigin(context: Context): void {
+  if (!isSameOriginRequest(requestOriginContext(context))) {
+    throw apiError(403, 'forbidden', 'The request origin is not allowed.')
+  }
+}
+
+/**
+ * Login accepts only a JSON body. A cross-site HTML form cannot send that
+ * content type without a CORS preflight, so this is an additional CSRF control
+ * next to the origin and SameSite checks.
+ */
+function assertJsonRequest(context: Context): void {
+  const contentType = context.req.header('content-type') ?? ''
+  if (!/^application\/json(?:\s*;|\s*$)/i.test(contentType)) {
+    throw apiError(
+      400,
+      'invalid_request',
+      'The request body must use content-type application/json.',
+    )
+  }
+}
+
+/** Remote address for the coarse client bound; `unknown` for in-process tests. */
+function adminClientKey(context: Context): string {
+  try {
+    return getConnInfo(context).remote.address ?? 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+function parseAdminLoginInput(body: unknown): {
+  readonly username: string
+  readonly password: string
+} {
+  const record = requireRecord(body, 'request body')
+  if (
+    typeof record.username !== 'string' ||
+    record.username.trim() === '' ||
+    record.username.length > MAX_ADMIN_USERNAME_LENGTH
+  ) {
+    throw invalidInput(
+      `username must be a non-empty string of at most ${String(MAX_ADMIN_USERNAME_LENGTH)} characters`,
+    )
+  }
+  if (
+    typeof record.password !== 'string' ||
+    record.password === '' ||
+    record.password.length > MAX_ADMIN_PASSWORD_LENGTH
+  ) {
+    throw invalidInput(
+      `password must be a non-empty string of at most ${String(MAX_ADMIN_PASSWORD_LENGTH)} characters`,
+    )
+  }
+  return { username: record.username, password: record.password }
+}
+
+function setAdminSessionCookie(context: Context, sessionId: string, maxAgeSeconds: number): void {
+  setCookie(context, ADMIN_SESSION_COOKIE_NAME, sessionId, {
+    httpOnly: true,
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: maxAgeSeconds,
+    secure: requestUsesHttps(requestOriginContext(context)),
+  })
+}
+
+function expireAdminSessionCookie(context: Context): void {
+  deleteCookie(context, ADMIN_SESSION_COOKIE_NAME, {
+    httpOnly: true,
+    sameSite: 'Lax',
+    path: '/',
+    secure: requestUsesHttps(requestOriginContext(context)),
+  })
+}
+
+function adminLoginHandler(dependencies: ApiDependencies): ApiHandler {
+  return async (context) => {
+    const adminAuth = requireAdminAuth(dependencies)
+    assertSameOrigin(context)
+    assertJsonRequest(context)
+    const credentials = parseAdminLoginInput(await readJsonBody(context))
+    context.header('cache-control', 'no-store')
+
+    const currentSessionId = getCookie(context, ADMIN_SESSION_COOKIE_NAME)
+    const outcome = await adminAuth.login({
+      ...credentials,
+      clientKey: adminClientKey(context),
+      ...(currentSessionId === undefined ? {} : { currentSessionId }),
+    })
+
+    if (outcome.kind === 'unavailable') {
+      throw apiError(
+        503,
+        'auth_unavailable',
+        'Administrator login is not configured on this server.',
+      )
+    }
+    if (outcome.kind === 'rate_limited') {
+      throw apiError(
+        429,
+        'rate_limited',
+        'Too many failed login attempts. Try again later.',
+        undefined,
+        {
+          headers: { 'Retry-After': String(outcome.retryAfterSeconds) },
+        },
+      )
+    }
+    if (outcome.kind === 'invalid_credentials') {
+      // The same body and status for an unknown username and a wrong password.
+      throw apiError(401, 'unauthorized', 'Invalid username or password.')
+    }
+
+    setAdminSessionCookie(context, outcome.sessionId, outcome.maxAgeSeconds)
+    return context.json(
+      {
+        data: {
+          provider: toProviderResource(outcome.provider),
+          expiresAt: outcome.expiresAt,
+        },
+      },
+      200,
+    )
+  }
+}
+
+function getAdminSessionHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    context.header('cache-control', 'no-store')
+    const sessionId = getCookie(context, ADMIN_SESSION_COOKIE_NAME)
+    const session =
+      dependencies.adminAuth === undefined || sessionId === undefined
+        ? null
+        : dependencies.adminAuth.resolveSession(sessionId)
+    if (session === null) {
+      throw apiError(401, 'unauthorized', 'Authentication is required.')
+    }
+    return context.json(
+      {
+        data: {
+          provider: toProviderResource(session.provider),
+          expiresAt: session.expiresAt,
+        },
+      },
+      200,
+    )
+  }
+}
+
+function logoutAdminHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    assertSameOrigin(context)
+    context.header('cache-control', 'no-store')
+    const sessionId = getCookie(context, ADMIN_SESSION_COOKIE_NAME)
+    dependencies.adminAuth?.logout(sessionId ?? null)
+    expireAdminSessionCookie(context)
+    return context.body(null, 204)
+  }
 }
 
 function listProvidersHandler(dependencies: ApiDependencies): ApiHandler {
@@ -1877,6 +2167,9 @@ export function createApiHandlers(
 
   return {
     getHealth: healthHandler(),
+    loginAdmin: adminLoginHandler(dependencies),
+    getAdminSession: getAdminSessionHandler(dependencies),
+    logoutAdmin: logoutAdminHandler(dependencies),
     listProviders: listProvidersHandler(dependencies),
     listRulebooks: listRulebooksHandler(dependencies),
     getRulebook: getRulebookHandler(dependencies),

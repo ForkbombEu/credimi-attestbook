@@ -412,10 +412,60 @@ exercised on every pull request.
 | `SCHEMA_SANDBOX_CONCURRENCY`   | `2`                 | Maximum concurrent schema-evaluation children                       |
 | `VALIDATION_CACHE_MAX_ENTRIES` | `64`                | Maximum parsed immutable rulebook snapshots cached in-process       |
 | `VALIDATION_CACHE_MAX_MB`      | `16`                | Maximum snapshot bytes cached in-process                            |
+| `ADMIN_USERNAME`               | unset               | Browser administrator username; the group is all-or-nothing         |
+| `ADMIN_PASSWORD_HASH`          | unset               | Argon2id PHC hash of the administrator password, never plaintext    |
+| `ADMIN_PROVIDER_ID`            | unset               | Identifier of an existing provider the administrator is bound to    |
 
 Local development binds loopback only. The Docker image and `compose.yaml` set
 `HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup
 instead of silently binding elsewhere.
+
+## Administrator browser login
+
+AttestBook has a minimal single-administrator login for the browser. It is optional and
+separate from the provider bearer-token API: login never creates a provider, never mints or
+returns a provider token and never stores one in the session. The public catalogue,
+validation and download reads stay anonymous, and existing `Authorization: Bearer` writes
+keep working unchanged.
+
+Set the following three variables together; a partial group is invalid and the login
+answers `503 auth_unavailable` while the rest of the server keeps working. The administrator
+is bound to an **existing** provider, so provision the provider first (the Docker image
+starts with an empty database and an operator provisions providers out of band).
+
+```bash
+# Generate a strong Argon2id hash; Bun is the pinned runtime.
+ADMIN_PASSWORD_HASH="$(bun -e 'console.log(await Bun.password.hash(process.env.ADMIN_PASSWORD))')"
+
+export ADMIN_USERNAME='attestbook-admin'
+export ADMIN_PASSWORD_HASH
+export ADMIN_PROVIDER_ID='<existing provider id>'
+```
+
+The login endpoints are:
+
+- `POST /api/v1/auth/login` with `{"username": "...", "password": "..."}` sets the opaque
+  session cookie. The cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`, has an eight-hour
+  absolute lifetime and is marked `Secure` when the request is HTTPS (directly or through a
+  TLS-terminating proxy that sets `X-Forwarded-Proto: https`).
+- `GET /api/v1/auth/me` returns the authenticated provider's public projection and the
+  session expiry, or `401` when there is no live session.
+- `POST /api/v1/auth/logout` revokes the server-side session and expires the cookie.
+
+Only a SHA-256 hash of the session identifier is stored in `admin_sessions`; the raw value
+exists only in the browser cookie. Every successful login mints a new identifier and retires
+the one the browser presented, and logout revokes the row server-side. Login failures are
+rate limited (five per account and twenty per client address in fifteen minutes), answer the
+same generic `401` for an unknown username and a wrong password, and never log credentials.
+Login and logout reject a cross-site `Origin`/`Sec-Fetch-Site`; login additionally requires
+`Content-Type: application/json`. Plain HTTP on loopback is the supported local test mode
+(the cookie is then not `Secure`); deploy behind HTTPS in any other environment.
+
+The UAT sandbox provisions this test-only configuration itself: `bun scripts/uat-setup.ts`
+creates a disposable SQLite database, provisions the existing test provider, generates a
+fresh Argon2id hash for the fixed test password and writes `dist/uat/admin.env`, which
+`scripts/uat-start.sh` sources. The test username is `uat-admin` and the test password is
+`uat-test-password`; neither is a committed secret or a production credential.
 
 ## Mandatory OWF dependency
 
