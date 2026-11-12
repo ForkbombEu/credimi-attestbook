@@ -469,9 +469,12 @@ bound to and a second, independent writer provider, generates a fresh Argon2id h
 fixed test password and writes `dist/uat/admin.env`, which `scripts/uat-start.sh` sources. The
 test username is `uat-admin` and the test password is `uat-test-password`; neither is a
 committed secret or a production credential. It also writes `dist/uat/fixtures.json` with the
-administrator's provider id and the writer provider's id and bearer token, so a UAT client can
-exercise the session transport for provider A and the bearer transport for provider B without
-creating or exposing real credentials.
+administrator's provider id and the writer provider's id and bearer token, so a local client
+can exercise the session transport for provider A and the bearer transport for provider B
+without creating or exposing real credentials. The UAT client runs outside the sandbox
+filesystem, so provider B's token is the documented disposable fixture value
+`att_uat_writer_disposable_test_token_only`: it is inserted only into the sandbox database,
+is never emitted by the application and is not a production credential.
 
 A live browser session authorizes the same protected write routes as a provider bearer token
 (issue #89): both resolve to the same provider actor, ownership and audit attribution are

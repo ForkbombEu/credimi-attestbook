@@ -7,18 +7,27 @@
 // writes the environment file that `scripts/uat-start.sh` sources. Nothing here
 // is a committed secret or a production credential.
 //
-// `dist/uat/fixtures.json` exposes the same disposable values to a test client:
-// the administrator test credentials and provider id (the session is bound to
-// provider A) plus provider B's id and bearer token (used to prove that the
-// legacy bearer path still works). The file is git-ignored together with the
-// rest of `dist/`.
+// `dist/uat/fixtures.json` exposes the same disposable values to a local test
+// client: the administrator test credentials and provider id (the session is
+// bound to provider A) plus provider B's id and bearer token (used to prove that
+// the legacy bearer path still works). The file is git-ignored together with
+// the rest of `dist/`.
+//
+// The UAT client runs outside this sandbox's filesystem, so the writer
+// provider's bearer token cannot be read from `fixtures.json`. It is therefore
+// a fixed, disposable test value (like the fixed test password above), valid
+// only in the throwaway database this script creates. It is never written by
+// the production server and no production configuration reads it.
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
 import { openDatabase } from '../src/db/database'
 import { applyMigrations } from '../src/db/migrations'
 import { provisionProvider } from '../src/registry/bootstrap'
+import { RegistryStore } from '../src/registry/store'
+import { hashBearerToken } from '../src/registry/tokens'
 
 const UAT_ADMIN_USERNAME = 'uat-admin'
 const UAT_ADMIN_PASSWORD = 'uat-test-password'
@@ -26,6 +35,16 @@ const UAT_PROVIDER_NAME = 'UAT Administrator Provider'
 const UAT_PUBLICATION_AUTHORITY = 'uat-administrator-provider'
 const UAT_WRITER_PROVIDER_NAME = 'UAT Writer Provider'
 const UAT_WRITER_PUBLICATION_AUTHORITY = 'uat-writer-provider'
+
+/**
+ * Fixed bearer token of the disposable writer provider. It is a test fixture,
+ * not a production credential: it exists only in the sandbox database created
+ * here, is documented as a UAT test value, and is never emitted by the
+ * application. A UAT client uses it to exercise the legacy bearer transport
+ * without access to the sandbox filesystem.
+ */
+const UAT_WRITER_BEARER_TOKEN = 'att_uat_writer_disposable_test_token_only'
+const UAT_WRITER_TOKEN_LABEL = 'uat-writer-fixed-test-token'
 
 const outputDirectory = resolve(process.cwd(), 'dist', 'uat')
 const databasePath = join(outputDirectory, 'attestbook.sqlite')
@@ -57,6 +76,16 @@ try {
     publicationAuthority: UAT_WRITER_PUBLICATION_AUTHORITY,
     tokenLabel: 'uat-writer',
   })
+  // The fixed fixture credential for the writer provider. It is inserted next
+  // to the random token provisioning issued, so both are valid in this
+  // disposable database.
+  new RegistryStore(database).insertToken(
+    randomUUID(),
+    writer.provider.id,
+    hashBearerToken(UAT_WRITER_BEARER_TOKEN),
+    UAT_WRITER_TOKEN_LABEL,
+    new Date().toISOString(),
+  )
 
   const passwordHash = await Bun.password.hash(UAT_ADMIN_PASSWORD, { algorithm: 'argon2id' })
   const environment: readonly (readonly [string, string])[] = [
@@ -84,7 +113,7 @@ try {
         },
         writer: {
           providerId: writer.provider.id,
-          bearerToken: writer.token.secret,
+          bearerToken: UAT_WRITER_BEARER_TOKEN,
         },
       },
       null,
@@ -94,7 +123,7 @@ try {
   )
 
   console.log(
-    `UAT fixtures provisioned: administrator provider ${administrator.provider.id}, writer provider ${writer.provider.id} (test credentials only; token in dist/uat/fixtures.json)`,
+    `UAT fixtures provisioned: administrator provider ${administrator.provider.id}, writer provider ${writer.provider.id} (test credentials only; writer token is the fixed UAT fixture value)`,
   )
 } finally {
   database.close()
