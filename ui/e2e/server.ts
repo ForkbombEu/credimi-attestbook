@@ -10,6 +10,7 @@
 import { writeFileSync } from 'node:fs'
 
 import { createApp } from '../../src/app'
+import { AdminAuth } from '../../src/auth'
 import { createMockCaptureExplorer } from '../../src/capture'
 import { openDatabase } from '../../src/db/database'
 import { applyMigrations } from '../../src/db/migrations'
@@ -20,7 +21,13 @@ import type { AuthenticatedActor, CreateRulebookInput } from '../../src/registry
 import { CredentialValidator } from '../../src/validation'
 import { issueTestCredential, seedPublishedRulebook } from '../../src/validation/test-support'
 
-import { AUTHORITY_TOKEN_FIXTURE, EDITOR_TOKEN_FIXTURE, PID_CREDENTIAL_FIXTURE } from './fixtures'
+import {
+  AUTHORITY_TOKEN_FIXTURE,
+  E2E_ADMIN_PASSWORD,
+  E2E_ADMIN_USERNAME,
+  EDITOR_TOKEN_FIXTURE,
+  PID_CREDENTIAL_FIXTURE,
+} from './fixtures'
 
 const port = Number(Bun.env.E2E_PORT ?? '4173')
 const database = openDatabase(':memory:')
@@ -38,6 +45,22 @@ const lab = provisionProvider(database, {
 const authority = provisionProvider(database, {
   name: 'Digital Identity Authority',
   publicationAuthority: 'digital-identity-authority',
+})
+// The disposable administrator exists only for the browser login tests. Its
+// password hash is generated for this process and is never a committed secret.
+const administrator = provisionProvider(database, {
+  name: 'E2E Administrator',
+  publicationAuthority: 'e2e-administrator',
+})
+const adminAuth = new AdminAuth({
+  database,
+  registry,
+  config: {
+    status: 'configured',
+    username: E2E_ADMIN_USERNAME,
+    passwordHash: await Bun.password.hash(E2E_ADMIN_PASSWORD, { algorithm: 'argon2id' }),
+    providerId: administrator.provider.id,
+  },
 })
 
 /**
@@ -220,7 +243,7 @@ const captures = createMockCaptureExplorer({
   additionalIssuerEnvelopes: [realCredentialCapture],
 })
 
-const app = createApp({ registry, validation, captures, uiRoot: './dist/ui' })
+const app = createApp({ registry, validation, captures, adminAuth, uiRoot: './dist/ui' })
 
 const server = Bun.serve({
   hostname: '127.0.0.1',

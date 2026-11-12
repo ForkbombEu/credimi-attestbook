@@ -454,6 +454,11 @@ The login endpoints are:
 - `POST /api/v1/auth/logout` revokes the server-side session and expires the cookie; a live
   session also requires its `csrfToken` in `X-CSRF-Token`.
 
+The web UI exposes this flow at `/login`: the form uses only the username and password, the
+shared header restores `GET /api/v1/auth/me` on load and shows either the signed-in provider
+identity with a `Log out` action or a `Log in` link, and logout sends the session's CSRF token.
+The catalogue and playground stay usable anonymously. See [`docs/ui.md`](docs/ui.md) §3.5.
+
 Only a SHA-256 hash of the session identifier is stored in `admin_sessions`; the raw value
 exists only in the browser cookie. Every successful login mints a new identifier and retires
 the one the browser presented, and logout revokes the row server-side. Login failures are

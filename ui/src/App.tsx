@@ -6,20 +6,32 @@ import {
   createHttpEditorApi,
   createHttpValidationApi,
 } from './api'
+import { createHttpAuthApi, intendedPath } from './auth'
 import { CaptureDetailPage } from './CaptureDetailPage'
 import { CapturesPage } from './CapturesPage'
 import { CatalogPage } from './CatalogPage'
+import { LoginPage } from './LoginPage'
 import { PlaygroundPage } from './PlaygroundPage'
 import { RulebookDetailPage } from './RulebookDetailPage'
 import { RulebookDraftEditorPage } from './RulebookDraftEditorPage'
 import { useRoute } from './router'
+import { SessionProvider } from './session'
 
 const defaultApi = createHttpCatalogApi()
 const defaultValidator = createHttpValidationApi()
 const defaultEditor = createHttpEditorApi()
 const defaultCaptures = createHttpCaptureApi()
+const defaultAuth = createHttpAuthApi()
 
 export function App() {
+  return (
+    <SessionProvider api={defaultAuth}>
+      <AppRoutes />
+    </SessionProvider>
+  )
+}
+
+function AppRoutes() {
   const { route, navigate } = useRoute()
   /**
    * The provider bearer token lives only in this component's memory for the
@@ -35,6 +47,9 @@ export function App() {
     }
   }, [route])
 
+  if (route.name === 'login') {
+    return <LoginPage onNavigate={navigate} nextPath={intendedPath(window.location.search)} />
+  }
   if (route.name === 'playground') {
     return <PlaygroundPage api={defaultApi} validator={defaultValidator} onNavigate={navigate} />
   }

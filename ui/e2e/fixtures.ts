@@ -16,3 +16,8 @@ export const EDITOR_TOKEN_FIXTURE = join(tmpdir(), 'attestbook-e2e-editor-token.
 
 /** Bearer token of the seeded `Digital Identity Authority` provider. */
 export const AUTHORITY_TOKEN_FIXTURE = join(tmpdir(), 'attestbook-e2e-authority-token.txt')
+
+// Disposable browser-login credentials for the seeded e2e administrator. They
+// exist only for these tests and are never a deployment or production secret.
+export const E2E_ADMIN_USERNAME = 'e2e-admin'
+export const E2E_ADMIN_PASSWORD = 'e2e-admin-password'

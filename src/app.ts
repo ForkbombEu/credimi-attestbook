@@ -128,16 +128,19 @@ export function createApp(options: AppOptions = {}): Hono {
     // assets and the installed Credimi brand directory go through directory
     // handlers that refuse to walk outside the build output.
     app.get('/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
-    // The client router owns `/rulebooks/<id>` and `/playground`. Serving the
-    // entry document for those paths makes a deep link and a browser reload
-    // address the same view instead of a JSON 404; the API stays under
-    // `/api/*` and unknown non-UI paths keep the JSON not-found envelope.
+    // The client router owns `/rulebooks/<id>`, `/playground`, `/captures/*`
+    // and `/login`. Serving the entry document for those paths makes a deep
+    // link and a browser reload address the same view instead of a JSON 404;
+    // the API stays under `/api/*` and unknown non-UI paths keep the JSON
+    // not-found envelope.
     app.get('/rulebooks/*', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/playground', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/playground/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/captures', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/captures/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/captures/*', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
+    app.get('/login', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
+    app.get('/login/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.use(
       '/assets/*',
       uiDirectoryHandler(

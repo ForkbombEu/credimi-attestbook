@@ -1,6 +1,8 @@
-import type { ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 
+import { currentPath, loginPath } from '../auth'
 import { AppLink, CAPTURES_PATH, CATALOG_PATH, PLAYGROUND_PATH } from '../router'
+import { useSession } from '../session'
 
 const CREDIMI_URL = 'https://credimi.io'
 
@@ -68,14 +70,103 @@ function CredimiExtrasBanner({ variant }: { readonly variant?: 'footer' }) {
 interface SiteHeaderProps {
   readonly section: string
   readonly onNavigate: (path: string) => void
+  /** The login page hides the anonymous sign-in link that would target itself. */
+  readonly showLoginLink?: boolean
 }
 
 /**
- * The shared header with the two Phase 1 product views. The long-form section
- * label names the current view; the short navigation labels stay distinct from
- * the breadcrumb links so assistive technology can address each destination.
+ * Session controls in the shared topbar (issue #90). An anonymous visitor gets
+ * a sign-in link that preserves the current path; an authenticated
+ * administrator sees the provider identity and a sign-out action. The session
+ * endpoint is authoritative, so a missing or expired cookie renders anonymous
+ * instead of claiming an identity.
  */
-export function SiteHeader({ section, onNavigate }: SiteHeaderProps) {
+function SessionControls({
+  onNavigate,
+  showLoginLink,
+}: {
+  readonly onNavigate: (path: string) => void
+  readonly showLoginLink: boolean
+}) {
+  const session = useSession()
+  const [signingOut, setSigningOut] = useState(false)
+  const [signOutError, setSignOutError] = useState<string | null>(null)
+
+  if (session.status === 'loading') {
+    // The login page renders its own session status in the card; elsewhere the
+    // topbar says what it is waiting for.
+    return showLoginLink ? (
+      <div className="site-session" role="group" aria-label="Administrator session">
+        <span className="site-session__status">Checking session…</span>
+      </div>
+    ) : null
+  }
+
+  if (session.status === 'authenticated' && session.session !== null) {
+    const providerName = session.session.provider.name
+    const handleSignOut = async () => {
+      if (signingOut) {
+        return
+      }
+      setSignOutError(null)
+      setSigningOut(true)
+      try {
+        await session.signOut()
+      } catch {
+        setSignOutError('Sign-out failed.')
+      } finally {
+        setSigningOut(false)
+      }
+    }
+
+    return (
+      <div className="site-session" role="group" aria-label="Administrator session">
+        <span className="site-session__identity" title={`Signed in as ${providerName}`}>
+          <span className="site-session__label">Signed in:</span>
+          <span className="site-session__provider">{providerName}</span>
+        </span>
+        <button
+          className="button button--ghost button--small"
+          type="button"
+          disabled={signingOut}
+          onClick={() => {
+            void handleSignOut()
+          }}
+        >
+          {signingOut ? 'Signing out…' : 'Log out'}
+        </button>
+        {signOutError === null ? null : (
+          <span className="site-session__error" role="alert">
+            {signOutError}
+          </span>
+        )}
+      </div>
+    )
+  }
+
+  if (!showLoginLink) {
+    return null
+  }
+
+  return (
+    <div className="site-session" role="group" aria-label="Administrator session">
+      <AppLink
+        className="button button--ghost button--small"
+        href={loginPath(currentPath())}
+        onNavigate={onNavigate}
+      >
+        Log in
+      </AppLink>
+    </div>
+  )
+}
+
+/**
+ * The shared header with the product views. The long-form section label names
+ * the current view; the short navigation labels stay distinct from the
+ * breadcrumb links so assistive technology can address each destination.
+ */
+export function SiteHeader({ section, onNavigate, showLoginLink = true }: SiteHeaderProps) {
   return (
     <>
       <CredimiExtrasBanner />
@@ -119,6 +210,7 @@ export function SiteHeader({ section, onNavigate }: SiteHeaderProps) {
               Capture explorer
             </AppLink>
           </nav>
+          <SessionControls onNavigate={onNavigate} showLoginLink={showLoginLink} />
           <span className="site-header__section">{section}</span>
         </div>
       </header>

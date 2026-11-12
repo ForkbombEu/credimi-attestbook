@@ -399,4 +399,28 @@ describe('app catalog and detail navigation', () => {
     expect(await screen.findByRole('heading', { name: 'PID Rulebook' })).toBeInTheDocument()
     expect(screen.getByRole('heading', { name: 'Version history' })).toBeInTheDocument()
   })
+
+  test('opens the administrator sign-in page from the shared header', async () => {
+    const user = userEvent.setup()
+    installFetch()
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('link', { name: 'Log in' }))
+
+    expect(window.location.pathname).toBe('/login')
+    expect(await screen.findByRole('heading', { name: 'Sign in' })).toBeInTheDocument()
+    expect(screen.getByLabelText('Username')).toBeInTheDocument()
+    expect(screen.getByLabelText('Password')).toHaveAttribute('type', 'password')
+  })
+
+  test('renders a deep-linked administrator sign-in path with a safe destination', async () => {
+    installFetch()
+    window.history.replaceState({}, '', '/login?next=%2Fplayground')
+
+    render(<App />)
+
+    expect(await screen.findByLabelText('Username')).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Log in' })).not.toBeInTheDocument()
+  })
 })
