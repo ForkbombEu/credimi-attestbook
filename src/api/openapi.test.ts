@@ -107,17 +107,33 @@ describe('generated OpenAPI document', () => {
     expect(preview?.['security']).toEqual([{ bearerAuth: [] }])
   })
 
-  test('write operations declare the bearer security scheme', () => {
+  test('operations declare their bearer or session security scheme', () => {
     const securitySchemes = document.components['securitySchemes'] as Record<string, unknown>
     expect(securitySchemes['bearerAuth']).toMatchObject({ type: 'http', scheme: 'bearer' })
+    expect(securitySchemes['sessionAuth']).toMatchObject({
+      type: 'apiKey',
+      in: 'cookie',
+      name: 'attestbook_admin_session',
+    })
 
     for (const route of API_ROUTES) {
       const operation = operationFor(route)
       if (route.security) {
         expect(operation['security']).toEqual([{ bearerAuth: [] }])
+      } else if (route.sessionAuth) {
+        expect(operation['security']).toEqual([{ sessionAuth: [] }])
       } else {
         expect(operation['security']).toBeUndefined()
       }
+    }
+  })
+
+  test('session operations do not advertise a bearer challenge on 401', () => {
+    for (const route of API_ROUTES.filter((candidate) => candidate.sessionAuth)) {
+      const operation = operationFor(route)
+      const responses = operation['responses'] as Record<string, Record<string, unknown>>
+      const headers = responses['401']?.['headers'] as Record<string, unknown> | undefined
+      expect(headers?.['WWW-Authenticate'], route.operationId).toBeUndefined()
     }
   })
 

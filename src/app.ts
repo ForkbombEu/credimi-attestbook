@@ -167,10 +167,16 @@ export function createApp(options: AppOptions = {}): Hono {
   app.onError((error, c) => {
     const mapped = toApiError(error)
     if (mapped !== null) {
+      const headers: Record<string, string> = { ...mapped.headers }
+      // The RFC 6750 challenge belongs only to bearer-authenticated routes;
+      // browser-session failures answer 401 without advertising a bearer token.
+      if (mapped.status === 401 && (mapped.challenge ?? true)) {
+        headers['WWW-Authenticate'] = BEARER_CHALLENGE
+      }
       return c.json(
         mapped.body,
         mapped.status,
-        mapped.status === 401 ? { 'WWW-Authenticate': BEARER_CHALLENGE } : undefined,
+        Object.keys(headers).length === 0 ? undefined : headers,
       )
     }
 

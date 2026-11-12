@@ -13,7 +13,7 @@ import { OPENAPI_COMPONENTS, componentJsonSchema } from './schemas'
 export const OPENAPI_VERSION = '3.1.0'
 
 /** Version of the API contract document itself. */
-export const API_CONTRACT_VERSION = '1.9.0'
+export const API_CONTRACT_VERSION = '1.10.0'
 
 /** URL prefix that carries the product API's major version. */
 export const API_VERSION_PREFIX = '/api/v1'
@@ -37,6 +37,11 @@ const TAG_DESCRIPTIONS: readonly { readonly name: string; readonly description: 
   {
     name: 'providers',
     description: 'Public provider identities referenced by catalogue rulebooks.',
+  },
+  {
+    name: 'auth',
+    description:
+      'Environment-configured administrator browser login and opaque server-side sessions. Independent of provider bearer authentication.',
   },
   { name: 'rulebooks', description: 'Stable rulebook identity, content and schema references.' },
   { name: 'versions', description: 'Immutable rulebook snapshots, digests and publication.' },
@@ -149,7 +154,11 @@ function operationObject(route: ApiRouteSpec): JsonObject {
     summary: route.summary,
     description: route.description,
     tags: [route.tag],
-    ...(route.security ? { security: [{ bearerAuth: [] }] } : {}),
+    ...(route.security
+      ? { security: [{ bearerAuth: [] }] }
+      : route.sessionAuth
+        ? { security: [{ sessionAuth: [] }] }
+        : {}),
     ...(parameters.length === 0 ? {} : { parameters }),
     ...(route.request === undefined
       ? {}
@@ -193,7 +202,8 @@ export function buildOpenApiDocument(): OpenApiDocument {
         'The major version is carried in the URL under `/api/v1`. Within v1 only additive, backwards-compatible',
         'changes are made. Successful responses use a `{ "data": ... }` envelope (lists add `pagination`);',
         'failures use `{ "error": { "code", "message", "details"? } }`. Reads are public; writes require an',
-        'AttestBook provider bearer token. See docs/api.md for the versioning, idempotency and error policy.',
+        'AttestBook provider bearer token. The administrator browser session is a separate cookie scheme used only',
+        'by the `/api/v1/auth` routes. See docs/api.md for the versioning, idempotency and error policy.',
       ].join(' '),
       license: { name: 'Apache-2.0' },
     },
@@ -208,6 +218,13 @@ export function buildOpenApiDocument(): OpenApiDocument {
           scheme: 'bearer',
           description:
             'AttestBook provider write token. Tokens are issued by operator provisioning, are never returned by the API and are sent only in the Authorization header.',
+        },
+        sessionAuth: {
+          type: 'apiKey',
+          in: 'cookie',
+          name: 'attestbook_admin_session',
+          description:
+            'Opaque administrator browser-session identifier. Set HttpOnly and SameSite=Lax by POST /api/v1/auth/login, revoked by POST /api/v1/auth/logout, never accepted from a URL or request body.',
         },
       },
     },

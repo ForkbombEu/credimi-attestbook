@@ -123,11 +123,15 @@ describe('write operation security surface', () => {
 
     // Draft validation, fixture generation, verifier constraints, credential
     // validation, the read-only capture comparison and the reproducible
-    // conformance run are public POSTs.
+    // conformance run are public POSTs. The auth POSTs are not bearer
+    // operations: login is unauthenticated and logout uses the session cookie
+    // with its own same-origin check.
     const publicPosts = API_ROUTES.filter(
       (route) => route.method === 'post' && !route.security,
     ).map((route) => route.operationId)
     expect(publicPosts).toEqual([
+      'loginAdmin',
+      'logoutAdmin',
       'validateRulebookDraft',
       'generateIssuerFixture',
       'validateCredential',
@@ -268,7 +272,7 @@ describe('public read behavior is preserved', () => {
     const { app, seeded } = setup()
 
     for (const route of API_ROUTES.filter(
-      (candidate) => candidate.method === 'get' && !candidate.security,
+      (candidate) => candidate.method === 'get' && !candidate.security && !candidate.sessionAuth,
     )) {
       const response = await app.request(concretePath(route, seeded.rulebookId))
       expect(response.status, `${route.operationId} must be publicly readable`).toBe(200)

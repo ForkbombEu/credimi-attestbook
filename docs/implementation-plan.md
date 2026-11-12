@@ -290,6 +290,7 @@ not by this plan.
 | `validations` | Validation request/result snapshots | References `rulebook_version` + digest; result is reproducible |
 | `audit_log` | Publication and privileged mutations | Actor, action, entity, timestamp, digest |
 | `auth_tokens` | Provisional write credentials | Only a hash is stored; bound to a provider (D-10) |
+| `admin_sessions` | Optional administrator browser sessions (issue #88) | Only a SHA-256 hash of the opaque identifier is stored; provider-bound, absolute expiry, revocable, bound to the administrator configuration fingerprint |
 | `schema_migrations` | Applied migration bookkeeping | Append-only |
 
 The #28 implementation lives in `src/db/`, `src/registry/` and

@@ -9,6 +9,7 @@
 
 import { z } from 'zod'
 
+import { MAX_ADMIN_PASSWORD_LENGTH, MAX_ADMIN_USERNAME_LENGTH } from '../auth'
 import { ISSUER_FIXTURE_KIND, ISSUER_FIXTURE_NEGATIVE_CATEGORIES } from '../fixtures/types'
 import {
   CONFORMANCE_CANONICALIZATION,
@@ -94,6 +95,24 @@ export const providerSchema = z.object({
 })
 
 export const providerListResponseSchema = z.object({ data: z.array(providerSchema) })
+
+/** Login body for the environment-configured administrator. */
+export const adminLoginRequestSchema = z.object({
+  username: z.string().min(1).max(MAX_ADMIN_USERNAME_LENGTH),
+  password: z.string().min(1).max(MAX_ADMIN_PASSWORD_LENGTH),
+})
+
+/**
+ * The authenticated administrator session. It identifies the existing provider
+ * and the absolute expiry only; no bearer token or credential material is part
+ * of the resource.
+ */
+export const adminSessionSchema = z.object({
+  provider: providerSchema,
+  expiresAt: timestamp,
+})
+
+export const adminSessionResponseSchema = z.object({ data: adminSessionSchema })
 
 /** The public rulebook representation: no provenance, metadata or import key. */
 export const rulebookSchema = z.object({
@@ -1433,6 +1452,9 @@ export const verifierConstraintsResponseSchema = z.object({
 export const OPENAPI_COMPONENTS = {
   ErrorEnvelope: errorEnvelopeSchema,
   HealthResponse: healthResponseSchema,
+  AdminLoginRequest: adminLoginRequestSchema,
+  AdminSession: adminSessionSchema,
+  AdminSessionResponse: adminSessionResponseSchema,
   Provider: providerSchema,
   ProviderListResponse: providerListResponseSchema,
   Rulebook: rulebookSchema,
@@ -1499,6 +1521,7 @@ export type OpenApiComponentName = keyof typeof OPENAPI_COMPONENTS
  * Response components use output mode, where an unexpected member is a bug.
  */
 const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
+  'AdminLoginRequest',
   'CreateRulebookRequest',
   'CreateRulebookVersionRequest',
   'SaveDraftRequest',
@@ -1526,6 +1549,8 @@ export function componentJsonSchema(name: OpenApiComponentName): Record<string, 
 // Inferred public resource types. Handlers and tests use these so the wire
 // shape and the schema cannot disagree.
 export type HealthResource = z.infer<typeof healthResponseSchema>
+export type AdminLoginRequestResource = z.infer<typeof adminLoginRequestSchema>
+export type AdminSessionResource = z.infer<typeof adminSessionSchema>
 export type ProviderResource = z.infer<typeof providerSchema>
 export type RulebookResource = z.infer<typeof rulebookSchema>
 export type AttestationResource = z.infer<typeof attestationSchema>

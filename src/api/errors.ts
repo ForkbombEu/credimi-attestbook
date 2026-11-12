@@ -35,6 +35,8 @@ export const API_ERROR_CODES = [
   'import_rejected',
   'capture_fetch_failed',
   'capture_unavailable',
+  'rate_limited',
+  'auth_unavailable',
   'registry_unavailable',
   'validation_unavailable',
   'fixture_unavailable',
@@ -44,7 +46,7 @@ export const API_ERROR_CODES = [
 export type ApiErrorCode = (typeof API_ERROR_CODES)[number]
 
 /** HTTP statuses the API layer itself may return. */
-export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 422 | 500 | 502 | 503
+export type ApiErrorStatus = 400 | 401 | 403 | 404 | 409 | 413 | 422 | 429 | 500 | 502 | 503
 
 /** The error body every failing product-API request returns. */
 export interface ErrorEnvelope {
@@ -60,13 +62,28 @@ export class ApiError extends Error {
   readonly status: ApiErrorStatus
   readonly code: ApiErrorCode
   readonly details: JsonObject | undefined
+  /** Send the RFC 6750 bearer challenge with a `401`; opt-in, for bearer routes. */
+  readonly challenge: boolean
+  /** Additional response headers, such as `Retry-After` on a `429`. */
+  readonly headers: Readonly<Record<string, string>> | undefined
 
-  constructor(status: ApiErrorStatus, code: ApiErrorCode, message: string, details?: JsonObject) {
+  constructor(
+    status: ApiErrorStatus,
+    code: ApiErrorCode,
+    message: string,
+    details?: JsonObject,
+    options?: {
+      readonly challenge?: boolean
+      readonly headers?: Readonly<Record<string, string>>
+    },
+  ) {
     super(message)
     this.name = 'ApiError'
     this.status = status
     this.code = code
     this.details = details
+    this.challenge = options?.challenge ?? false
+    this.headers = options?.headers
   }
 }
 
@@ -75,8 +92,12 @@ export function apiError(
   code: ApiErrorCode,
   message: string,
   details?: JsonObject,
+  options?: {
+    readonly challenge?: boolean
+    readonly headers?: Readonly<Record<string, string>>
+  },
 ): ApiError {
-  return new ApiError(status, code, message, details)
+  return new ApiError(status, code, message, details, options)
 }
 
 /** Builds the error envelope without losing the typed code. */
@@ -135,11 +156,16 @@ function importErrorResponse(error: ImportError): {
 export function toApiError(error: unknown): {
   readonly status: ApiErrorStatus
   readonly body: ErrorEnvelope
+  /** Send the bearer challenge with a `401`; only bearer-path failures do. */
+  readonly challenge?: boolean
+  readonly headers?: Readonly<Record<string, string>>
 } | null {
   if (error instanceof ApiError) {
     return {
       status: error.status,
       body: errorEnvelope(error.code, error.message, error.details),
+      challenge: error.challenge,
+      ...(error.headers === undefined ? {} : { headers: error.headers }),
     }
   }
 
@@ -173,7 +199,7 @@ export function toApiError(error: unknown): {
     case 'invalid_input':
       return { status: 400, body: errorEnvelope('invalid_request', error.message) }
     case 'unauthorized':
-      return { status: 401, body: errorEnvelope('unauthorized', error.message) }
+      return { status: 401, body: errorEnvelope('unauthorized', error.message), challenge: true }
     case 'forbidden':
       return { status: 403, body: errorEnvelope('forbidden', error.message) }
     case 'not_found':

@@ -19,7 +19,9 @@ authentication).
 **Implementation:** `src/api/routes.ts` (one route table and the central bearer check),
 `src/api/errors.ts` (typed error mapping), `src/app.ts` (HTTP assembly),
 `src/registry/registry.ts` (ownership enforcement), `src/registry/bootstrap.ts` (operator
-provisioning) and `src/registry/tokens.ts` (token primitives).
+provisioning), `src/registry/tokens.ts` (token primitives), `src/auth/` (environment
+administrator login, sessions, rate limiting and origin checks) and
+`migrations/0004_admin_sessions.sql` (hashed session rows).
 
 ## 1. Trust boundaries and actors
 
@@ -27,7 +29,8 @@ provisioning) and `src/registry/tokens.ts` (token primitives).
 | --- | --- | --- |
 | Anonymous reader | none | Public catalogue, attestation, schema-reference, version, snapshot and health reads; structural credential validation. |
 | Provider account | Provider bearer token (`Authorization: Bearer att_…`) | Create and mutate only the rulebooks owned by that provider; import drafts owned by that provider; preview imports; discover issuer metadata. |
-| Operator | Out-of-band deployment access | Provision a provider and its first token, audit inspection and deployment configuration. Nothing in the HTTP API performs provider administration. |
+| Administrator (browser) | Environment-configured username and Argon2id password hash; opaque session cookie | Authenticate as the bound **existing** provider through `GET /api/v1/auth/me`, rotate the session at login and revoke it at logout. It does not create a provider, mint or expose a bearer token, or itself authorize provider write routes. |
+| Operator | Out-of-band deployment access | Provision a provider and its first token, configure the optional administrator login, audit inspection and deployment configuration. Nothing in the HTTP API performs provider administration. |
 | Remote import or issuer source | none | Untrusted input; bounded and validated by the import/discovery pipelines, never trusted for provider identity or publication authority. |
 
 Writes are authenticated; reads are deliberately public, mirroring TS11's public-read
@@ -35,6 +38,11 @@ expectation. Provider identity is never inferred from a remote URL, a `rulebookU
 import source, issuer metadata or a request body.
 
 ## 2. Authentication
+
+Provider bearer tokens and the administrator browser session are independent credential
+paths. The session backend introduced by issue #88 does not change bearer parsing, the
+protected-route set or any registry ownership rule; #89 extends browser sessions to the
+existing provider write routes.
 
 - A write request presents `Authorization: Bearer <token>`. The scheme is case-insensitive;
   exactly one non-empty token is accepted. No token is accepted from a query string, cookie
@@ -49,6 +57,54 @@ import source, issuer metadata or a request body.
   `WWW-Authenticate: Bearer realm="attestbook"`. This avoids a token-validity oracle.
 - Token revocation is idempotent and provider-scoped. Token expiry and a rotation policy are
   not implemented in Phase 1 (§8).
+
+### 2.1 Administrator browser session
+
+The optional single-administrator login (issue #88) keeps its own credential path in
+`src/auth/` and `admin_sessions`; it never creates a provider, mints a bearer token, stores an
+API token in the session or changes the bearer checks above.
+
+- **Configuration.** `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` and `ADMIN_PROVIDER_ID` must be
+  set together. The hash must be an Argon2id PHC string with at least 19 MiB of memory and
+  two passes; a plaintext password is never accepted. The provider id must identify an
+  existing provider and is re-checked on every login attempt. A missing, partial, invalid or
+  unresolvable configuration leaves the login endpoints answering `503 auth_unavailable` while
+  the public API and bearer writes continue to work. Startup logs the non-secret reason only.
+- **Verification and non-enumeration.** The username is compared in constant time and the
+  Argon2id verification always runs, so an unknown username and a wrong password take the same
+  path. Both answer the same generic `401 unauthorized` body and neither logs the submitted
+  values. Passwords longer than 1024 characters are rejected without hashing.
+- **Opaque server-side sessions.** Login mints 256 random bits, sets them in the
+  `attestbook_admin_session` cookie and stores only their SHA-256 hash in `admin_sessions`.
+  Cookie attributes are `HttpOnly`, `SameSite=Lax`, `Path=/`, an eight-hour absolute
+  `Max-Age`, and `Secure` when the request is HTTPS directly or through a proxy that sets
+  `X-Forwarded-Proto: https`. The identifier is never accepted from a URL or request body and
+  is never returned in a response body.
+- **Bounded lifetime, revocation and rotation.** `expires_at` is an absolute bound checked on
+  every read. Logout sets `revoked_at` server-side, so replaying the cookie fails even if a
+  client keeps it; repeated logout is idempotent. Every successful login mints a new
+  identifier and revokes the session the browser presented, which defends against session
+  fixation. Each session also stores an `auth_fingerprint` over the configured username,
+  provider and password hash, so rotating any of those invalidates outstanding sessions.
+- **CSRF and cross-origin.** `SameSite=Lax` withholds the cookie from cross-site POSTs. Login
+  and logout also require a missing `Sec-Fetch-Site` or `same-origin`/`none`, and a missing
+  `Origin` or one equal to the effective request origin (forwarded headers honoured); they
+  answer `403` otherwise. Login accepts only `Content-Type: application/json`, which a
+  cross-site HTML form cannot send without a CORS preflight. The login and logout endpoints
+  add no audit rows (neither successes nor failures).
+- **Rate limiting and parallel attempts.** Login failures are bounded in-process: five per
+  account and twenty per client address in a fifteen-minute sliding window, answering
+  `429 rate_limited` with `Retry-After`. An attempt reserves its failure slot before the
+  Argon2id check in one synchronous step, so overlapping requests cannot all pass the bound
+  before any of them is counted. At most four password checks run concurrently; further
+  concurrent attempts answer `429` without touching the CPU or memory of a hash. A successful
+  login clears both keys; the account key is case-folded so case variants do not reset the
+  budget. The limiter is not persisted and resets on restart, and it does not rate-limit
+  bearer-token API traffic.
+- **Provider binding only.** `/api/v1/auth/me` returns the public provider projection
+  (`id`, `name`, `createdAt`) and the session expiry. It exposes no publication authority,
+  metadata, password hash or token. The browser stores no session identifier or password in
+  `localStorage`/`sessionStorage`; the cookie is the only client-side credential.
 
 ## 3. Authorization and provider ownership
 
@@ -87,6 +143,9 @@ The following rules implement that model:
 | Operation | Auth | Ownership rule | Denial |
 | --- | --- | --- | --- |
 | `GET /health` | no | n/a | n/a |
+| `POST /api/v1/auth/login` | environment credentials | Binds the configured existing provider; never creates a provider or mints a token | `401` generic; `403` cross-origin; `429` rate limited; `503` unconfigured |
+| `GET /api/v1/auth/me` | session cookie | Resolves only its own live session; returns the public provider projection | `401` for missing, expired or revoked sessions |
+| `POST /api/v1/auth/logout` | session cookie | Revokes its own session; idempotent | `403` cross-origin |
 | `GET /api/v1/rulebooks`, `GET /api/v1/rulebooks/{id}` | no | n/a | `404` for an unknown id |
 | `GET …/attestations`, `…/schema-references`, `…/versions`, `…/versions/{version}`, `…/content` | no | n/a | `404` for an unknown resource |
 | `POST /api/v1/rulebooks` | yes | New rulebook is owned by the actor; the body cannot set its provider | `401`; `400` for invalid input |
@@ -182,24 +241,40 @@ trail is not exposed over HTTP; it is read by operators from the database.
 
 ## 8. Limitations and non-goals
 
-- **No HTTP rate limiting.** An authenticated provider can repeat a bounded import fetch or a
-  write at the network level. The import pipeline still applies its own timeout, size, redirect
-  and fan-out limits. Rate limiting remains future hardening work.
+- **No general HTTP rate limiting.** Login failures are rate limited (§2.1), but an
+  authenticated provider can repeat a bounded import fetch or a write at the network level.
+  The import pipeline still applies its own timeout, size, redirect and fan-out limits. Rate
+  limiting for the remaining routes remains future hardening work.
 - **No token expiry or rotation policy.** Tokens are revoked explicitly and provider-scoped.
 - **No fine-grained scopes or roles.** Every token of a provider has the provider's full write
   authority; there are no read-only or per-rulebook tokens.
+- **Single administrator, no MFA or password change endpoint.** The administrator is one
+  environment-configured account; rotating the password means changing `ADMIN_PASSWORD_HASH`
+  and restarting (outstanding sessions then fail the fingerprint check). There is no
+  self-service password reset, second factor or account management API.
+- **The account failure bound can be used for a temporary lockout.** Because the account key
+  is the submitted username, anyone who knows it can spend the five-attempt budget every
+  fifteen-minute window and keep the single administrator from logging in. This availability
+  trade-off is accepted for a single-account deployment; there is no separate unlock path or
+  per-client account budget.
+- **Behind a reverse proxy the client budget is shared.** The client key is the socket's
+  remote address; in a proxy deployment every browser presents the proxy's address, so the
+  twenty-attempt client window is effectively global. `X-Forwarded-For` is deliberately not
+  trusted as a limiter key.
 - **Provider administration is operator-only.** The API does not expose provider provisioning,
   token issuance for a new provider, or provider deletion.
 - **Denied attempts are not audited.** The audit trail records successful mutations and token
-  lifecycle events, not rejected requests.
+  lifecycle events, not rejected requests, failed logins or administrator login/logout events.
 - **Transport security is deployment-owned.** AttestBook serves HTTP; a deployment must
-  terminate TLS in front of it. Bearer tokens are not meaningful over plaintext transport.
+  terminate TLS in front of it. Bearer tokens and the session cookie are not meaningful over
+  plaintext transport beyond the documented loopback test mode.
 - **The cross-cutting audit is separate.** SSRF and schema recursion, artifact retention,
   the full security test matrix and the residual-risk register are recorded in
   [`docs/security-threat-model.md`](security-threat-model.md); this document covers the
   write-API authentication, provider authorization, error and secret-handling model asked for
-  by issue #35. The audit leaves three limitations open and explicit: no HTTP rate limiting,
-  no token expiry/rotation and no audit row for denied attempts.
+  by issue #35. The audit leaves three limitations open and explicit: no general HTTP rate
+  limiting (login failure limiting is now separate), no token expiry/rotation and no audit row
+  for denied attempts.
 
 ## 9. Verification
 
@@ -214,6 +289,17 @@ trail is not exposed over HTTP; it is read by operators from the database.
   the database unchanged.
 - `src/api/routes.test.ts` and `src/api/openapi.test.ts` cover the HTTP error envelope,
   auth-before-body-read, cross-provider publish denial and the generated security contract.
+- `src/auth/admin-auth.test.ts` covers configuration validation, Argon2id hash acceptance and
+  rejection, opaque sessions hashed at rest, provider binding, generic unknown-user versus
+  wrong-password outcomes, missing/invalid configuration and missing providers, expiry,
+  logout revocation and idempotency, configuration rotation invalidation, login session
+  rotation, the failure limiter's parallel reservation and concurrent-check cap, and the
+  same-origin/proxy checks.
+- `src/api/auth.test.ts` exercises the real Hono application: login, the hardened cookie
+  attributes (`HttpOnly`, `SameSite`, `Path`, `Max-Age`, conditional `Secure`), `/auth/me`,
+  logout revocation, expiry, both rate-limited and cross-origin refusals, absence of bearer
+  token issuance, and public reads plus bearer writes staying available without the login
+  configuration.
 - `src/api/discovery.test.ts` verifies that issuer discovery authenticates before any
   discovery work, maps the shared bounded-fetch failures and validates its response against
   the generated contract; `src/discovery/discover.test.ts` covers the SSRF, size,
@@ -238,3 +324,5 @@ trail is not exposed over HTTP; it is read by operators from the database.
 - [Decision D-10](implementation-plan.md)
 - [Issue #35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) and the Phase 6
   audit in [issue #52](https://github.com/ForkbombEu/credimi-attestbook/issues/52)
+- [Issue #88](https://github.com/ForkbombEu/credimi-attestbook/issues/88) for the
+  environment-configured administrator login and server-side browser session

@@ -37,6 +37,9 @@ Implemented and exposed by this slice:
 - authenticated import preview and import of URL/JSON sources;
 - authenticated issuer metadata discovery and candidate rulebook association (added by
   [issue #43](https://github.com/ForkbombEu/credimi-attestbook/issues/43));
+- the optional environment-configured administrator browser login and its opaque, expiring
+  server-side session (added by
+  [issue #88](https://github.com/ForkbombEu/credimi-attestbook/issues/88));
 - public rulebook-driven unsigned issuer fixture generation (added by
   [issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44));
 - structural credential validation against a pinned rulebook version;
@@ -54,8 +57,9 @@ Deliberately **not** in this slice:
 - the TS11 catalogue interface (`GET/PUT/DELETE /schemas`, JWS responses) — it must be
   implemented separately and exactly if a later issue adds it (architecture §5);
 - capture validation and validation-result persistence; no route pretends to offer them;
-- provider-management HTTP routes, rate limiting and token expiry/rotation — future hardening;
-  the implemented write-auth model is documented in [`docs/security.md`](security.md);
+- provider-management HTTP routes, generic API rate limiting and token expiry/rotation —
+  future hardening; the administrator login has its own failure limit and the implemented
+  write-auth model is documented in [`docs/security.md`](security.md);
 - a publication signature: no export claims one. OWF 0.5.4 signs only a bare OWF-profile
   `SchemaMeta` compact JWS and does not implement the TS11 v1.0.1 catalogue-response JWS,
   while a version snapshot is not a `SchemaMeta` document; the manifest reports this boundary
@@ -92,12 +96,16 @@ wired answers `503` with a typed code instead of a placeholder success response.
 ## 3. Resource surface
 
 All paths below are prefixed with the API base. `auth` means an AttestBook provider bearer
-token in the `Authorization: Bearer <token>` header. All operations are synchronous in Phase
-1.
+token in the `Authorization: Bearer <token>` header; `session` means the opaque administrator
+browser-session cookie set by `/api/v1/auth/login`. The two credential paths are independent.
+All operations are synchronous in Phase 1.
 
 | Method | Path | Auth | Success | Purpose |
 | --- | --- | --- | --- | --- |
 | `GET` | `/health` | no | `200` | Liveness and build version (unversioned). |
+| `POST` | `/api/v1/auth/login` | no | `200` + `Set-Cookie` | Verify the environment-configured administrator against an existing provider and issue an opaque session cookie. `503 auth_unavailable` when unconfigured; `401` generic for bad credentials; `429` with `Retry-After` when limited. |
+| `GET` | `/api/v1/auth/me` | session | `200` | The authenticated provider's public projection and the session expiry; `401` without a live session. Never returns a bearer token. |
+| `POST` | `/api/v1/auth/logout` | session | `204` + `Set-Cookie` | Revoke the server-side session and expire the cookie; idempotent. |
 | `GET` | `/api/v1/providers` | no | `200` | Public provider projection (`id`, `name`, `createdAt`) used by the catalog UI. |
 | `GET` | `/api/v1/rulebooks` | no | `200` | Filtered, paginated catalogue listing. Query parameters: `providerId`, `status`, `limit` (default 50, max 100), `offset` (default 0). |
 | `POST` | `/api/v1/rulebooks` | yes | `201` + `Location` | Create a draft rulebook, its attestation types and their schema references. An optional top-level `schemaReferences` array adds rulebook-level references. `sourceUrl` is optional and may be omitted or `null`. |
@@ -664,6 +672,44 @@ body, `404` an unknown rulebook/version/attestation type and `503` an unwired va
 service. The full contract, determinism scope and failure-class table are in
 [`docs/conformance.md`](conformance.md).
 
+### 3.11 Administrator browser session
+
+The optional single-administrator login (issue #88) is configured entirely from the server
+environment: `ADMIN_USERNAME`, `ADMIN_PASSWORD_HASH` (an Argon2id PHC hash with at least
+19 MiB of memory and two passes) and `ADMIN_PROVIDER_ID` (an existing provider). The group is
+all-or-nothing; a missing, partial or invalid group makes login answer `503 auth_unavailable`
+without affecting the public API or provider bearer writes. The full model is in
+[`docs/security.md`](security.md) §2.1.
+
+`POST /api/v1/auth/login` takes `{ "username": "...", "password": "..." }` and requires
+`Content-Type: application/json`. Success is `200`:
+
+```json
+{
+  "data": {
+    "provider": { "id": "…", "name": "…", "createdAt": "…" },
+    "expiresAt": "2026-01-01T08:00:00.000Z"
+  }
+}
+```
+
+and the response sets `attestbook_admin_session` with `HttpOnly`, `SameSite=Lax`, `Path=/`,
+an eight-hour absolute `Max-Age`, and `Secure` when the request is HTTPS (directly or through
+`X-Forwarded-Proto: https`). The identifier is a 256-bit opaque value, stored only as a
+SHA-256 hash; no bearer token, password or session identifier appears in the body. An unknown
+username and a wrong password get the same `401` with `unauthorized` and no
+`WWW-Authenticate` challenge. Login and logout reject a foreign `Origin`/`Sec-Fetch-Site` with
+`403`. Repeated failures answer `429 rate_limited` with `Retry-After` (five per account and
+twenty per client address in fifteen minutes). An attempt reserves its failure slot before the
+password check, and at most four checks run concurrently, so parallel requests cannot exceed
+the bound; a successful login clears the counters and rotates away any session the browser
+presented.
+
+`GET /api/v1/auth/me` resolves the cookie to the bound provider and returns the same `data`
+shape; `401` means no live session. `POST /api/v1/auth/logout` revokes the session row and
+expires the cookie, answers `204`, and is idempotent. None of these routes accept a session
+identifier from a URL, and nothing is stored in browser storage.
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -688,6 +734,9 @@ present where a stable sub-reason helps the client (currently import failures ca
 | API body parsing | malformed/non-object JSON, invalid query or path value, malformed import envelope | `400` | `invalid_request` |
 | Registry | `invalid_input` | `400` | `invalid_request` |
 | Registry | missing, unknown or revoked token | `401` | `unauthorized` |
+| Administrator login | wrong password or unknown username (indistinguishable) | `401` | `unauthorized` |
+| Administrator session | missing, unknown, expired or revoked session on `/auth/me` | `401` | `unauthorized` |
+| Administrator login/logout | foreign `Origin` or cross-site `Sec-Fetch-Site` | `403` | `forbidden` |
 | Registry / publish handler | authenticated provider does not own the resource | `403` | `forbidden` |
 | API / registry | resource does not exist | `404` | `not_found` |
 | Registry | duplicate version label, stale draft snapshot | `409` | `conflict` |
@@ -707,13 +756,16 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Capture explorer | capture, pinned rulebook, version or attestation type does not exist | `404` | `not_found` |
 | Capture explorer | external reference not fetched or non-credential artifact type | `409` | `conflict` |
 | Capture explorer | capture-source transport failure | `502` | `capture_fetch_failed` |
+| Administrator login | repeated failures above the account or client bound | `429` | `rate_limited` |
 | API wiring | registry, validation, issuer discovery, issuer fixtures, verifier policy resolver or capture explorer not configured | `503` | `registry_unavailable` / `validation_unavailable` / `capture_unavailable` |
+| Administrator login | configuration absent, partial, invalid or its provider missing | `503` | `auth_unavailable` |
 | API | unexpected failure | `500` | `internal_error` |
 
 Unknown routes under any path answer `404` with `not_found` and the same envelope. The
 mapping is implemented once in `src/api/errors.ts`; the OpenAPI document references the same
-`ErrorEnvelope` component for every error response. Every `401` response also carries the
-RFC 6750 challenge `WWW-Authenticate: Bearer realm="attestbook"`.
+`ErrorEnvelope` component for every error response. A `401` from a bearer-authenticated route
+also carries the RFC 6750 challenge `WWW-Authenticate: Bearer realm="attestbook"`; the
+browser-session routes deliberately do not advertise a bearer challenge.
 
 ## 5. Authentication and authorization
 
@@ -739,9 +791,15 @@ summarizes the HTTP contract.
   projects a whitelist of public fields, so a caller cannot inject them even though the
   service type accepts them internally, and a rulebook is always attributed to the
   authenticated provider.
+- The optional administrator browser session is a third, independent credential path used
+  only by `/api/v1/auth/login`, `/api/v1/auth/me` and `/api/v1/auth/logout`. It is cookie
+  based, is bound to an existing provider, and neither requires nor mints a bearer token.
+  It does not by itself authenticate the provider write routes in this slice; the operation
+  matrix in [`docs/security.md`](security.md) §3.1 is unchanged for bearer routes.
 
-Rate limiting, token expiry/rotation and provider-administration routes are not implemented
-in Phase 1; [`docs/security.md`](security.md) §8 records those limitations.
+Generic API rate limiting, token expiry/rotation and provider-administration routes are not
+implemented in Phase 1; administrator login failures are rate limited separately
+([`docs/security.md`](security.md) §2.1 and §8).
 
 ## 6. Idempotency policy
 
@@ -806,6 +864,8 @@ Run the relevant checks from the repository root:
 ```
 bun run openapi:check   # generated OpenAPI 3.1 document validates
 bun test src/api        # contract, success and error coverage
+bun test src/auth       # administrator login configuration, sessions, limits and origins
+bun test src/api/auth.test.ts  # administrator login/session HTTP contract
 bun test src/discovery  # discovery extraction, bounds and association
 bun test src/fixtures   # fixture synthesis, grounding and negative cases
 bun test src/verifier   # typed verifier constraints and OpenID4VP-aware mappings
@@ -818,22 +878,28 @@ bun run check           # formatting, lint, strict typecheck and all tests
 ```
 
 The API tests use real temporary SQLite databases, real registry services, the real import
-pipeline (offline JSON sources only) and a genuinely signed SD-JWT VC fixture. Discovery tests
-use an injected transport and DNS resolver, so no test performs a real network request. They
-do not claim coverage of HTTP rate limits or provider-management routes. The catalog UI has its
-own component and browser tests described in [`docs/ui.md`](ui.md).
+pipeline (offline JSON sources only) and a genuinely signed SD-JWT VC fixture. The
+administrator tests use real Argon2id hashes, temporary databases and injected clocks for
+deterministic expiry. Discovery tests use an injected transport and DNS resolver, so no test
+performs a real network request. They do not claim coverage of general API rate limits or
+provider-management routes. The catalog UI has its own component and browser tests described
+in [`docs/ui.md`](ui.md).
 
 ## 9. Limitations and next slices
 
 - Catalogue pagination is applied in memory after filtering; versions and attestations are
   returned in full. A paginated store query is a later registry slice.
 - No generic `Idempotency-Key` store, no request-body content-type enforcement beyond JSON
-  parsing, and no HTTP rate limits for reads, preview, import or discovery. Rate limiting is
-  still missing for the outbound-fetch routes, so an authenticated provider can repeat a
-  bounded fetch; the import and discovery services' own size, time, redirect and fan-out
-  limits still apply to every call. Rate limiting, token expiry/rotation and
-  provider-administration routes remain future hardening work documented in
-  [`docs/security.md`](security.md) §8.
+  parsing, and no HTTP rate limits for reads, preview, import or discovery. Administrator
+  login failures are bounded separately (§3.11). Rate limiting is still missing for the
+  outbound-fetch routes, so an authenticated provider can repeat a bounded fetch; the import
+  and discovery services' own size, time, redirect and fan-out limits still apply to every
+  call. General rate limiting, token expiry/rotation and provider-administration routes
+  remain future hardening work documented in [`docs/security.md`](security.md) §8.
+- The administrator login is one environment-configured account with no MFA, self-service
+  password change or account management API; rotating the password means changing
+  `ADMIN_PASSWORD_HASH` and restarting. The failure limiter is in-process and resets on
+  restart.
 - Import previews expose a projection (no internal canonical document) and do not persist a
   preview; an import re-runs the preview under the same controls.
 - Discovery is read-only: it does not persist discovered issuers, metadata snapshots or

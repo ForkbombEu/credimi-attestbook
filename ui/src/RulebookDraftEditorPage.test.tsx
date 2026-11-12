@@ -356,7 +356,7 @@ describe('rulebook draft editor', () => {
     const lifecycle = await screen.findByRole('region', {
       name: 'Draft lifecycle and publication',
     })
-    expect(within(lifecycle).getByText(/No versions have been frozen/)).toBeVisible()
+    expect(await within(lifecycle).findByText(/No versions have been frozen/)).toBeVisible()
 
     await user.type(within(lifecycle).getByLabelText('New version label'), '2.0')
     await user.click(within(lifecycle).getByRole('button', { name: 'Freeze as draft version' }))
