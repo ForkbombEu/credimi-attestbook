@@ -700,8 +700,10 @@ SHA-256 hash; no bearer token, password or session identifier appears in the bod
 username and a wrong password get the same `401` with `unauthorized` and no
 `WWW-Authenticate` challenge. Login and logout reject a foreign `Origin`/`Sec-Fetch-Site` with
 `403`. Repeated failures answer `429 rate_limited` with `Retry-After` (five per account and
-twenty per client address in fifteen minutes); a successful login clears the counters and
-rotates away any session the browser presented.
+twenty per client address in fifteen minutes). An attempt reserves its failure slot before the
+password check, and at most four checks run concurrently, so parallel requests cannot exceed
+the bound; a successful login clears the counters and rotates away any session the browser
+presented.
 
 `GET /api/v1/auth/me` resolves the cookie to the bound provider and returns the same `data`
 shape; `401` means no live session. `POST /api/v1/auth/logout` revokes the session row and

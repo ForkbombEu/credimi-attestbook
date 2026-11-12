@@ -39,6 +39,13 @@ export interface AdminProviderSource {
   getProvider(id: string): Provider | null
 }
 
+/**
+ * Simultaneous Argon2id password checks allowed for login. Beyond this bound
+ * a request answers `429` immediately, so an unauthenticated burst cannot tie
+ * up the process' CPU and memory.
+ */
+export const DEFAULT_ADMIN_LOGIN_MAX_CONCURRENT_VERIFICATIONS = 4
+
 export interface AdminAuthOptions {
   readonly database: Database
   readonly registry: AdminProviderSource
@@ -51,6 +58,8 @@ export interface AdminAuthOptions {
   readonly verifyPassword?: (password: string, hash: string) => Promise<boolean>
   readonly accountRateLimiter?: LoginRateLimiter
   readonly clientRateLimiter?: LoginRateLimiter
+  /** Simultaneous password checks; defaults to the exported constant. */
+  readonly maxConcurrentVerifications?: number
 }
 
 export interface AdminLoginInput {
@@ -107,6 +116,8 @@ export class AdminAuth {
   private readonly verifyPassword: (password: string, hash: string) => Promise<boolean>
   private readonly accountRateLimiter: LoginRateLimiter
   private readonly clientRateLimiter: LoginRateLimiter
+  private readonly maxConcurrentVerifications: number
+  private inFlight = 0
 
   constructor(options: AdminAuthOptions) {
     this.database = options.database
@@ -116,6 +127,14 @@ export class AdminAuth {
     this.ttlMs = options.ttlMs ?? ADMIN_SESSION_TTL_MS
     this.generateSessionId = options.generateSessionId ?? generateAdminSessionId
     this.verifyPassword = options.verifyPassword ?? verifyArgon2idPassword
+    this.maxConcurrentVerifications =
+      options.maxConcurrentVerifications ?? DEFAULT_ADMIN_LOGIN_MAX_CONCURRENT_VERIFICATIONS
+    if (
+      !Number.isSafeInteger(this.maxConcurrentVerifications) ||
+      this.maxConcurrentVerifications < 1
+    ) {
+      throw new Error('maxConcurrentVerifications must be a positive integer')
+    }
     const nowMs = (): number => Date.parse(this.now())
     this.accountRateLimiter =
       options.accountRateLimiter ??
@@ -149,62 +168,86 @@ export class AdminAuth {
       return { kind: 'unavailable' }
     }
 
+    if (this.inFlight >= this.maxConcurrentVerifications) {
+      // Refuse before doing any work: an unauthenticated burst must not start
+      // an unbounded number of memory-hard password checks.
+      return { kind: 'rate_limited', retryAfterSeconds: 1, scope: 'client' }
+    }
+
+    // Reserve the failure budget before the slow verification. The check and
+    // the append are one synchronous step, so overlapping requests cannot all
+    // pass the bound before any of them records a failure.
     const accountKey = createHash('sha256')
       .update(input.username.trim().toLowerCase(), 'utf8')
       .digest('hex')
-    const accountRetry = this.accountRateLimiter.retryAfterSeconds(accountKey)
-    if (accountRetry !== null) {
-      return { kind: 'rate_limited', retryAfterSeconds: accountRetry, scope: 'account' }
+    const accountReservation = this.accountRateLimiter.tryReserve(accountKey)
+    if ('retryAfterSeconds' in accountReservation) {
+      return {
+        kind: 'rate_limited',
+        retryAfterSeconds: accountReservation.retryAfterSeconds,
+        scope: 'account',
+      }
     }
-    const clientRetry = this.clientRateLimiter.retryAfterSeconds(input.clientKey)
-    if (clientRetry !== null) {
-      return { kind: 'rate_limited', retryAfterSeconds: clientRetry, scope: 'client' }
-    }
-
-    const usernameMatches =
-      input.username.length <= MAX_ADMIN_USERNAME_LENGTH &&
-      constantTimeEquals(input.username.trim(), this.config.username)
-    const candidatePassword =
-      input.password.length <= MAX_ADMIN_PASSWORD_LENGTH ? input.password : ''
-    const passwordMatches = await this.verifyPassword(candidatePassword, this.config.passwordHash)
-
-    if (!usernameMatches || !passwordMatches) {
-      this.accountRateLimiter.recordFailure(accountKey)
-      this.clientRateLimiter.recordFailure(input.clientKey)
-      return { kind: 'invalid_credentials' }
+    const clientReservation = this.clientRateLimiter.tryReserve(input.clientKey)
+    if ('retryAfterSeconds' in clientReservation) {
+      // The request never reached verification, so it must not spend the
+      // account's failure budget.
+      this.accountRateLimiter.release(accountKey, accountReservation.token)
+      return {
+        kind: 'rate_limited',
+        retryAfterSeconds: clientReservation.retryAfterSeconds,
+        scope: 'client',
+      }
     }
 
-    this.accountRateLimiter.reset(accountKey)
-    this.clientRateLimiter.reset(input.clientKey)
+    this.inFlight += 1
+    try {
+      const usernameMatches =
+        input.username.length <= MAX_ADMIN_USERNAME_LENGTH &&
+        constantTimeEquals(input.username.trim(), this.config.username)
+      const candidatePassword =
+        input.password.length <= MAX_ADMIN_PASSWORD_LENGTH ? input.password : ''
+      const passwordMatches = await this.verifyPassword(candidatePassword, this.config.passwordHash)
 
-    // Session fixation defence: never adopt the identifier the browser
-    // presented. Retire that session and mint a new unpredictable one.
-    if (input.currentSessionId !== undefined) {
-      this.logout(input.currentSessionId)
-    }
+      if (!usernameMatches || !passwordMatches) {
+        // Both reservations already count this as a failure.
+        return { kind: 'invalid_credentials' }
+      }
 
-    const createdAt = this.now()
-    const nowMs = Date.parse(createdAt)
-    const expiresAt = new Date(nowMs + this.ttlMs).toISOString()
-    const sessionId = this.generateSessionId()
-    const sessionHash = hashAdminSessionId(sessionId)
+      this.accountRateLimiter.reset(accountKey)
+      this.clientRateLimiter.reset(input.clientKey)
 
-    // Housekeeping: expired rows are useless and bounded storage is cheap.
-    this.database.query('DELETE FROM admin_sessions WHERE expires_at <= ?').run(createdAt)
-    this.database
-      .query(
-        `INSERT INTO admin_sessions
-           (session_hash, provider_id, auth_fingerprint, created_at, expires_at, revoked_at)
-         VALUES (?, ?, ?, ?, ?, NULL)`,
-      )
-      .run(sessionHash, provider.id, this.fingerprint(), createdAt, expiresAt)
+      // Session fixation defence: never adopt the identifier the browser
+      // presented. Retire that session and mint a new unpredictable one.
+      if (input.currentSessionId !== undefined) {
+        this.logout(input.currentSessionId)
+      }
 
-    return {
-      kind: 'authenticated',
-      sessionId,
-      provider,
-      expiresAt,
-      maxAgeSeconds: Math.max(1, Math.floor(this.ttlMs / 1_000)),
+      const createdAt = this.now()
+      const nowMs = Date.parse(createdAt)
+      const expiresAt = new Date(nowMs + this.ttlMs).toISOString()
+      const sessionId = this.generateSessionId()
+      const sessionHash = hashAdminSessionId(sessionId)
+
+      // Housekeeping: expired rows are useless and bounded storage is cheap.
+      this.database.query('DELETE FROM admin_sessions WHERE expires_at <= ?').run(createdAt)
+      this.database
+        .query(
+          `INSERT INTO admin_sessions
+             (session_hash, provider_id, auth_fingerprint, created_at, expires_at, revoked_at)
+           VALUES (?, ?, ?, ?, ?, NULL)`,
+        )
+        .run(sessionHash, provider.id, this.fingerprint(), createdAt, expiresAt)
+
+      return {
+        kind: 'authenticated',
+        sessionId,
+        provider,
+        expiresAt,
+        maxAgeSeconds: Math.max(1, Math.floor(this.ttlMs / 1_000)),
+      }
+    } finally {
+      this.inFlight -= 1
     }
   }
 

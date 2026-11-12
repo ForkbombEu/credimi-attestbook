@@ -86,8 +86,48 @@ export class LoginRateLimiter {
   }
 
   recordFailure(key: string): void {
-    const recent = this.recent(key)
-    this.failures.set(key, [...recent, this.now()])
+    this.append(key, this.now())
+  }
+
+  /**
+   * Atomically checks the bound and reserves one attempt. The check and the
+   * append happen in one synchronous step, so requests that overlap the slow
+   * password verification cannot all pass the bound before any failure is
+   * recorded.
+   */
+  tryReserve(key: string): { readonly retryAfterSeconds: number } | { readonly token: number } {
+    const retry = this.retryAfterSeconds(key)
+    if (retry !== null) {
+      return { retryAfterSeconds: retry }
+    }
+    return { token: this.append(key, this.now()) }
+  }
+
+  /**
+   * Gives back one reserved attempt, for example when a later bound rejects
+   * the same request. Successful logins use `reset` instead.
+   */
+  release(key: string, token: number): void {
+    const recorded = this.failures.get(key)
+    if (recorded === undefined) {
+      return
+    }
+    const index = recorded.lastIndexOf(token)
+    if (index < 0) {
+      return
+    }
+    const remaining = [...recorded]
+    remaining.splice(index, 1)
+    if (remaining.length === 0) {
+      this.failures.delete(key)
+    } else {
+      this.failures.set(key, remaining)
+    }
+  }
+
+  /** Appends one entry and bounds the number of tracked keys. */
+  private append(key: string, at: number): number {
+    this.failures.set(key, [...this.recent(key), at])
     while (this.failures.size > this.maxKeys) {
       const oldestKey = this.failures.keys().next().value
       if (oldestKey === undefined || oldestKey === key) {
@@ -95,6 +135,7 @@ export class LoginRateLimiter {
       }
       this.failures.delete(oldestKey)
     }
+    return at
   }
 
   /** Clears a key after a successful login. */

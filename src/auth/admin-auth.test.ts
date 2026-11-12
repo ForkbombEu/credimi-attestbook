@@ -57,6 +57,8 @@ function setup(
     readonly config?: AdminLoginConfig
     readonly maxFailures?: number
     readonly ttlMs?: number
+    readonly maxConcurrentVerifications?: number
+    readonly verifyPassword?: (password: string, hash: string) => Promise<boolean>
   } = {},
 ): Harness {
   fixture = createRegistryFixture()
@@ -77,6 +79,10 @@ function setup(
     config,
     now: () => clock.iso,
     ...(options.ttlMs === undefined ? {} : { ttlMs: options.ttlMs }),
+    ...(options.verifyPassword === undefined ? {} : { verifyPassword: options.verifyPassword }),
+    ...(options.maxConcurrentVerifications === undefined
+      ? {}
+      : { maxConcurrentVerifications: options.maxConcurrentVerifications }),
     accountRateLimiter: new LoginRateLimiter({
       maxFailures: options.maxFailures ?? 5,
       now: () => Date.parse(clock.iso),
@@ -274,6 +280,61 @@ describe('admin session login', () => {
     expect((await login(harness, { password: 'wrong' })).kind).toBe('invalid_credentials')
     expect((await login(harness)).kind).toBe('authenticated')
     expect((await login(harness, { password: 'wrong' })).kind).toBe('invalid_credentials')
+    expect((await login(harness, { password: 'wrong' })).kind).toBe('invalid_credentials')
+    expect((await login(harness)).kind).toBe('rate_limited')
+  })
+
+  test('reserves failures before verification so parallel guesses are bounded', async () => {
+    // A high verification cap isolates the reservation property: all twenty
+    // requests can reach the limiter, and only the account bound may reject.
+    const harness = setup({ maxConcurrentVerifications: 20 })
+
+    const outcomes = await Promise.all(
+      Array.from({ length: 20 }, (_, index) =>
+        login(harness, { password: `wrong-${String(index)}` }),
+      ),
+    )
+
+    expect(outcomes.filter((outcome) => outcome.kind === 'invalid_credentials')).toHaveLength(5)
+    expect(outcomes.filter((outcome) => outcome.kind === 'rate_limited')).toHaveLength(15)
+    expect(sessionRows(harness)).toHaveLength(0)
+  })
+
+  test('caps simultaneous password checks before doing any work', async () => {
+    let release: () => void = () => {}
+    const blocked = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let checks = 0
+    const harness = setup({
+      maxConcurrentVerifications: 2,
+      verifyPassword: async () => {
+        checks += 1
+        await blocked
+        return false
+      },
+    })
+
+    const first = login(harness, { username: 'first', password: 'wrong' })
+    const second = login(harness, { username: 'second', password: 'wrong' })
+    const third = await login(harness, { username: 'third', password: 'wrong' })
+
+    expect(third.kind).toBe('rate_limited')
+    if (third.kind === 'rate_limited') {
+      expect(third.scope).toBe('client')
+    }
+    expect(checks).toBe(2)
+
+    release()
+    expect((await first).kind).toBe('invalid_credentials')
+    expect((await second).kind).toBe('invalid_credentials')
+    expect(checks).toBe(2)
+  })
+
+  test('a successful attempt releases its reserved failure slot', async () => {
+    const harness = setup({ maxFailures: 1 })
+
+    expect((await login(harness)).kind).toBe('authenticated')
     expect((await login(harness, { password: 'wrong' })).kind).toBe('invalid_credentials')
     expect((await login(harness)).kind).toBe('rate_limited')
   })

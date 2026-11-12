@@ -433,4 +433,29 @@ describe('administrator login availability and limits', () => {
     // Public reads are unaffected by the login bound.
     expect((await harness.app.request('/api/v1/rulebooks')).status).toBe(200)
   })
+
+  test('bounds parallel login attempts instead of only sequential ones', async () => {
+    const harness = setup()
+
+    const responses = await Promise.all(
+      Array.from({ length: 10 }, (_, index) =>
+        postLogin(harness.app, {
+          username: 'uat-admin',
+          password: `wrong-${String(index)}`,
+        }),
+      ),
+    )
+
+    const unauthorized = responses.filter((response) => response.status === 401)
+    const limited = responses.filter((response) => response.status === 429)
+    expect(unauthorized.length).toBeLessThanOrEqual(5)
+    expect(limited.length).toBeGreaterThanOrEqual(5)
+    expect(unauthorized.length + limited.length).toBe(responses.length)
+
+    for (const response of limited) {
+      expect(Number(response.headers.get('retry-after'))).toBeGreaterThan(0)
+      expect((await errorJson(response)).error.code).toBe('rate_limited')
+    }
+    expect(sessionCount(harness)).toBe(0)
+  })
 })

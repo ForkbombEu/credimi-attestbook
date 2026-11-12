@@ -5,6 +5,7 @@
 
 export {
   AdminAuth,
+  DEFAULT_ADMIN_LOGIN_MAX_CONCURRENT_VERIFICATIONS,
   type AdminAuthOptions,
   type AdminLoginInput,
   type AdminLoginOutcome,

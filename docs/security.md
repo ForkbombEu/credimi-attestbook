@@ -92,11 +92,15 @@ API token in the session or changes the bearer checks above.
   answer `403` otherwise. Login accepts only `Content-Type: application/json`, which a
   cross-site HTML form cannot send without a CORS preflight. The login and logout endpoints
   add no audit rows (neither successes nor failures).
-- **Rate limiting.** Login failures are bounded in-process: five per account and twenty per
-  client address in a fifteen-minute sliding window, answering `429 rate_limited` with
-  `Retry-After`. A successful login clears both keys; the account key is case-folded so case
-  variants do not reset the budget. The limiter is not persisted and resets on restart, and it
-  does not rate-limit bearer-token API traffic.
+- **Rate limiting and parallel attempts.** Login failures are bounded in-process: five per
+  account and twenty per client address in a fifteen-minute sliding window, answering
+  `429 rate_limited` with `Retry-After`. An attempt reserves its failure slot before the
+  Argon2id check in one synchronous step, so overlapping requests cannot all pass the bound
+  before any of them is counted. At most four password checks run concurrently; further
+  concurrent attempts answer `429` without touching the CPU or memory of a hash. A successful
+  login clears both keys; the account key is case-folded so case variants do not reset the
+  budget. The limiter is not persisted and resets on restart, and it does not rate-limit
+  bearer-token API traffic.
 - **Provider binding only.** `/api/v1/auth/me` returns the public provider projection
   (`id`, `name`, `createdAt`) and the session expiry. It exposes no publication authority,
   metadata, password hash or token. The browser stores no session identifier or password in
@@ -248,6 +252,15 @@ trail is not exposed over HTTP; it is read by operators from the database.
   environment-configured account; rotating the password means changing `ADMIN_PASSWORD_HASH`
   and restarting (outstanding sessions then fail the fingerprint check). There is no
   self-service password reset, second factor or account management API.
+- **The account failure bound can be used for a temporary lockout.** Because the account key
+  is the submitted username, anyone who knows it can spend the five-attempt budget every
+  fifteen-minute window and keep the single administrator from logging in. This availability
+  trade-off is accepted for a single-account deployment; there is no separate unlock path or
+  per-client account budget.
+- **Behind a reverse proxy the client budget is shared.** The client key is the socket's
+  remote address; in a proxy deployment every browser presents the proxy's address, so the
+  twenty-attempt client window is effectively global. `X-Forwarded-For` is deliberately not
+  trusted as a limiter key.
 - **Provider administration is operator-only.** The API does not expose provider provisioning,
   token issuance for a new provider, or provider deletion.
 - **Denied attempts are not audited.** The audit trail records successful mutations and token
@@ -280,7 +293,8 @@ trail is not exposed over HTTP; it is read by operators from the database.
   rejection, opaque sessions hashed at rest, provider binding, generic unknown-user versus
   wrong-password outcomes, missing/invalid configuration and missing providers, expiry,
   logout revocation and idempotency, configuration rotation invalidation, login session
-  rotation, the failure limiter and the same-origin/proxy checks.
+  rotation, the failure limiter's parallel reservation and concurrent-check cap, and the
+  same-origin/proxy checks.
 - `src/api/auth.test.ts` exercises the real Hono application: login, the hardened cookie
   attributes (`HttpOnly`, `SameSite`, `Path`, `Max-Age`, conditional `Secure`), `/auth/me`,
   logout revocation, expiry, both rate-limited and cross-origin refusals, absence of bearer
