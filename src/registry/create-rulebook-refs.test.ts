@@ -15,11 +15,11 @@ afterEach(() => {
 
 function setup() {
   fixture = createRegistryFixture()
-  const { provider, token } = provisionProvider(fixture.database, {
+  const { actor, provider, token } = provisionProvider(fixture.database, {
     name: 'Reference Provider',
     publicationAuthority: 'account-references',
   })
-  return { fixture, provider, token }
+  return { actor, fixture, provider, token }
 }
 
 function expectRegistryError(action: () => unknown, code: RegistryErrorCode): void {
@@ -58,9 +58,9 @@ function input(overrides: Partial<CreateRulebookInput> = {}): CreateRulebookInpu
 
 describe('createRulebook with attestation schema references', () => {
   test('creates the attestation and its references in one call', () => {
-    const { fixture, token } = setup()
+    const { actor, fixture } = setup()
 
-    const rulebook = fixture.registry.createRulebook(token.secret, input())
+    const rulebook = fixture.registry.createRulebook(actor, input())
     const attestations = fixture.registry.listAttestations(rulebook.id)
     const references = fixture.registry.listSchemaReferences(rulebook.id)
 
@@ -82,9 +82,9 @@ describe('createRulebook with attestation schema references', () => {
   })
 
   test('creates several rulebooks in one transaction', () => {
-    const { fixture, token } = setup()
+    const { actor, fixture } = setup()
 
-    const rulebooks = fixture.registry.createRulebooks(token.secret, [
+    const rulebooks = fixture.registry.createRulebooks(actor, [
       input({ name: 'First Rulebook' }),
       input({ name: 'Second Rulebook' }),
     ])
@@ -98,11 +98,11 @@ describe('createRulebook with attestation schema references', () => {
   })
 
   test('refuses the whole batch when a later entry is invalid', () => {
-    const { fixture, token } = setup()
+    const { actor, fixture } = setup()
 
     expectRegistryError(
       () =>
-        fixture.registry.createRulebooks(token.secret, [
+        fixture.registry.createRulebooks(actor, [
           input({ name: 'First Rulebook' }),
           input({
             name: 'Second Rulebook',
@@ -126,12 +126,12 @@ describe('createRulebook with attestation schema references', () => {
   })
 
   test('refuses duplicate format identifiers and leaves no rulebook', () => {
-    const { fixture, token } = setup()
+    const { actor, fixture } = setup()
 
     expectRegistryError(
       () =>
         fixture.registry.createRulebook(
-          token.secret,
+          actor,
           input({
             attestations: [
               {
@@ -153,7 +153,7 @@ describe('createRulebook with attestation schema references', () => {
   })
 
   test('enforces the per-attestation reference limit', () => {
-    const { fixture, token } = setup()
+    const { actor, fixture } = setup()
     const references = Array.from(
       { length: MAX_SCHEMA_REFERENCES_PER_ATTESTATION + 1 },
       (_, index) => ({
@@ -165,7 +165,7 @@ describe('createRulebook with attestation schema references', () => {
     expectRegistryError(
       () =>
         fixture.registry.createRulebook(
-          token.secret,
+          actor,
           input({
             attestations: [
               {
@@ -183,12 +183,12 @@ describe('createRulebook with attestation schema references', () => {
   })
 
   test('rejects an invalid reference before writing the rulebook', () => {
-    const { fixture, token } = setup()
+    const { actor, fixture } = setup()
 
     expectRegistryError(
       () =>
         fixture.registry.createRulebook(
-          token.secret,
+          actor,
           input({
             attestations: [
               {

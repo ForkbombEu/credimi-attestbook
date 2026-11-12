@@ -81,8 +81,9 @@ describe('provider provisioning and authentication', () => {
     expect(rows[0]?.token_hash).toHaveLength(AUTH_TOKEN_HASH_LENGTH)
     expect(rows[0]?.token_hash).not.toContain(token.secret)
 
-    expect(registry.authenticate(token.secret)).toEqual({
+    expect(registry.authenticateBearer(token.secret)).toEqual({
       providerId: provider.id,
+      authMethod: 'bearer',
       tokenId: token.id,
     })
     expect(registry.getProvider(provider.id)).toEqual(provider)
@@ -111,36 +112,36 @@ describe('provider provisioning and authentication', () => {
 
   test('issues additional tokens and revokes them idempotently', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const second = registry.issueToken(token.secret, 'ci')
+    const { actor, token } = provision('a')
+    const second = registry.issueToken(actor, 'ci')
 
-    expect(registry.authenticate(second.secret).providerId).toBe(token.providerId)
+    expect(registry.authenticateBearer(second.secret).providerId).toBe(token.providerId)
     expect(
       registry
-        .listTokens(token.secret)
+        .listTokens(actor)
         .map((entry) => entry.id)
         .sort(),
     ).toEqual([token.id, second.id].sort())
 
-    registry.revokeToken(token.secret, second.id)
-    expect(() => registry.authenticate(second.secret)).toThrow('valid bearer token')
-    registry.revokeToken(token.secret, second.id)
+    registry.revokeToken(actor, second.id)
+    expect(() => registry.authenticateBearer(second.secret)).toThrow('valid bearer token')
+    registry.revokeToken(actor, second.id)
 
-    const revoked = registry.listTokens(token.secret).find((entry) => entry.id === second.id)
+    const revoked = registry.listTokens(actor).find((entry) => entry.id === second.id)
     expect(revoked?.revokedAt).not.toBeNull()
   })
 
   test('rejects unknown, malformed and revoked tokens as unauthorized', () => {
     const { registry } = setup()
-    const { token } = provision('a')
+    const { actor, token } = provision('a')
 
     for (const candidate of ['', 'not-a-token', `${token.secret}x`, 'att_']) {
-      expectRegistryError(() => registry.authenticate(candidate), 'unauthorized')
+      expectRegistryError(() => registry.authenticateBearer(candidate), 'unauthorized')
     }
 
-    const second = registry.issueToken(token.secret)
-    registry.revokeToken(token.secret, second.id)
-    expectRegistryError(() => registry.authenticate(second.secret), 'unauthorized')
+    const second = registry.issueToken(actor)
+    registry.revokeToken(actor, second.id)
+    expectRegistryError(() => registry.authenticateBearer(second.secret), 'unauthorized')
   })
 
   test('updates and deletes only the authenticated provider account', () => {
@@ -148,7 +149,7 @@ describe('provider provisioning and authentication', () => {
     const first = provision('a')
     const second = provision('b')
 
-    const updated = registry.updateProvider(first.token.secret, {
+    const updated = registry.updateProvider(first.actor, {
       name: 'Renamed Provider',
       metadata: { owner: 'team-a' },
     })
@@ -157,32 +158,32 @@ describe('provider provisioning and authentication', () => {
 
     // Publication authority is operator-assigned; even an extra runtime field
     // cannot change it through the update path.
-    const attempted = registry.updateProvider(first.token.secret, {
+    const attempted = registry.updateProvider(first.actor, {
       name: 'Renamed Provider',
       publicationAuthority: 'account-b',
     } as unknown as UpdateProviderInput)
     expect(attempted.publicationAuthority).toBe(first.provider.publicationAuthority)
 
-    const rulebook = registry.createRulebook(first.token.secret, {
+    const rulebook = registry.createRulebook(first.actor, {
       name: 'Owned Rulebook',
       applicableSpec: 'ts11@1.0.1',
     })
-    expectRegistryError(() => registry.deleteProvider(first.token.secret), 'conflict')
+    expectRegistryError(() => registry.deleteProvider(first.actor), 'conflict')
 
-    registry.deleteRulebook(first.token.secret, rulebook.id)
-    registry.deleteProvider(first.token.secret)
+    registry.deleteRulebook(first.actor, rulebook.id)
+    registry.deleteProvider(first.actor)
     expect(registry.getProvider(first.provider.id)).toBeNull()
     expect(registry.getProvider(second.provider.id)).not.toBeNull()
-    expect(() => registry.authenticate(first.token.secret)).toThrow('valid bearer token')
+    expect(() => registry.authenticateBearer(first.token.secret)).toThrow('valid bearer token')
   })
 })
 
 describe('rulebook persistence', () => {
   test('creates, reads and lists rulebooks with nested attestation types', () => {
     const { registry } = setup()
-    const { provider, token } = provision('a')
+    const { actor, provider } = provision('a')
 
-    const rulebook = registry.createRulebook(token.secret, {
+    const rulebook = registry.createRulebook(actor, {
       name: 'PID Rulebook',
       description: 'Person Identification Data',
       sourceUrl: 'https://example.org/catalog/pid',
@@ -223,15 +224,15 @@ describe('rulebook persistence', () => {
 
   test('normalizes absolute http(s) URLs before storing them', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'URLs',
       applicableSpec: 'ts11@1.0.1',
       sourceUrl: 'HTTPS://Example.ORG/Catalog',
     })
     expect(rulebook.sourceUrl).toBe('https://example.org/Catalog')
 
-    const reference = registry.addSchemaReference(token.secret, rulebook.id, {
+    const reference = registry.addSchemaReference(actor, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
       uri: 'HTTPS://Example.ORG/schema.json',
     })
@@ -240,9 +241,9 @@ describe('rulebook persistence', () => {
 
   test('stores a detached JSON copy of internal metadata', () => {
     const { registry } = setup()
-    const { token } = provision('a')
+    const { actor } = provision('a')
     const metadata = { nested: { value: 1 } }
-    const rulebook = registry.createRulebook(token.secret, {
+    const rulebook = registry.createRulebook(actor, {
       name: 'Detached metadata',
       applicableSpec: 'ts11@1.0.1',
       metadata,
@@ -255,15 +256,15 @@ describe('rulebook persistence', () => {
 
   test('updates drafts, clears optional fields and leaves unchanged rows untouched', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'Draft',
       description: 'Before',
       sourceUrl: 'https://example.org/before',
       applicableSpec: 'ts11@1.0.1',
     })
 
-    const updated = registry.updateRulebook(token.secret, rulebook.id, {
+    const updated = registry.updateRulebook(actor, rulebook.id, {
       name: 'Renamed Draft',
       description: 'After',
       metadata: { note: 'updated' },
@@ -274,13 +275,13 @@ describe('rulebook persistence', () => {
     expect(updated.sourceUrl).toBe('https://example.org/before')
     expect(updated.updatedAt).not.toBe(rulebook.updatedAt)
 
-    const unchanged = registry.updateRulebook(token.secret, updated.id, {
+    const unchanged = registry.updateRulebook(actor, updated.id, {
       name: 'Renamed Draft',
       metadata: { note: 'updated' },
     })
     expect(unchanged.updatedAt).toBe(updated.updatedAt)
 
-    const cleared = registry.updateRulebook(token.secret, updated.id, { sourceUrl: null })
+    const cleared = registry.updateRulebook(actor, updated.id, { sourceUrl: null })
     expect(cleared.sourceUrl).toBeNull()
   })
 
@@ -291,11 +292,11 @@ describe('rulebook persistence', () => {
 
     try {
       const first = new Registry({ database })
-      const { token } = provisionProvider(database, {
+      const { actor, token } = provisionProvider(database, {
         name: 'Persistent Provider',
         publicationAuthority: 'account-persistent',
       })
-      const rulebook = first.createRulebook(token.secret, {
+      const rulebook = first.createRulebook(actor, {
         name: 'Persistent Rulebook',
         applicableSpec: 'ts11@1.0.1',
       })
@@ -304,7 +305,7 @@ describe('rulebook persistence', () => {
       database = openMigratedDatabase(databasePath)
       const second = new Registry({ database })
       expect(second.getRulebook(rulebook.id)).toEqual(rulebook)
-      expect(second.authenticate(token.secret).providerId).toBe(token.providerId)
+      expect(second.authenticateBearer(token.secret).providerId).toBe(token.providerId)
       expect(second.listAttestations(rulebook.id)).toEqual([])
     } finally {
       database.close()
@@ -314,8 +315,8 @@ describe('rulebook persistence', () => {
 
   test('deletes draft rulebooks and cascades attestations and schema references', () => {
     const { registry, database } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'To delete',
       applicableSpec: 'ts11@1.0.1',
       attestations: [{ name: 'PID', attestationLoS: 'iso_18045_high', bindingType: 'key' }],
@@ -324,13 +325,13 @@ describe('rulebook persistence', () => {
     if (attestation === undefined) {
       throw new Error('expected the created attestation')
     }
-    registry.addSchemaReference(token.secret, rulebook.id, {
+    registry.addSchemaReference(actor, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
       uri: 'https://example.org/schema.json',
       attestationId: attestation.id,
     })
 
-    registry.deleteRulebook(token.secret, rulebook.id)
+    registry.deleteRulebook(actor, rulebook.id)
 
     expect(registry.getRulebook(rulebook.id)).toBeNull()
     expect(registry.listRulebooks()).toEqual([])
@@ -368,13 +369,13 @@ describe('rulebook persistence', () => {
 
   test('records an audit entry for every mutation, with the acting provider', () => {
     const { registry, database } = setup()
-    const { provider, token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor, provider } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'Audited',
       applicableSpec: 'ts11@1.0.1',
       attestations: [{ name: 'PID', attestationLoS: 'iso_18045_high', bindingType: 'key' }],
     })
-    registry.updateRulebook(token.secret, rulebook.id, { description: 'changed' })
+    registry.updateRulebook(actor, rulebook.id, { description: 'changed' })
 
     const entries = database
       .query<{ action: string; actor_provider_id: string | null }, []>(
@@ -396,13 +397,13 @@ describe('rulebook persistence', () => {
 describe('attestation types and schema references', () => {
   test('supports CRUD for attestation types and schema references', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'CRUD',
       applicableSpec: 'ts11@1.0.1',
     })
 
-    const attestation = registry.addAttestation(token.secret, rulebook.id, {
+    const attestation = registry.addAttestation(actor, rulebook.id, {
       name: 'PID',
       attestationLoS: 'iso_18045_high',
       bindingType: 'key',
@@ -412,7 +413,7 @@ describe('attestation types and schema references', () => {
     const afterAttestation = registry.getRulebook(rulebook.id)
     expect(afterAttestation?.updatedAt).not.toBe(rulebook.updatedAt)
 
-    const reference = registry.addSchemaReference(token.secret, rulebook.id, {
+    const reference = registry.addSchemaReference(actor, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
       uri: 'https://example.org/pid.json',
       integrity: 'sha256-abc123',
@@ -422,35 +423,32 @@ describe('attestation types and schema references', () => {
     expect(registry.listSchemaReferences(rulebook.id)).toEqual([reference])
     expect(reference.attestationId).toBe(attestation.id)
 
-    const updatedAttestation = registry.updateAttestation(
-      token.secret,
-      rulebook.id,
-      attestation.id,
-      { bindingType: 'claim', supportedFormats: ['mso_mdoc'] },
-    )
+    const updatedAttestation = registry.updateAttestation(actor, rulebook.id, attestation.id, {
+      bindingType: 'claim',
+      supportedFormats: ['mso_mdoc'],
+    })
     expect(updatedAttestation.bindingType).toBe('claim')
     expect(updatedAttestation.supportedFormats).toEqual(['mso_mdoc'])
 
-    const updatedReference = registry.updateSchemaReference(
-      token.secret,
-      rulebook.id,
-      reference.id,
-      { formatIdentifier: 'mso_mdoc', integrity: null, attestationId: null },
-    )
+    const updatedReference = registry.updateSchemaReference(actor, rulebook.id, reference.id, {
+      formatIdentifier: 'mso_mdoc',
+      integrity: null,
+      attestationId: null,
+    })
     expect(updatedReference.formatIdentifier).toBe('mso_mdoc')
     expect(updatedReference.integrity).toBeNull()
     expect(updatedReference.attestationId).toBeNull()
 
-    registry.removeSchemaReference(token.secret, rulebook.id, reference.id)
-    registry.removeAttestation(token.secret, rulebook.id, attestation.id)
+    registry.removeSchemaReference(actor, rulebook.id, reference.id)
+    registry.removeAttestation(actor, rulebook.id, attestation.id)
     expect(registry.listSchemaReferences(rulebook.id)).toEqual([])
     expect(registry.listAttestations(rulebook.id)).toEqual([])
   })
 
   test('scopes schema-reference uniqueness to the attestation type', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'Scoped schemas',
       applicableSpec: 'ts11@1.0.1',
       attestations: [
@@ -463,12 +461,12 @@ describe('attestation types and schema references', () => {
       throw new Error('expected both attestation types')
     }
 
-    const pidReference = registry.addSchemaReference(token.secret, rulebook.id, {
+    const pidReference = registry.addSchemaReference(actor, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
       uri: 'https://example.org/pid.json',
       attestationId: pid.id,
     })
-    const mdlReference = registry.addSchemaReference(token.secret, rulebook.id, {
+    const mdlReference = registry.addSchemaReference(actor, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
       uri: 'https://example.org/mdl.json',
       attestationId: mdl.id,
@@ -476,7 +474,7 @@ describe('attestation types and schema references', () => {
     expect(registry.listSchemaReferences(rulebook.id)).toHaveLength(2)
 
     // The same format is accepted at rulebook level as its own scope.
-    const rulebookReference = registry.addSchemaReference(token.secret, rulebook.id, {
+    const rulebookReference = registry.addSchemaReference(actor, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
       uri: 'https://example.org/rulebook.json',
     })
@@ -484,7 +482,7 @@ describe('attestation types and schema references', () => {
 
     expectRegistryError(
       () =>
-        registry.addSchemaReference(token.secret, rulebook.id, {
+        registry.addSchemaReference(actor, rulebook.id, {
           formatIdentifier: 'dc+sd-jwt',
           uri: 'https://example.org/pid-duplicate.json',
           attestationId: pid.id,
@@ -493,7 +491,7 @@ describe('attestation types and schema references', () => {
     )
     expectRegistryError(
       () =>
-        registry.addSchemaReference(token.secret, rulebook.id, {
+        registry.addSchemaReference(actor, rulebook.id, {
           formatIdentifier: 'dc+sd-jwt',
           uri: 'https://example.org/rulebook-duplicate.json',
         }),
@@ -501,7 +499,7 @@ describe('attestation types and schema references', () => {
     )
     expectRegistryError(
       () =>
-        registry.updateSchemaReference(token.secret, rulebook.id, pidReference.id, {
+        registry.updateSchemaReference(actor, rulebook.id, pidReference.id, {
           attestationId: null,
         }),
       'conflict',
@@ -511,8 +509,8 @@ describe('attestation types and schema references', () => {
 
   test('audits schema references removed together with their attestation', () => {
     const { registry, database } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'Cascade audit',
       applicableSpec: 'ts11@1.0.1',
       attestations: [{ name: 'PID', attestationLoS: 'iso_18045_high', bindingType: 'key' }],
@@ -521,13 +519,13 @@ describe('attestation types and schema references', () => {
     if (attestation === undefined) {
       throw new Error('expected the created attestation')
     }
-    registry.addSchemaReference(token.secret, rulebook.id, {
+    registry.addSchemaReference(actor, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
       uri: 'https://example.org/schema.json',
       attestationId: attestation.id,
     })
 
-    registry.removeAttestation(token.secret, rulebook.id, attestation.id)
+    registry.removeAttestation(actor, rulebook.id, attestation.id)
 
     expect(registry.listSchemaReferences(rulebook.id)).toEqual([])
     const audit = database
@@ -543,24 +541,24 @@ describe('attestation types and schema references', () => {
 
   test('rejects duplicate attestation names and schema format identifiers', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'Duplicates',
       applicableSpec: 'ts11@1.0.1',
     })
-    registry.addAttestation(token.secret, rulebook.id, {
+    registry.addAttestation(actor, rulebook.id, {
       name: 'PID',
       attestationLoS: 'iso_18045_high',
       bindingType: 'key',
     })
-    registry.addSchemaReference(token.secret, rulebook.id, {
+    registry.addSchemaReference(actor, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
       uri: 'https://example.org/pid.json',
     })
 
     expectRegistryError(
       () =>
-        registry.addAttestation(token.secret, rulebook.id, {
+        registry.addAttestation(actor, rulebook.id, {
           name: 'PID',
           attestationLoS: 'iso_18045_moderate',
           bindingType: 'key',
@@ -569,7 +567,7 @@ describe('attestation types and schema references', () => {
     )
     expectRegistryError(
       () =>
-        registry.addSchemaReference(token.secret, rulebook.id, {
+        registry.addSchemaReference(actor, rulebook.id, {
           formatIdentifier: 'dc+sd-jwt',
           uri: 'https://example.org/other.json',
         }),
@@ -581,36 +579,36 @@ describe('attestation types and schema references', () => {
 describe('registry invalid writes', () => {
   test('rejects malformed rulebook input before it reaches the database', () => {
     const { registry } = setup()
-    const { token } = provision('a')
+    const { actor } = provision('a')
     const base = { name: 'Rulebook', applicableSpec: 'ts11@1.0.1' }
 
     expectRegistryError(
-      () => registry.createRulebook(token.secret, { ...base, name: '   ' }),
+      () => registry.createRulebook(actor, { ...base, name: '   ' }),
       'invalid_input',
     )
     expectRegistryError(
-      () => registry.createRulebook(token.secret, { ...base, applicableSpec: '' }),
+      () => registry.createRulebook(actor, { ...base, applicableSpec: '' }),
       'invalid_input',
     )
     expectRegistryError(
-      () => registry.createRulebook(token.secret, { ...base, sourceUrl: 'ftp://example.org/x' }),
+      () => registry.createRulebook(actor, { ...base, sourceUrl: 'ftp://example.org/x' }),
       'invalid_input',
     )
     expectRegistryError(
       () =>
-        registry.createRulebook(token.secret, {
+        registry.createRulebook(actor, {
           ...base,
           sourceUrl: 'https://user:secret@example.org/x',
         }),
       'invalid_input',
     )
     expectRegistryError(
-      () => registry.createRulebook(token.secret, { ...base, sourceUrl: 'not a url' }),
+      () => registry.createRulebook(actor, { ...base, sourceUrl: 'not a url' }),
       'invalid_input',
     )
     expectRegistryError(
       () =>
-        registry.createRulebook(token.secret, {
+        registry.createRulebook(actor, {
           ...base,
           sourceUrl: `https://example.org/${'é'.repeat(1_000)}`,
         }),
@@ -618,7 +616,7 @@ describe('registry invalid writes', () => {
     )
     expectRegistryError(
       () =>
-        registry.createRulebook(token.secret, {
+        registry.createRulebook(actor, {
           ...base,
           metadata: [] as unknown as JsonObject,
         }),
@@ -626,7 +624,7 @@ describe('registry invalid writes', () => {
     )
     expectRegistryError(
       () =>
-        registry.createRulebook(token.secret, {
+        registry.createRulebook(actor, {
           ...base,
           description: 'x'.repeat(MAX_DESCRIPTION_LENGTH + 1),
         }),
@@ -634,7 +632,7 @@ describe('registry invalid writes', () => {
     )
     expectRegistryError(
       () =>
-        registry.createRulebook(token.secret, {
+        registry.createRulebook(actor, {
           ...base,
           attestations: [
             { name: 'Same', attestationLoS: 'iso_18045_high', bindingType: 'key' },
@@ -645,21 +643,20 @@ describe('registry invalid writes', () => {
     )
     expectRegistryError(
       () =>
-        registry.createRulebook(token.secret, {
+        registry.createRulebook(actor, {
           ...base,
           attestations: {} as unknown as readonly CreateAttestationInput[],
         }),
       'invalid_input',
     )
     expectRegistryError(
-      () => registry.createRulebook(token.secret, null as unknown as CreateRulebookInput),
+      () => registry.createRulebook(actor, null as unknown as CreateRulebookInput),
       'invalid_input',
     )
 
-    const created = registry.createRulebook(token.secret, base)
+    const created = registry.createRulebook(actor, base)
     expectRegistryError(
-      () =>
-        registry.updateRulebook(token.secret, created.id, null as unknown as UpdateRulebookInput),
+      () => registry.updateRulebook(actor, created.id, null as unknown as UpdateRulebookInput),
       'invalid_input',
     )
 
@@ -668,15 +665,15 @@ describe('registry invalid writes', () => {
 
   test('rejects malformed attestation and schema-reference input', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'Invalid',
       applicableSpec: 'ts11@1.0.1',
     })
 
     expectRegistryError(
       () =>
-        registry.addAttestation(token.secret, rulebook.id, {
+        registry.addAttestation(actor, rulebook.id, {
           name: 'PID',
           attestationLoS: 'iso_18045_high',
           bindingType: 'key',
@@ -686,7 +683,7 @@ describe('registry invalid writes', () => {
     )
     expectRegistryError(
       () =>
-        registry.addSchemaReference(token.secret, rulebook.id, {
+        registry.addSchemaReference(actor, rulebook.id, {
           formatIdentifier: 'dc+sd-jwt',
           uri: 'file:///etc/passwd',
         }),
@@ -694,7 +691,7 @@ describe('registry invalid writes', () => {
     )
     expectRegistryError(
       () =>
-        registry.addSchemaReference(token.secret, rulebook.id, {
+        registry.addSchemaReference(actor, rulebook.id, {
           formatIdentifier: 'dc+sd-jwt',
           uri: 'https://example.org/schema.json',
           integrity: 'sha256',
@@ -703,7 +700,7 @@ describe('registry invalid writes', () => {
     )
     expectRegistryError(
       () =>
-        registry.addSchemaReference(token.secret, rulebook.id, {
+        registry.addSchemaReference(actor, rulebook.id, {
           formatIdentifier: 'dc+sd-jwt',
           uri: 'https://example.org/schema.json',
           attestationId: 'missing-attestation',
@@ -712,7 +709,7 @@ describe('registry invalid writes', () => {
     )
     expectRegistryError(
       () =>
-        registry.addAttestation(token.secret, 'missing-rulebook', {
+        registry.addAttestation(actor, 'missing-rulebook', {
           name: 'PID',
           attestationLoS: 'iso_18045_high',
           bindingType: 'key',
@@ -720,19 +717,19 @@ describe('registry invalid writes', () => {
       'not_found',
     )
     expectRegistryError(
-      () => registry.updateRulebook(token.secret, 'missing-rulebook', { name: 'x' }),
+      () => registry.updateRulebook(actor, 'missing-rulebook', { name: 'x' }),
       'not_found',
     )
     expectRegistryError(
       () =>
-        registry.updateAttestation(token.secret, rulebook.id, 'missing-attestation', {
+        registry.updateAttestation(actor, rulebook.id, 'missing-attestation', {
           name: 'x',
         }),
       'not_found',
     )
     expectRegistryError(
       () =>
-        registry.updateSchemaReference(token.secret, rulebook.id, 'missing-reference', {
+        registry.updateSchemaReference(actor, rulebook.id, 'missing-reference', {
           uri: 'https://example.org/other.json',
         }),
       'not_found',
@@ -741,8 +738,8 @@ describe('registry invalid writes', () => {
 
   test('refuses to mutate published or historical rulebooks', () => {
     const { registry, database } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'Published',
       applicableSpec: 'ts11@1.0.1',
       attestations: [{ name: 'PID', attestationLoS: 'iso_18045_high', bindingType: 'key' }],
@@ -755,13 +752,13 @@ describe('registry invalid writes', () => {
       .run('published', rulebook.id)
 
     expectRegistryError(
-      () => registry.updateRulebook(token.secret, rulebook.id, { name: 'Changed' }),
+      () => registry.updateRulebook(actor, rulebook.id, { name: 'Changed' }),
       'immutable',
     )
-    expectRegistryError(() => registry.deleteRulebook(token.secret, rulebook.id), 'immutable')
+    expectRegistryError(() => registry.deleteRulebook(actor, rulebook.id), 'immutable')
     expectRegistryError(
       () =>
-        registry.addAttestation(token.secret, rulebook.id, {
+        registry.addAttestation(actor, rulebook.id, {
           name: 'New',
           attestationLoS: 'iso_18045_high',
           bindingType: 'key',
@@ -769,7 +766,7 @@ describe('registry invalid writes', () => {
       'immutable',
     )
     expectRegistryError(
-      () => registry.removeAttestation(token.secret, rulebook.id, attestation?.id ?? ''),
+      () => registry.removeAttestation(actor, rulebook.id, attestation?.id ?? ''),
       'immutable',
     )
     expect(registry.getRulebook(rulebook.id)?.publicationStatus).toBe('published')
@@ -778,7 +775,7 @@ describe('registry invalid writes', () => {
       .query('UPDATE rulebooks SET publication_status = ? WHERE id = ?')
       .run('historical', rulebook.id)
     expectRegistryError(
-      () => registry.updateRulebook(token.secret, rulebook.id, { name: 'Changed' }),
+      () => registry.updateRulebook(actor, rulebook.id, { name: 'Changed' }),
       'immutable',
     )
   })

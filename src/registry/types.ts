@@ -41,12 +41,29 @@ export interface IssuedToken extends AuthTokenRecord {
 export interface ProvisionedProvider {
   readonly provider: Provider
   readonly token: IssuedToken
+  /** The trusted actor the provisioned token resolves to. */
+  readonly actor: AuthenticatedActor
 }
 
-/** A verified write actor, resolved from a bearer token. */
+/**
+ * How a trusted write actor authenticated. `bearer` is a provider API token;
+ * `session` is the administrator browser session. The transport layer resolves
+ * one of them and hands the registry an already-verified actor, so the
+ * registry never accepts a raw token and never mints a synthetic one for a
+ * session.
+ */
+export type ActorAuthMethod = 'bearer' | 'session'
+
+/**
+ * A verified write actor bound to one provider. Only the transport layer
+ * constructs it, from a bearer token it hashed or a session cookie it resolved;
+ * it is never read from request input, so a caller cannot forge its provider id.
+ */
 export interface AuthenticatedActor {
   readonly providerId: string
-  readonly tokenId: string
+  readonly authMethod: ActorAuthMethod
+  /** Bearer token row id; `null` for a browser-session actor. */
+  readonly tokenId: string | null
 }
 
 export interface AttestationType {

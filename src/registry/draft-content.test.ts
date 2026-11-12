@@ -11,7 +11,7 @@ import { provisionProvider } from './bootstrap'
 import { isRegistryError, RegistryError, type RegistryErrorCode } from './errors'
 import type { Registry } from './registry'
 import { createRegistryFixture, type RegistryFixture } from './test-support'
-import type { DraftAttestationInput, Rulebook } from './types'
+import type { AuthenticatedActor, DraftAttestationInput, Rulebook } from './types'
 
 let fixture: RegistryFixture | undefined
 
@@ -46,8 +46,8 @@ function provision(suffix: string) {
   })
 }
 
-function seedDraft(registry: Registry, token: string): Rulebook {
-  return registry.createRulebook(token, {
+function seedDraft(registry: Registry, actor: AuthenticatedActor): Rulebook {
+  return registry.createRulebook(actor, {
     name: 'Original draft',
     description: 'Original description',
     sourceUrl: 'https://issuer.example.org/rulebooks/original',
@@ -106,9 +106,9 @@ describe('draft working-copy replacement', () => {
   test('persists metadata, attestation types and schema references', () => {
     const { registry } = setup()
     const provider = provision('one')
-    const rulebook = seedDraft(registry, provider.token.secret)
+    const rulebook = seedDraft(registry, provider.actor)
 
-    const content = registry.replaceDraftContent(provider.token.secret, rulebook.id, REPLACEMENT)
+    const content = registry.replaceDraftContent(provider.actor, rulebook.id, REPLACEMENT)
 
     expect(content.rulebook.name).toBe('Edited draft')
     expect(content.rulebook.description).toBe('Edited description')
@@ -141,9 +141,9 @@ describe('draft working-copy replacement', () => {
   test('normalizes omitted description and source URL for a full replacement', () => {
     const { registry } = setup()
     const provider = provision('one')
-    const rulebook = seedDraft(registry, provider.token.secret)
+    const rulebook = seedDraft(registry, provider.actor)
 
-    const content = registry.replaceDraftContent(provider.token.secret, rulebook.id, {
+    const content = registry.replaceDraftContent(provider.actor, rulebook.id, {
       name: 'Minimal draft',
       applicableSpec: 'ts11@1.0.1',
     })
@@ -158,18 +158,15 @@ describe('draft working-copy replacement', () => {
     const { registry } = setup()
     const owner = provision('owner')
     const other = provision('other')
-    const rulebook = seedDraft(registry, owner.token.secret)
+    const rulebook = seedDraft(registry, owner.actor)
 
+    expectRegistryError(() => registry.authenticateBearer('att_unknown'), 'unauthorized')
     expectRegistryError(
-      () => registry.replaceDraftContent('att_unknown', rulebook.id, REPLACEMENT),
-      'unauthorized',
-    )
-    expectRegistryError(
-      () => registry.replaceDraftContent(other.token.secret, rulebook.id, REPLACEMENT),
+      () => registry.replaceDraftContent(other.actor, rulebook.id, REPLACEMENT),
       'forbidden',
     )
     expectRegistryError(
-      () => registry.replaceDraftContent(owner.token.secret, 'missing-rulebook', REPLACEMENT),
+      () => registry.replaceDraftContent(owner.actor, 'missing-rulebook', REPLACEMENT),
       'not_found',
     )
     expect(registry.getDraftContent(rulebook.id).rulebook.name).toBe('Original draft')
@@ -178,20 +175,20 @@ describe('draft working-copy replacement', () => {
   test('refuses published and historical rulebooks without changing them', () => {
     const { registry } = setup()
     const provider = provision('one')
-    const rulebook = seedDraft(registry, provider.token.secret)
-    registry.createRulebookVersion(provider.token.secret, rulebook.id, { version: '1.0' })
-    registry.publishRulebookVersion(provider.token.secret, rulebook.id, '1.0')
+    const rulebook = seedDraft(registry, provider.actor)
+    registry.createRulebookVersion(provider.actor, rulebook.id, { version: '1.0' })
+    registry.publishRulebookVersion(provider.actor, rulebook.id, '1.0')
 
     expectRegistryError(
-      () => registry.replaceDraftContent(provider.token.secret, rulebook.id, REPLACEMENT),
+      () => registry.replaceDraftContent(provider.actor, rulebook.id, REPLACEMENT),
       'immutable',
     )
     expect(registry.getRulebook(rulebook.id)?.publicationStatus).toBe('published')
     expect(registry.getDraftContent(rulebook.id).rulebook.name).toBe('Original draft')
 
-    registry.createRulebookVersion(provider.token.secret, rulebook.id, { version: '1.1' })
+    registry.createRulebookVersion(provider.actor, rulebook.id, { version: '1.1' })
     expect(registry.getRulebook(rulebook.id)?.publicationStatus).toBe('draft')
-    const replaced = registry.replaceDraftContent(provider.token.secret, rulebook.id, REPLACEMENT)
+    const replaced = registry.replaceDraftContent(provider.actor, rulebook.id, REPLACEMENT)
     expect(replaced.rulebook.name).toBe('Edited draft')
     expect(registry.getRulebookVersion(rulebook.id, '1.0')?.status).toBe('published')
   })
@@ -199,11 +196,11 @@ describe('draft working-copy replacement', () => {
   test('never mutates a published version artifact or digest', () => {
     const { registry } = setup()
     const provider = provision('one')
-    const rulebook = seedDraft(registry, provider.token.secret)
-    const created = registry.createRulebookVersion(provider.token.secret, rulebook.id, {
+    const rulebook = seedDraft(registry, provider.actor)
+    const created = registry.createRulebookVersion(provider.actor, rulebook.id, {
       version: '1.0',
     })
-    const published = registry.publishRulebookVersion(provider.token.secret, rulebook.id, '1.0')
+    const published = registry.publishRulebookVersion(provider.actor, rulebook.id, '1.0')
     expect(published.contentDigest).toBe(created.contentDigest)
     const before = registry.getRulebookVersionContent(rulebook.id, '1.0')
     if (before === null) {
@@ -211,8 +208,8 @@ describe('draft working-copy replacement', () => {
     }
     const beforeBytes = Buffer.from(before.bytes).toString('utf8')
 
-    registry.createRulebookVersion(provider.token.secret, rulebook.id, { version: '2.0' })
-    registry.replaceDraftContent(provider.token.secret, rulebook.id, REPLACEMENT)
+    registry.createRulebookVersion(provider.actor, rulebook.id, { version: '2.0' })
+    registry.replaceDraftContent(provider.actor, rulebook.id, REPLACEMENT)
 
     const after = registry.getRulebookVersionContent(rulebook.id, '1.0')
     expect(after?.version).toEqual(published)
@@ -225,7 +222,7 @@ describe('draft working-copy replacement', () => {
   test('preserves unchanged internal metadata and row identity across a save', () => {
     const { registry } = setup()
     const provider = provision('one')
-    const rulebook = registry.createRulebook(provider.token.secret, {
+    const rulebook = registry.createRulebook(provider.actor, {
       name: 'Imported draft',
       applicableSpec: 'ts11@1.0.1',
       attestations: [
@@ -302,7 +299,7 @@ describe('draft working-copy replacement', () => {
         })),
     }
 
-    const saved = registry.replaceDraftContent(provider.token.secret, rulebook.id, replacement)
+    const saved = registry.replaceDraftContent(provider.actor, rulebook.id, replacement)
 
     expect(saved.attestations[0]).toMatchObject({
       id: attestation.id,
@@ -321,7 +318,7 @@ describe('draft working-copy replacement', () => {
     })
 
     // Changing an entry clears only that entry's internal metadata.
-    const changed = registry.replaceDraftContent(provider.token.secret, rulebook.id, {
+    const changed = registry.replaceDraftContent(provider.actor, rulebook.id, {
       ...replacement,
       attestations: [
         {
@@ -363,12 +360,12 @@ describe('draft working-copy replacement', () => {
   test('leaves the previous working copy intact when validation fails', () => {
     const { registry } = setup()
     const provider = provision('one')
-    const rulebook = seedDraft(registry, provider.token.secret)
+    const rulebook = seedDraft(registry, provider.actor)
     const before = registry.getDraftContent(rulebook.id)
 
     expectRegistryError(
       () =>
-        registry.replaceDraftContent(provider.token.secret, rulebook.id, {
+        registry.replaceDraftContent(provider.actor, rulebook.id, {
           ...REPLACEMENT,
           name: '   ',
         }),
@@ -376,7 +373,7 @@ describe('draft working-copy replacement', () => {
     )
     expectRegistryError(
       () =>
-        registry.replaceDraftContent(provider.token.secret, rulebook.id, {
+        registry.replaceDraftContent(provider.actor, rulebook.id, {
           ...REPLACEMENT,
           attestations: [
             { name: 'Repeated', attestationLoS: 'iso_18045_high', bindingType: 'key' },
@@ -387,7 +384,7 @@ describe('draft working-copy replacement', () => {
     )
     expectRegistryError(
       () =>
-        registry.replaceDraftContent(provider.token.secret, rulebook.id, {
+        registry.replaceDraftContent(provider.actor, rulebook.id, {
           ...REPLACEMENT,
           schemaReferences: [{ formatIdentifier: 'dc+sd-jwt', uri: 'not-a-url' }],
         }),
@@ -403,8 +400,8 @@ describe('draft working-copy replacement', () => {
   test('writes audit rows for replaced content', () => {
     const { registry, database } = setup()
     const provider = provision('one')
-    const rulebook = seedDraft(registry, provider.token.secret)
-    registry.replaceDraftContent(provider.token.secret, rulebook.id, REPLACEMENT)
+    const rulebook = seedDraft(registry, provider.actor)
+    registry.replaceDraftContent(provider.actor, rulebook.id, REPLACEMENT)
 
     const actions = database
       .query<{ action: string }, [string]>(

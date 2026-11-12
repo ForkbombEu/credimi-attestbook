@@ -13,7 +13,7 @@ import { OPENAPI_COMPONENTS, componentJsonSchema } from './schemas'
 export const OPENAPI_VERSION = '3.1.0'
 
 /** Version of the API contract document itself. */
-export const API_CONTRACT_VERSION = '1.10.0'
+export const API_CONTRACT_VERSION = '1.11.0'
 
 /** URL prefix that carries the product API's major version. */
 export const API_VERSION_PREFIX = '/api/v1'
@@ -41,7 +41,7 @@ const TAG_DESCRIPTIONS: readonly { readonly name: string; readonly description: 
   {
     name: 'auth',
     description:
-      'Environment-configured administrator browser login and opaque server-side sessions. Independent of provider bearer authentication.',
+      'Environment-configured administrator browser login and opaque server-side sessions. A live session resolves to the same provider actor as a provider bearer token; both authorize the protected write routes.',
   },
   { name: 'rulebooks', description: 'Stable rulebook identity, content and schema references.' },
   { name: 'versions', description: 'Immutable rulebook snapshots, digests and publication.' },
@@ -101,6 +101,25 @@ function parameterObject(parameter: {
   }
 }
 
+/**
+ * The CSRF header a cookie-authenticated state change must present. It is
+ * optional for the bearer path, so it is documented on every protected
+ * non-GET operation exactly as the route table derives the check.
+ */
+function csrfHeaderParameter(route: ApiRouteSpec): JsonObject | null {
+  if (!route.security || route.method === 'get') {
+    return null
+  }
+  return {
+    name: 'X-CSRF-Token',
+    in: 'header',
+    required: false,
+    description:
+      'Required when the request authenticates with the administrator browser-session cookie instead of a bearer token. Value: the `csrfToken` returned by POST /api/v1/auth/login or GET /api/v1/auth/me. A missing or wrong token answers 403 csrf_failed.',
+    schema: { type: 'string' },
+  }
+}
+
 function operationParameters(route: ApiRouteSpec): readonly JsonObject[] {
   const declared = new Set((route.parameters ?? []).map((parameter) => parameter.name))
   const implicitPathParameters = pathParameterNames(route.path)
@@ -114,7 +133,12 @@ function operationParameters(route: ApiRouteSpec): readonly JsonObject[] {
         schema: { type: 'string' },
       }),
     )
-  return [...(route.parameters ?? []).map(parameterObject), ...implicitPathParameters]
+  const csrf = csrfHeaderParameter(route)
+  return [
+    ...(route.parameters ?? []).map(parameterObject),
+    ...implicitPathParameters,
+    ...(csrf === null ? [] : [csrf]),
+  ]
 }
 
 function responseObject(response: ApiRouteSpec['responses'][number]): JsonObject {
@@ -155,7 +179,8 @@ function operationObject(route: ApiRouteSpec): JsonObject {
     description: route.description,
     tags: [route.tag],
     ...(route.security
-      ? { security: [{ bearerAuth: [] }] }
+      ? // Alternative requirements: either credential authenticates the actor.
+        { security: [{ bearerAuth: [] }, { sessionAuth: [] }] }
       : route.sessionAuth
         ? { security: [{ sessionAuth: [] }] }
         : {}),
@@ -201,9 +226,11 @@ export function buildOpenApiDocument(): OpenApiDocument {
         'This is the product REST API described by docs/specification.md §13; it is not the TS11 catalogue API.',
         'The major version is carried in the URL under `/api/v1`. Within v1 only additive, backwards-compatible',
         'changes are made. Successful responses use a `{ "data": ... }` envelope (lists add `pagination`);',
-        'failures use `{ "error": { "code", "message", "details"? } }`. Reads are public; writes require an',
-        'AttestBook provider bearer token. The administrator browser session is a separate cookie scheme used only',
-        'by the `/api/v1/auth` routes. See docs/api.md for the versioning, idempotency and error policy.',
+        'failures use `{ "error": { "code", "message", "details"? } }`. Reads are public; writes accept either an',
+        'AttestBook provider bearer token or the administrator browser-session cookie, both resolving to the same',
+        'provider actor. A state-changing cookie request must also echo the session-bound `X-CSRF-Token`; a present',
+        'but invalid bearer never falls back to a cookie session. See docs/api.md for the versioning, idempotency',
+        'and error policy.',
       ].join(' '),
       license: { name: 'Apache-2.0' },
     },
@@ -224,7 +251,7 @@ export function buildOpenApiDocument(): OpenApiDocument {
           in: 'cookie',
           name: 'attestbook_admin_session',
           description:
-            'Opaque administrator browser-session identifier. Set HttpOnly and SameSite=Lax by POST /api/v1/auth/login, revoked by POST /api/v1/auth/logout, never accepted from a URL or request body.',
+            'Opaque administrator browser-session identifier bound to an existing provider. Set HttpOnly and SameSite=Lax by POST /api/v1/auth/login, revoked by POST /api/v1/auth/logout, never accepted from a URL or request body. Every state-changing request that uses it must also send the session `csrfToken` in X-CSRF-Token; GET /api/v1/auth/me returns the current token.',
         },
       },
     },

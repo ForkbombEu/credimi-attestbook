@@ -445,12 +445,14 @@ export ADMIN_PROVIDER_ID='<existing provider id>'
 The login endpoints are:
 
 - `POST /api/v1/auth/login` with `{"username": "...", "password": "..."}` sets the opaque
-  session cookie. The cookie is `HttpOnly`, `SameSite=Lax`, `Path=/`, has an eight-hour
-  absolute lifetime and is marked `Secure` when the request is HTTPS (directly or through a
-  TLS-terminating proxy that sets `X-Forwarded-Proto: https`).
-- `GET /api/v1/auth/me` returns the authenticated provider's public projection and the
-  session expiry, or `401` when there is no live session.
-- `POST /api/v1/auth/logout` revokes the server-side session and expires the cookie.
+  session cookie and returns the session-bound `csrfToken`. The cookie is `HttpOnly`,
+  `SameSite=Lax`, `Path=/`, has an eight-hour absolute lifetime and is marked `Secure` when
+  the request is HTTPS (directly or through a TLS-terminating proxy that sets
+  `X-Forwarded-Proto: https`).
+- `GET /api/v1/auth/me` returns the authenticated provider's public projection, the session
+  expiry and the live `csrfToken`, or `401` when there is no live session.
+- `POST /api/v1/auth/logout` revokes the server-side session and expires the cookie; a live
+  session also requires its `csrfToken` in `X-CSRF-Token`.
 
 Only a SHA-256 hash of the session identifier is stored in `admin_sessions`; the raw value
 exists only in the browser cookie. Every successful login mints a new identifier and retires
@@ -462,10 +464,21 @@ Login and logout reject a cross-site `Origin`/`Sec-Fetch-Site`; login additional
 (the cookie is then not `Secure`); deploy behind HTTPS in any other environment.
 
 The UAT sandbox provisions this test-only configuration itself: `bun scripts/uat-setup.ts`
-creates a disposable SQLite database, provisions the existing test provider, generates a
-fresh Argon2id hash for the fixed test password and writes `dist/uat/admin.env`, which
-`scripts/uat-start.sh` sources. The test username is `uat-admin` and the test password is
-`uat-test-password`; neither is a committed secret or a production credential.
+creates a disposable SQLite database, provisions the existing provider the administrator is
+bound to and a second, independent writer provider, generates a fresh Argon2id hash for the
+fixed test password and writes `dist/uat/admin.env`, which `scripts/uat-start.sh` sources. The
+test username is `uat-admin` and the test password is `uat-test-password`; neither is a
+committed secret or a production credential. It also writes `dist/uat/fixtures.json` with the
+administrator's provider id and the writer provider's id and bearer token, so a UAT client can
+exercise the session transport for provider A and the bearer transport for provider B without
+creating or exposing real credentials.
+
+A live browser session authorizes the same protected write routes as a provider bearer token
+(issue #89): both resolve to the same provider actor, ownership and audit attribution are
+unchanged, and an explicit invalid bearer never falls back to the cookie. `POST
+/api/v1/auth/login` and `GET /api/v1/auth/me` return the session-bound `csrfToken`, which every
+cookie-authenticated state change must send in the `X-CSRF-Token` header; a missing or wrong
+token answers `403 csrf_failed`.
 
 ## Mandatory OWF dependency
 

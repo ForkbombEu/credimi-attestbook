@@ -148,13 +148,16 @@ function tokenCount(harness: Harness): number {
   )
 }
 
-async function successfulLogin(harness: Harness): Promise<{ response: Response; cookie: string }> {
+async function successfulLogin(
+  harness: Harness,
+): Promise<{ response: Response; cookie: string; csrfToken: string }> {
   const response = await postLogin(harness.app, {
     username: 'uat-admin',
     password: PASSWORD,
   })
   expect(response.status).toBe(200)
-  return { response, cookie: sessionCookie(response) }
+  const body = await json<{ data: { csrfToken: string } }>(response)
+  return { response, cookie: sessionCookie(response), csrfToken: body.data.csrfToken }
 }
 
 describe('administrator login', () => {
@@ -299,11 +302,12 @@ describe('administrator session reads and logout', () => {
 
   test('logout revokes the server-side session and expires the cookie', async () => {
     const harness = setup()
-    const { cookie } = await successfulLogin(harness)
+    const { cookie, csrfToken } = await successfulLogin(harness)
+    const headers = { cookie, 'x-csrf-token': csrfToken }
 
     const logout = await harness.app.request('/api/v1/auth/logout', {
       method: 'POST',
-      headers: { cookie },
+      headers,
     })
     expect(logout.status).toBe(204)
     expect(await logout.text()).toBe('')
@@ -321,18 +325,23 @@ describe('administrator session reads and logout', () => {
     // Repeated logout is idempotent and still succeeds.
     const again = await harness.app.request('/api/v1/auth/logout', {
       method: 'POST',
-      headers: { cookie },
+      headers,
     })
     expect(again.status).toBe(204)
   })
 
   test('rejects a cross-origin logout without revoking the session', async () => {
     const harness = setup()
-    const { cookie } = await successfulLogin(harness)
+    const { cookie, csrfToken } = await successfulLogin(harness)
 
     const response = await harness.app.request('/api/v1/auth/logout', {
       method: 'POST',
-      headers: { cookie, origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' },
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+        origin: 'https://evil.example',
+        'sec-fetch-site': 'cross-site',
+      },
     })
     expect(response.status).toBe(403)
     expect((await errorJson(response)).error.code).toBe('forbidden')

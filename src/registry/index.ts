@@ -34,6 +34,7 @@ export {
 export {
   AUDIT_ACTIONS,
   PUBLICATION_STATUSES,
+  type ActorAuthMethod,
   type AttestationType,
   type AuditAction,
   type AuditEntry,

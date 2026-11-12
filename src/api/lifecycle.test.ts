@@ -73,8 +73,8 @@ function setup(): Setup {
     name: 'Other Provider',
     publicationAuthority: 'other-provider',
   })
-  const rulebook = fixture.registry.createRulebook(owner.token.secret, content())
-  fixture.registry.createRulebookVersion(owner.token.secret, rulebook.id, { version: '1.0' })
+  const rulebook = fixture.registry.createRulebook(owner.actor, content())
+  fixture.registry.createRulebookVersion(owner.actor, rulebook.id, { version: '1.0' })
 
   return {
     app: createApp({ registry: fixture.registry }),

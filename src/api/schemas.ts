@@ -103,13 +103,15 @@ export const adminLoginRequestSchema = z.object({
 })
 
 /**
- * The authenticated administrator session. It identifies the existing provider
- * and the absolute expiry only; no bearer token or credential material is part
- * of the resource.
+ * The authenticated administrator session. It identifies the existing provider,
+ * the absolute expiry and the session-bound CSRF token that a state-changing
+ * cookie request must echo in `X-CSRF-Token`; no bearer token or password
+ * material is part of the resource.
  */
 export const adminSessionSchema = z.object({
   provider: providerSchema,
   expiresAt: timestamp,
+  csrfToken: z.string().min(1),
 })
 
 export const adminSessionResponseSchema = z.object({ data: adminSessionSchema })

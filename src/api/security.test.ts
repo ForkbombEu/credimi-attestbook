@@ -149,7 +149,7 @@ describe('write operation security surface', () => {
       name: 'Revoked Provider',
       publicationAuthority: 'authority-revoked',
     })
-    registry.revokeToken(revokedProvider.token.secret, revokedProvider.token.id)
+    registry.revokeToken(revokedProvider.actor, revokedProvider.token.id)
 
     const credentials: readonly (string | undefined)[] = [
       undefined,
@@ -287,7 +287,7 @@ describe('public read behavior is preserved', () => {
       name: 'Draft Owner',
       publicationAuthority: 'authority-draft-owner',
     })
-    const draft = fixture.registry.createRulebook(owner.token.secret, {
+    const draft = fixture.registry.createRulebook(owner.actor, {
       name: 'Public Draft',
       applicableSpec: 'ts11@1.0.1',
     })

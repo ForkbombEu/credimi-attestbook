@@ -415,7 +415,7 @@ describe('CredentialValidator with a pinned rulebook version', () => {
     if (fixture === undefined) {
       throw new Error('fixture is not initialized')
     }
-    const next = fixture.registry.createRulebookVersion(seeded.token, seeded.rulebookId, {
+    const next = fixture.registry.createRulebookVersion(seeded.actor, seeded.rulebookId, {
       version: '1.1',
     })
 

@@ -688,7 +688,8 @@ without affecting the public API or provider bearer writes. The full model is in
 {
   "data": {
     "provider": { "id": "…", "name": "…", "createdAt": "…" },
-    "expiresAt": "2026-01-01T08:00:00.000Z"
+    "expiresAt": "2026-01-01T08:00:00.000Z",
+    "csrfToken": "…"
   }
 }
 ```
@@ -705,10 +706,33 @@ password check, and at most four checks run concurrently, so parallel requests c
 the bound; a successful login clears the counters and rotates away any session the browser
 presented.
 
+`csrfToken` is the session-bound CSRF value (issue #89). Every state-changing request that
+authenticates with the session cookie instead of a bearer token must send it in the
+`X-CSRF-Token` header; a missing or wrong value answers `403 csrf_failed` and changes nothing.
+The token is minted with the session, rotated by the next login and returned again by
+`GET /api/v1/auth/me`, so a reloaded page can continue writing. It is never set as a cookie.
+
 `GET /api/v1/auth/me` resolves the cookie to the bound provider and returns the same `data`
-shape; `401` means no live session. `POST /api/v1/auth/logout` revokes the session row and
-expires the cookie, answers `204`, and is idempotent. None of these routes accept a session
+shape, including the live `csrfToken`; `401` means no live session.
+`POST /api/v1/auth/logout` revokes the session row and expires the cookie, answers `204`, and
+is idempotent; when a live session cookie is present it also requires `X-CSRF-Token`, while a
+request with nothing to revoke still answers `204`. None of these routes accept a session
 identifier from a URL, and nothing is stored in browser storage.
+
+### 3.12 Dual-transport authorization of the write routes
+
+The protected write routes listed in [`docs/security.md`](security.md) §3.1 accept either the
+`Authorization: Bearer <token>` header or the `attestbook_admin_session` cookie (issue #89).
+Both resolve to the same provider actor, so ownership rules, `401`/`403` semantics, provider
+attribution and audit rows do not depend on the credential used.
+
+- A present `Authorization` header is authoritative. A malformed, unknown or revoked bearer
+  answers `401` and never falls back to a cookie session; a valid bearer ignores any cookie.
+- A cookie request must send `X-CSRF-Token` when the operation is not a `GET`. The header is
+  documented as an optional parameter on every protected non-GET operation, because the bearer
+  path does not need it.
+- With neither credential the route answers `401`; a cookie without CSRF evidence answers
+  `403 csrf_failed`. Anonymous catalogue, validation and download reads are unchanged.
 
 ## 4. Errors
 
@@ -735,7 +759,8 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Registry | `invalid_input` | `400` | `invalid_request` |
 | Registry | missing, unknown or revoked token | `401` | `unauthorized` |
 | Administrator login | wrong password or unknown username (indistinguishable) | `401` | `unauthorized` |
-| Administrator session | missing, unknown, expired or revoked session on `/auth/me` | `401` | `unauthorized` |
+| Administrator session | missing, unknown, expired or revoked session on `/auth/me` or a protected route | `401` | `unauthorized` |
+| Administrator session | cookie-authenticated state change without its `X-CSRF-Token`, or a foreign `Origin`/cross-site `Sec-Fetch-Site` | `403` | `csrf_failed` |
 | Administrator login/logout | foreign `Origin` or cross-site `Sec-Fetch-Site` | `403` | `forbidden` |
 | Registry / publish handler | authenticated provider does not own the resource | `403` | `forbidden` |
 | API / registry | resource does not exist | `404` | `not_found` |
@@ -763,9 +788,11 @@ present where a stable sub-reason helps the client (currently import failures ca
 
 Unknown routes under any path answer `404` with `not_found` and the same envelope. The
 mapping is implemented once in `src/api/errors.ts`; the OpenAPI document references the same
-`ErrorEnvelope` component for every error response. A `401` from a bearer-authenticated route
-also carries the RFC 6750 challenge `WWW-Authenticate: Bearer realm="attestbook"`; the
-browser-session routes deliberately do not advertise a bearer challenge.
+`ErrorEnvelope` component for every error response. A `401` from a protected route also carries
+the RFC 6750 challenge `WWW-Authenticate: Bearer realm="attestbook"`, whatever credential was
+attempted, so the failure does not disclose which credential path was used; the session-only
+`/auth/me` route deliberately does not advertise a bearer challenge. A refused cookie state
+change answers `403 csrf_failed` and carries no challenge.
 
 ## 5. Authentication and authorization
 
@@ -776,13 +803,16 @@ summarizes the HTTP contract.
 - Reads are public, mirroring TS11's public-read requirement and the registry service's
   public read surface. The two exceptions are the import preview and issuer discovery: both
   make the server perform a bounded outbound fetch under the untrusted-import controls, so
-  their HTTP routes require the same provider bearer token even though they write nothing.
-- Writes, the import preview and issuer discovery require a provider bearer token. Tokens use
-  the `att_` prefix and are stored only as SHA-256 hashes; the raw secret is returned once by
-  operator provisioning, which is not an HTTP route. The API never echoes a token. The route
-  table's `security` flag gates authentication centrally, before any request body is read, so a
-  protected operation cannot forget the check. Missing, malformed, unknown and revoked
-  credentials all answer `401` with `unauthorized` and the bearer challenge.
+  their HTTP routes require a provider credential even though they write nothing.
+- Writes, the import preview and issuer discovery accept a provider bearer token or the
+  administrator browser session (issue #89). Tokens use the `att_` prefix and are stored only
+  as SHA-256 hashes; the raw secret is returned once by operator provisioning, which is not an
+  HTTP route. The API never echoes a token, and a session never mints, returns or stores one.
+  The route table's `security` flag gates authentication centrally, before any request body is
+  read, so a protected operation cannot forget the check. Missing, malformed, unknown and
+  revoked credentials all answer `401` with `unauthorized` and the bearer challenge. A present
+  but invalid bearer is never downgraded to the cookie session, and a cookie state change
+  without its CSRF token answers `403 csrf_failed`.
 - Ownership is enforced by the registry service on the stored resource, not by the route.
   The publish route additionally authenticates and checks ownership before its idempotent
   replay check so a foreign or missing token cannot get a write-shaped success or probe
@@ -791,11 +821,12 @@ summarizes the HTTP contract.
   projects a whitelist of public fields, so a caller cannot inject them even though the
   service type accepts them internally, and a rulebook is always attributed to the
   authenticated provider.
-- The optional administrator browser session is a third, independent credential path used
-  only by `/api/v1/auth/login`, `/api/v1/auth/me` and `/api/v1/auth/logout`. It is cookie
-  based, is bound to an existing provider, and neither requires nor mints a bearer token.
-  It does not by itself authenticate the provider write routes in this slice; the operation
-  matrix in [`docs/security.md`](security.md) §3.1 is unchanged for bearer routes.
+- The optional administrator browser session is a second transport for the same provider
+  actor, not a third authority. It is cookie based, bound to an existing provider, and neither
+  requires nor mints a bearer token: the session resolves directly to the trusted actor the
+  registry accepts and never issues a synthetic token. Its write authority is exactly the
+  bound provider's, so the operation matrix in [`docs/security.md`](security.md) §3.1 is the
+  same for both transports apart from the cookie's CSRF requirement.
 
 Generic API rate limiting, token expiry/rotation and provider-administration routes are not
 implemented in Phase 1; administrator login failures are rate limited separately
@@ -845,8 +876,9 @@ Validation runs in two places:
 1. `src/api/openapi.test.ts` (in the `test` job) validates the generated document against
    the **official OpenAPI 3.1 JSON Schema**, compiles every component as JSON Schema
    2020-12, and compares the documented operations with `app.routes` from the app the tests
-   exercise. It also checks that every path template parameter is declared and that every
-   write operation uses the bearer scheme.
+   exercise. It also checks that every path template parameter is declared, that every
+   protected operation declares the bearer and session alternatives, and that every protected
+   non-GET operation documents the `X-CSRF-Token` header.
 2. `bun run openapi:check` (in the `openapi` CI job) performs the document/schema validation
    standalone, so a broken contract fails CI even if a route test is skipped.
 
@@ -866,6 +898,7 @@ bun run openapi:check   # generated OpenAPI 3.1 document validates
 bun test src/api        # contract, success and error coverage
 bun test src/auth       # administrator login configuration, sessions, limits and origins
 bun test src/api/auth.test.ts  # administrator login/session HTTP contract
+bun test src/api/session-writes.test.ts  # session-authorized writes, CSRF and bearer precedence
 bun test src/discovery  # discovery extraction, bounds and association
 bun test src/fixtures   # fixture synthesis, grounding and negative cases
 bun test src/verifier   # typed verifier constraints and OpenID4VP-aware mappings

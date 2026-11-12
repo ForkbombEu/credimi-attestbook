@@ -33,7 +33,7 @@ const importedAt = '2026-11-05T10:05:00.000Z'
 
 function setup(transport: FakeTransport['transport']) {
   fixture = createRegistryFixture()
-  const { provider, token } = provisionProvider(fixture.database, {
+  const { actor, provider, token } = provisionProvider(fixture.database, {
     name: 'Import Provider',
     publicationAuthority: 'account-import',
   })
@@ -44,7 +44,7 @@ function setup(transport: FakeTransport['transport']) {
     limits,
     now: () => importedAt,
   })
-  return { fixture, provider, token, importer }
+  return { fixture, provider, token, actor, importer }
 }
 
 describe('authenticated rulebook import', () => {
@@ -53,9 +53,9 @@ describe('authenticated rulebook import', () => {
     const fake = createFakeTransport({
       [IMPORT_URL]: { body: document },
     })
-    const { fixture, provider, token, importer } = setup(fake.transport)
+    const { fixture, provider, actor, importer } = setup(fake.transport)
 
-    const result = await importer.import(token.secret, { kind: 'url', url: IMPORT_URL })
+    const result = await importer.import(actor, { kind: 'url', url: IMPORT_URL })
 
     expect(result.rulebooks).toHaveLength(1)
     const rulebook = result.rulebooks[0]
@@ -101,9 +101,9 @@ describe('authenticated rulebook import', () => {
   })
 
   test('persists a JSON-imported OWF rulebook with its meta and no source URL', async () => {
-    const { fixture, token, importer } = setup(createFakeTransport({}).transport)
+    const { fixture, actor, importer } = setup(createFakeTransport({}).transport)
 
-    const result = await importer.import(token.secret, {
+    const result = await importer.import(actor, {
       kind: 'json',
       content: jsonBytes(owfDocument),
       name: 'owf-schema.json',
@@ -134,9 +134,9 @@ describe('authenticated rulebook import', () => {
         body: jsonBytes({ data: [validTs11Document, owfDocument] }),
       },
     })
-    const { fixture, token, importer } = setup(fake.transport)
+    const { fixture, actor, importer } = setup(fake.transport)
 
-    const result = await importer.import(token.secret, { kind: 'url', url: IMPORT_URL })
+    const result = await importer.import(actor, { kind: 'url', url: IMPORT_URL })
 
     expect(result.rulebooks).toHaveLength(2)
     expect(fixture.registry.listRulebooks()).toHaveLength(2)
@@ -149,11 +149,11 @@ describe('authenticated rulebook import', () => {
         body: jsonBytes({ data: [validTs11Document, invalidTs11Document] }),
       },
     })
-    const { fixture, token, importer } = setup(fake.transport)
+    const { fixture, actor, importer } = setup(fake.transport)
 
     let caught: unknown
     try {
-      await importer.import(token.secret, { kind: 'url', url: IMPORT_URL })
+      await importer.import(actor, { kind: 'url', url: IMPORT_URL })
     } catch (error) {
       caught = error
     }
@@ -173,11 +173,11 @@ describe('authenticated rulebook import', () => {
         body: jsonBytes({ data: [validTs11Document, duplicateReferences] }),
       },
     })
-    const { fixture, token, importer } = setup(fake.transport)
+    const { fixture, actor, importer } = setup(fake.transport)
 
     let caught: unknown
     try {
-      await importer.import(token.secret, { kind: 'url', url: IMPORT_URL })
+      await importer.import(actor, { kind: 'url', url: IMPORT_URL })
     } catch (error) {
       caught = error
     }
@@ -187,15 +187,17 @@ describe('authenticated rulebook import', () => {
     expect(fixture.registry.listRulebooks()).toHaveLength(0)
   })
 
-  test('authenticates before any network request', async () => {
+  test('rejects an unknown bearer before any network request', () => {
     const fake = createFakeTransport({
       [IMPORT_URL]: { body: jsonBytes(validTs11Document) },
     })
-    const { fixture, importer } = setup(fake.transport)
+    const { fixture } = setup(fake.transport)
 
+    // The transport resolves the actor before the importer runs; an unknown
+    // token is refused there, so no fetch and no write ever happen.
     let caught: unknown
     try {
-      await importer.import('not-a-token', { kind: 'url', url: IMPORT_URL })
+      fixture.registry.authenticateBearer('not-a-token')
     } catch (error) {
       caught = error
     }
@@ -210,9 +212,9 @@ describe('authenticated rulebook import', () => {
     const fake = createFakeTransport({
       [IMPORT_URL]: { body: jsonBytes({ data: [source, owfDocument] }) },
     })
-    const { fixture, provider, token, importer } = setup(fake.transport)
+    const { fixture, provider, actor, importer } = setup(fake.transport)
 
-    const result = await importer.import(token.secret, { kind: 'url', url: IMPORT_URL })
+    const result = await importer.import(actor, { kind: 'url', url: IMPORT_URL })
     expect(result.rulebooks).toHaveLength(2)
     // Prove the marker really reached stored content before asserting that the
     // audit trail does not copy it; otherwise the negative check could pass

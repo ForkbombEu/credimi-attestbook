@@ -280,10 +280,13 @@ provisional product model of D-10. The service enforces it, not the UI or a rout
    exists because a provider cannot hold a token before it exists; it is never exposed as an
    HTTP route. The publication authority is case-insensitively unique and cannot be changed
    through the service, so a provider cannot self-assert another account's authority (FR-003).
-2. **Writes require a bearer token.** `issueToken`, `updateProvider`, `deleteProvider` and
-   every rulebook/attestation/schema/version mutation authenticate the token. Tokens use the
-   `att_` prefix, 256 random bits and a SHA-256 hash at rest; the raw secret is returned once at
-   issuance and cannot be recovered from the database.
+2. **Writes require a verified actor.** `issueToken`, `updateProvider`, `deleteProvider` and
+   every rulebook/attestation/schema/version mutation take an `AuthenticatedActor` bound to one
+   provider; they never take a raw credential. The HTTP transport produces that actor from a
+   provider bearer token (`authenticateBearer`) or from the administrator browser session, so
+   both credentials reach the same ownership and audit rules and a session never needs a
+   synthetic token. Bearer tokens use the `att_` prefix, 256 random bits and a SHA-256 hash at
+   rest; the raw secret is returned once at issuance and cannot be recovered from the database.
 3. **Ownership is checked on the stored resource.** A mutation loads the rulebook and requires
    its `provider_id` to equal the authenticated actor's provider. The create input has no
    provider field, so a caller cannot create a rulebook for another provider. Cross-provider
@@ -479,7 +482,7 @@ parsing messages:
 | Code | Meaning |
 | --- | --- |
 | `invalid_input` | malformed, missing, oversized or unsafe value |
-| `unauthorized` | missing, unknown or revoked bearer token |
+| `unauthorized` | missing, unknown or revoked bearer token, or a missing/expired/revoked session |
 | `forbidden` | authenticated provider does not own the resource |
 | `not_found` | resource does not exist (or is not part of the named rulebook) |
 | `conflict` | duplicate attestation name, schema format, version label or import identity; stale draft snapshot at publication; provider still owns rulebooks |
