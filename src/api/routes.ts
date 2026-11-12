@@ -12,6 +12,7 @@ import type { Context, Hono } from 'hono'
 
 import packageJson from '../../package.json'
 import {
+  ADMIN_CSRF_HEADER_NAME,
   ADMIN_SESSION_COOKIE_NAME,
   MAX_ADMIN_PASSWORD_LENGTH,
   MAX_ADMIN_USERNAME_LENGTH,
@@ -48,6 +49,7 @@ import type { PublicationExportManifest } from '../publication'
 import type { Registry } from '../registry/registry'
 import { invalidInput, unauthorized } from '../registry/errors'
 import type {
+  AuthenticatedActor,
   CreateRulebookInput,
   CreateRulebookVersionInput,
   ReplaceDraftContentInput,
@@ -178,7 +180,11 @@ export interface ApiRouteSpec {
     | 'conformance'
     | 'captures'
     | 'verifiers'
-  /** `true` marks a bearer-authenticated operation. */
+  /**
+   * `true` marks a protected operation: it accepts either an `Authorization:
+   * Bearer` provider token or the administrator browser-session cookie. A
+   * cookie-authenticated state change must also echo the session CSRF token.
+   */
   readonly security: boolean
   /**
    * `true` marks an operation authenticated by the administrator browser
@@ -293,7 +299,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: '/api/v1/auth/login',
     summary: 'Start an administrator browser session',
     description:
-      'Verifies the environment-configured administrator credentials and issues an opaque, HttpOnly browser-session cookie. The administrator is bound to an existing provider; login never creates a provider, never mints or returns a provider bearer token and never stores one in the session. Unknown users and wrong passwords get the same generic 401; repeated failures are rate limited with 429 and Retry-After. Login answers 503 when the administrator configuration is absent, invalid or names a missing provider, while the public API and bearer authentication keep working.',
+      'Verifies the environment-configured administrator credentials and issues an opaque, HttpOnly browser-session cookie plus the session-bound CSRF token. The administrator is bound to an existing provider; login never creates a provider, never mints or returns a provider bearer token and never stores one in the session. Unknown users and wrong passwords get the same generic 401; repeated failures are rate limited with 429 and Retry-After. Login answers 503 when the administrator configuration is absent, invalid or names a missing provider, while the public API and bearer authentication keep working.',
     tag: 'auth',
     security: false,
     request: {
@@ -306,7 +312,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
       {
         status: 200,
         description:
-          'The administrator session; the provider public projection and the absolute expiry are returned without any token.',
+          'The administrator session; the provider public projection, the absolute expiry and the session CSRF token are returned without any bearer token.',
         schema: 'AdminSessionResponse',
         headers: [
           {
@@ -325,14 +331,14 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: '/api/v1/auth/me',
     summary: 'Read the current administrator session',
     description:
-      'Resolves the opaque session cookie to the configured existing provider. A missing, unknown, expired or revoked session answers 401 without advertising a bearer challenge. The response never carries a provider bearer token.',
+      'Resolves the opaque session cookie to the configured existing provider and returns the live session CSRF token so a reloaded page can keep writing. A missing, unknown, expired or revoked session answers 401 without advertising a bearer challenge. The response never carries a provider bearer token.',
     tag: 'auth',
     security: false,
     sessionAuth: true,
     responses: [
       {
         status: 200,
-        description: 'The authenticated provider and the session absolute expiry.',
+        description: 'The authenticated provider, the session absolute expiry and the CSRF token.',
         schema: 'AdminSessionResponse',
       },
       ...sessionErrors(401, 500),
@@ -344,7 +350,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: '/api/v1/auth/logout',
     summary: 'Revoke the administrator browser session',
     description:
-      'Revokes the server-side session named by the cookie and expires the cookie. The call is same-origin checked and idempotent: an absent, unknown or already-revoked session still succeeds, and the old identifier can no longer authenticate.',
+      'Revokes the server-side session named by the cookie and expires the cookie. The call is same-origin checked and idempotent: an absent, unknown or already-revoked session still succeeds, and the old identifier can no longer authenticate. When a live session cookie is presented, the call also requires the session CSRF token in X-CSRF-Token and answers 403 csrf_failed without revoking otherwise.',
     tag: 'auth',
     security: false,
     sessionAuth: true,
@@ -618,7 +624,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         schema: 'RulebookResponse',
         headers: [{ name: 'Location', description: 'Canonical path of the created rulebook.' }],
       },
-      ...errors(400, 401, 413, 500, 503),
+      ...errors(400, 401, 403, 413, 500, 503),
     ],
   },
   {
@@ -802,7 +808,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'The compatibility and provenance preview.',
         schema: 'ImportPreviewResponse',
       },
-      ...errors(400, 401, 413, 422, 500, 502, 503),
+      ...errors(400, 401, 403, 413, 422, 500, 502, 503),
     ],
   },
   {
@@ -826,7 +832,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'Per-entry import dispositions, reported conflicts and created rulebooks.',
         schema: 'ImportResultResponse',
       },
-      ...errors(400, 401, 413, 422, 500, 502, 503),
+      ...errors(400, 401, 403, 413, 422, 500, 502, 503),
     ],
   },
   {
@@ -851,7 +857,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
           'The discovered configurations, their candidate rulebook mappings, diagnostics and limitations.',
         schema: 'IssuerDiscoveryResponse',
       },
-      ...errors(400, 401, 413, 422, 500, 502, 503),
+      ...errors(400, 401, 403, 413, 422, 500, 502, 503),
     ],
   },
   {
@@ -1005,7 +1011,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'The recorded correlation and the structural validation result.',
         schema: 'CaptureCorrelationResponse',
       },
-      ...errors(400, 401, 404, 409, 413, 500, 502, 503),
+      ...errors(400, 401, 403, 404, 409, 413, 500, 502, 503),
     ],
   },
   {
@@ -1066,7 +1072,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
 /** Narrow import seam so tests can double the pipeline without a network. */
 export interface ImportService {
   preview(source: ImportSource): Promise<ImportPreview>
-  import(accessToken: string, source: ImportSource): Promise<ImportResult>
+  import(actor: AuthenticatedActor, source: ImportSource): Promise<ImportResult>
 }
 
 export interface ApiDependencies {
@@ -1163,10 +1169,21 @@ function requireVerifierPolicy(service: VerifierPolicyService | undefined): Veri
   return service
 }
 
-function bearerToken(context: Context): string {
+/**
+ * Hono context key of the trusted actor a protected route resolved before its
+ * handler ran. Handlers read it; they never parse a credential themselves.
+ */
+const AUTHENTICATED_ACTOR_KEY = 'attestbook.authenticatedActor'
+
+/**
+ * Bearer credential of the request. `null` means no `Authorization` header was
+ * sent; a present but malformed header is unauthorized, exactly like an
+ * unknown or revoked token.
+ */
+function bearerCredential(context: Context): string | null {
   const header = context.req.header('authorization')
   if (header === undefined) {
-    throw unauthorized()
+    return null
   }
   const match = /^Bearer\s+(\S+)$/i.exec(header.trim())
   const token = match?.[1]
@@ -1174,6 +1191,48 @@ function bearerToken(context: Context): string {
     throw unauthorized()
   }
   return token
+}
+
+/**
+ * Resolves the one trusted provider actor of a protected request. A present
+ * `Authorization` header is authoritative: an invalid bearer never falls back
+ * to the cookie session, so a client that explicitly supplies a token cannot
+ * accidentally act as the browser's session user. The cookie session is the
+ * fallback and, for a state-changing request, must echo the session-bound CSRF
+ * token (issue #89).
+ */
+function resolveRequestActor(
+  context: Context,
+  dependencies: ApiDependencies,
+  stateChanging: boolean,
+): AuthenticatedActor {
+  const token = bearerCredential(context)
+  if (token !== null) {
+    return requireRegistry(dependencies).authenticateBearer(token)
+  }
+
+  const sessionId = getCookie(context, ADMIN_SESSION_COOKIE_NAME)
+  if (sessionId === undefined || dependencies.adminAuth === undefined) {
+    throw unauthorized()
+  }
+  if (stateChanging && !isSameOriginRequest(requestOriginContext(context))) {
+    throw apiError(403, 'csrf_failed', 'The request origin is not allowed.')
+  }
+  return dependencies.adminAuth.authenticateSession(sessionId, {
+    csrfToken: context.req.header(ADMIN_CSRF_HEADER_NAME) ?? null,
+    requireCsrf: stateChanging,
+  })
+}
+
+/** The actor of the current protected request; never read from request input. */
+function requireActor(context: Context): AuthenticatedActor {
+  const actor = context.get(AUTHENTICATED_ACTOR_KEY) as AuthenticatedActor | undefined
+  if (actor === undefined) {
+    // A protected handler must never run without a resolved actor; a missing
+    // one is a wiring bug, not a client failure.
+    throw new Error('protected handler reached without an authenticated actor')
+  }
+  return actor
 }
 
 /**
@@ -1572,6 +1631,7 @@ function adminLoginHandler(dependencies: ApiDependencies): ApiHandler {
         data: {
           provider: toProviderResource(outcome.provider),
           expiresAt: outcome.expiresAt,
+          csrfToken: outcome.csrfToken,
         },
       },
       200,
@@ -1595,6 +1655,7 @@ function getAdminSessionHandler(dependencies: ApiDependencies): ApiHandler {
         data: {
           provider: toProviderResource(session.provider),
           expiresAt: session.expiresAt,
+          csrfToken: session.csrfToken,
         },
       },
       200,
@@ -1607,6 +1668,23 @@ function logoutAdminHandler(dependencies: ApiDependencies): ApiHandler {
     assertSameOrigin(context)
     context.header('cache-control', 'no-store')
     const sessionId = getCookie(context, ADMIN_SESSION_COOKIE_NAME)
+    if (sessionId !== undefined && dependencies.adminAuth !== undefined) {
+      // Revoking a live session is a state change, so it needs the CSRF token
+      // bound to that session. No live session means nothing to revoke, and
+      // logout stays idempotent.
+      if (
+        dependencies.adminAuth.verifySessionCsrf(
+          sessionId,
+          context.req.header(ADMIN_CSRF_HEADER_NAME) ?? null,
+        ) === 'mismatch'
+      ) {
+        throw apiError(
+          403,
+          'csrf_failed',
+          'The request is missing or carries an invalid CSRF token; sign in again.',
+        )
+      }
+    }
     dependencies.adminAuth?.logout(sessionId ?? null)
     expireAdminSessionCookie(context)
     return context.body(null, 204)
@@ -1664,9 +1742,9 @@ function getRulebookDraftHandler(dependencies: ApiDependencies): ApiHandler {
 function replaceRulebookDraftHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const registry = requireRegistry(dependencies)
-    const token = bearerToken(context)
+    const actor = requireActor(context)
     const content = registry.replaceDraftContent(
-      token,
+      actor,
       context.req.param('rulebookId') ?? '',
       parseDraftContentInput(await readJsonBody(context)),
     )
@@ -1768,9 +1846,9 @@ function getRulebookVersionContentHandler(dependencies: ApiDependencies): ApiHan
 function createRulebookHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const registry = requireRegistry(dependencies)
-    const token = bearerToken(context)
+    const actor = requireActor(context)
     const rulebook = registry.createRulebook(
-      token,
+      actor,
       parseCreateRulebookInput(await readJsonBody(context)),
     )
     return context.json({ data: toRulebookResource(rulebook) }, 201, {
@@ -1782,9 +1860,9 @@ function createRulebookHandler(dependencies: ApiDependencies): ApiHandler {
 function createRulebookVersionHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const registry = requireRegistry(dependencies)
-    const token = bearerToken(context)
+    const actor = requireActor(context)
     const version = registry.createRulebookVersion(
-      token,
+      actor,
       context.req.param('rulebookId') ?? '',
       parseCreateRulebookVersionInput(await readJsonBody(context)),
     )
@@ -1797,13 +1875,12 @@ function createRulebookVersionHandler(dependencies: ApiDependencies): ApiHandler
 function publishRulebookVersionHandler(dependencies: ApiDependencies): ApiHandler {
   return (context) => {
     const registry = requireRegistry(dependencies)
-    const token = bearerToken(context)
+    const actor = requireActor(context)
     const rulebookId = context.req.param('rulebookId') ?? ''
     const label = context.req.param('version') ?? ''
 
     // Authenticate and authorize explicitly so an idempotent replay answers
     // consistently instead of throwing an immutability conflict.
-    const actor = registry.authenticate(token)
     const rulebook = registry.getRulebook(rulebookId)
     if (rulebook === null) {
       throw apiError(404, 'not_found', 'The requested rulebook does not exist.')
@@ -1826,7 +1903,7 @@ function publishRulebookVersionHandler(dependencies: ApiDependencies): ApiHandle
       )
     }
 
-    const published = registry.publishRulebookVersion(token, rulebookId, label)
+    const published = registry.publishRulebookVersion(actor, rulebookId, label)
     return context.json({ data: toRulebookVersionResource(published) }, 200)
   }
 }
@@ -1834,9 +1911,9 @@ function publishRulebookVersionHandler(dependencies: ApiDependencies): ApiHandle
 function refreshRulebookVersionHandler(dependencies: ApiDependencies): ApiHandler {
   return (context) => {
     const registry = requireRegistry(dependencies)
-    const token = bearerToken(context)
+    const actor = requireActor(context)
     const refreshed = registry.refreshDraftRulebookVersion(
-      token,
+      actor,
       context.req.param('rulebookId') ?? '',
       context.req.param('version') ?? '',
     )
@@ -1975,9 +2052,9 @@ function previewImportHandler(importer: ImportService | undefined): ApiHandler {
 function importRulebooksHandler(importer: ImportService | undefined): ApiHandler {
   return async (context) => {
     const service = requireImporter(importer)
-    const token = bearerToken(context)
+    const actor = requireActor(context)
     const source = parseImportSource(await readJsonBody(context))
-    const result = await service.import(token, source)
+    const result = await service.import(actor, source)
     return context.json({ data: toImportResultResource(result) }, 200)
   }
 }
@@ -2204,15 +2281,21 @@ export function createApiHandlers(
 }
 
 /**
- * Runs the route-declared bearer check before the handler, and therefore before
- * any request body is read. The contract's `security` flag is the only place
- * that decides which operations are protected, so a protected route cannot
- * forget the check.
+ * Resolves and stores the trusted actor before the handler runs, and therefore
+ * before any request body is read or outbound fetch starts. The contract's
+ * `security` flag is the only place that decides which operations are
+ * protected, and the declared HTTP method decides whether a cookie-authenticated
+ * call also needs its CSRF token. There is no second, manually maintained list
+ * of secured endpoints.
  */
-function authenticated(dependencies: ApiDependencies, handler: ApiHandler): ApiHandler {
+function protectedRoute(
+  dependencies: ApiDependencies,
+  route: ApiRouteSpec,
+  handler: ApiHandler,
+): ApiHandler {
+  const stateChanging = route.method !== 'get'
   return (context) => {
-    const registry = requireRegistry(dependencies)
-    registry.authenticate(bearerToken(context))
+    context.set(AUTHENTICATED_ACTOR_KEY, resolveRequestActor(context, dependencies, stateChanging))
     return handler(context)
   }
 }
@@ -2225,7 +2308,7 @@ export function registerApiRoutes(app: Hono, dependencies: ApiDependencies): voi
     app.on(
       route.method,
       route.path,
-      route.security ? authenticated(dependencies, handler) : handler,
+      route.security ? protectedRoute(dependencies, route, handler) : handler,
     )
   }
 }

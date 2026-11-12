@@ -1,9 +1,10 @@
-// AttestBook registry service (issues #28 and #29).
+// AttestBook registry service (issues #28, #29 and #89).
 //
 // This service is the authenticated write path into the registry database.
 // Operator-only provider provisioning lives in `bootstrap.ts`. The service
 // combines:
-//   * bearer-token authentication bound to a provider account (D-10);
+//   * a trusted provider actor, resolved by the transport from a bearer token
+//     or the administrator browser session (D-10) — never a raw credential;
 //   * service-level ownership enforcement for every mutation;
 //   * draft rulebook mutation, with an immutable draft→published→historical
 //     version lifecycle and content-addressed, digest-verified snapshots (#29);
@@ -119,8 +120,13 @@ export class Registry {
 
   // ---------------------------------------------------------------- providers
 
-  /** Resolves a bearer token to an actor; unknown and revoked tokens are equal. */
-  authenticate(rawToken: string): AuthenticatedActor {
+  /**
+   * Resolves a bearer token to its provider actor; unknown and revoked tokens
+   * are indistinguishable. The transport layer calls this once per request and
+   * passes the verified actor to the write methods, so a session-authenticated
+   * request never needs a minted or synthetic bearer token.
+   */
+  authenticateBearer(rawToken: string): AuthenticatedActor {
     if (
       typeof rawToken !== 'string' ||
       rawToken === '' ||
@@ -132,7 +138,7 @@ export class Registry {
     if (row === null || row.revoked_at !== null) {
       throw unauthorized()
     }
-    return { providerId: row.provider_id, tokenId: row.id }
+    return { providerId: row.provider_id, authMethod: 'bearer', tokenId: row.id }
   }
 
   getProvider(id: string): Provider | null {
@@ -143,8 +149,7 @@ export class Registry {
     return this.store.listProviders()
   }
 
-  updateProvider(accessToken: string, input: UpdateProviderInput): Provider {
-    const actor = this.authenticate(accessToken)
+  updateProvider(actor: AuthenticatedActor, input: UpdateProviderInput): Provider {
     assertObject(input, 'provider')
     const existing = this.store.getProvider(actor.providerId)
     if (existing === null) {
@@ -181,8 +186,7 @@ export class Registry {
     return updated
   }
 
-  deleteProvider(accessToken: string): void {
-    const actor = this.authenticate(accessToken)
+  deleteProvider(actor: AuthenticatedActor): void {
     if (this.store.getProvider(actor.providerId) === null) {
       throw notFound('The provider account no longer exists.')
     }
@@ -206,8 +210,7 @@ export class Registry {
 
   // ------------------------------------------------------------------- tokens
 
-  issueToken(accessToken: string, label?: string): IssuedToken {
-    const actor = this.authenticate(accessToken)
+  issueToken(actor: AuthenticatedActor, label?: string): IssuedToken {
     const tokenLabel = requireLabel(label, 'label')
     const tokenId = this.generateId()
     const createdAt = this.now()
@@ -244,8 +247,7 @@ export class Registry {
   }
 
   /** Revocation is idempotent; only tokens of the authenticated provider exist for it. */
-  revokeToken(accessToken: string, tokenId: string): void {
-    const actor = this.authenticate(accessToken)
+  revokeToken(actor: AuthenticatedActor, tokenId: string): void {
     const targetId = requireIdentifier(tokenId, 'tokenId')
     const token = this.store.findTokenById(targetId)
     if (token === null || token.provider_id !== actor.providerId) {
@@ -269,8 +271,7 @@ export class Registry {
     })()
   }
 
-  listTokens(accessToken: string): readonly AuthTokenRecord[] {
-    const actor = this.authenticate(accessToken)
+  listTokens(actor: AuthenticatedActor): readonly AuthTokenRecord[] {
     return this.store.listTokens(actor.providerId)
   }
 
@@ -295,8 +296,7 @@ export class Registry {
    * discover another provider's import identities. Import-internal; the public
    * read API remains `getRulebook`/`listRulebooks`.
    */
-  findImportedRulebook(accessToken: string, importKey: string): Rulebook | null {
-    const actor = this.authenticate(accessToken)
+  findImportedRulebook(actor: AuthenticatedActor, importKey: string): Rulebook | null {
     return this.store.findRulebookByImportKey(
       actor.providerId,
       requireSha256Digest(importKey, 'importKey'),
@@ -310,8 +310,7 @@ export class Registry {
    * the raw caller input. A caller-visible validation failure reuses the same
    * `RegistryError` contract as a real write.
    */
-  normalizeRulebookInput(accessToken: string, input: CreateRulebookInput): PreparedRulebook {
-    const actor = this.authenticate(accessToken)
+  normalizeRulebookInput(actor: AuthenticatedActor, input: CreateRulebookInput): PreparedRulebook {
     return this.prepareRulebook(actor, input, this.now())
   }
 
@@ -344,11 +343,10 @@ export class Registry {
    * invalid document leaves the previous working copy intact.
    */
   replaceDraftContent(
-    accessToken: string,
+    actor: AuthenticatedActor,
     rulebookId: string,
     input: ReplaceDraftContentInput,
   ): DraftContent {
-    const actor = this.authenticate(accessToken)
     assertObject(input, 'rulebook')
     const existing = this.requireOwnedDraft(actor, rulebookId)
     const at = this.now()
@@ -558,8 +556,8 @@ export class Registry {
     return this.store.listSchemaReferences(id)
   }
 
-  createRulebook(accessToken: string, input: CreateRulebookInput): Rulebook {
-    const rulebooks = this.createRulebooks(accessToken, [input])
+  createRulebook(actor: AuthenticatedActor, input: CreateRulebookInput): Rulebook {
+    const rulebooks = this.createRulebooks(actor, [input])
     const rulebook = rulebooks[0]
     if (rulebook === undefined) {
       throw new Error('createRulebooks returned no rulebook')
@@ -573,10 +571,9 @@ export class Registry {
    * before the transaction; any failure there leaves the database untouched.
    */
   createRulebooks(
-    accessToken: string,
+    actor: AuthenticatedActor,
     inputs: readonly CreateRulebookInput[],
   ): readonly Rulebook[] {
-    const actor = this.authenticate(accessToken)
     assertArray(inputs, 'rulebooks', MAX_RULEBOOKS_PER_BATCH)
     const createdAt = this.now()
     const prepared = inputs.map((input) => this.prepareRulebook(actor, input, createdAt))
@@ -590,8 +587,11 @@ export class Registry {
     return prepared.map((item) => item.rulebook)
   }
 
-  updateRulebook(accessToken: string, rulebookId: string, input: UpdateRulebookInput): Rulebook {
-    const actor = this.authenticate(accessToken)
+  updateRulebook(
+    actor: AuthenticatedActor,
+    rulebookId: string,
+    input: UpdateRulebookInput,
+  ): Rulebook {
     assertObject(input, 'rulebook')
     const existing = this.requireOwnedDraft(actor, rulebookId)
 
@@ -647,8 +647,7 @@ export class Registry {
     return updated
   }
 
-  deleteRulebook(accessToken: string, rulebookId: string): void {
-    const actor = this.authenticate(accessToken)
+  deleteRulebook(actor: AuthenticatedActor, rulebookId: string): void {
     const existing = this.requireOwnedDraft(actor, rulebookId)
     // A rulebook reopened for a next draft can still have published versions.
     // Deleting the rulebook would delete those immutable rows, so refuse it.
@@ -689,11 +688,10 @@ export class Registry {
   // -------------------------------------------------------------- attestations
 
   addAttestation(
-    accessToken: string,
+    actor: AuthenticatedActor,
     rulebookId: string,
     input: CreateAttestationInput,
   ): AttestationType {
-    const actor = this.authenticate(accessToken)
     assertObject(input, 'attestation')
     const rulebook = this.requireOwnedDraft(actor, rulebookId)
     const attestation = this.buildAttestation(rulebook.id, input, 0, this.now())
@@ -719,12 +717,11 @@ export class Registry {
   }
 
   updateAttestation(
-    accessToken: string,
+    actor: AuthenticatedActor,
     rulebookId: string,
     attestationId: string,
     input: UpdateAttestationInput,
   ): AttestationType {
-    const actor = this.authenticate(accessToken)
     assertObject(input, 'attestation')
     const rulebook = this.requireOwnedDraft(actor, rulebookId)
     const existing = this.requireAttestation(rulebook.id, attestationId)
@@ -781,8 +778,7 @@ export class Registry {
     return updated
   }
 
-  removeAttestation(accessToken: string, rulebookId: string, attestationId: string): void {
-    const actor = this.authenticate(accessToken)
+  removeAttestation(actor: AuthenticatedActor, rulebookId: string, attestationId: string): void {
     const rulebook = this.requireOwnedDraft(actor, rulebookId)
     const existing = this.requireAttestation(rulebook.id, attestationId)
     const attachedReferences = this.store
@@ -810,11 +806,10 @@ export class Registry {
   // ----------------------------------------------------------- schema refs
 
   addSchemaReference(
-    accessToken: string,
+    actor: AuthenticatedActor,
     rulebookId: string,
     input: CreateSchemaReferenceInput,
   ): SchemaReference {
-    const actor = this.authenticate(accessToken)
     assertObject(input, 'schemaReference')
     const rulebook = this.requireOwnedDraft(actor, rulebookId)
     const reference = this.buildSchemaReference(rulebook.id, input, this.now())
@@ -848,12 +843,11 @@ export class Registry {
   }
 
   updateSchemaReference(
-    accessToken: string,
+    actor: AuthenticatedActor,
     rulebookId: string,
     schemaReferenceId: string,
     input: UpdateSchemaReferenceInput,
   ): SchemaReference {
-    const actor = this.authenticate(accessToken)
     assertObject(input, 'schemaReference')
     const rulebook = this.requireOwnedDraft(actor, rulebookId)
     const existing = this.requireSchemaReference(rulebook.id, schemaReferenceId)
@@ -920,8 +914,11 @@ export class Registry {
     return updated
   }
 
-  removeSchemaReference(accessToken: string, rulebookId: string, schemaReferenceId: string): void {
-    const actor = this.authenticate(accessToken)
+  removeSchemaReference(
+    actor: AuthenticatedActor,
+    rulebookId: string,
+    schemaReferenceId: string,
+  ): void {
     const rulebook = this.requireOwnedDraft(actor, rulebookId)
     const existing = this.requireSchemaReference(rulebook.id, schemaReferenceId)
 
@@ -1025,11 +1022,10 @@ export class Registry {
    * version; every already-published version stays immutable.
    */
   createRulebookVersion(
-    accessToken: string,
+    actor: AuthenticatedActor,
     rulebookId: string,
     input: CreateRulebookVersionInput,
   ): RulebookVersion {
-    const actor = this.authenticate(accessToken)
     assertObject(input, 'version')
     const rulebook = this.requireOwnedRulebook(actor, rulebookId)
     if (rulebook.publicationStatus === 'historical') {
@@ -1094,11 +1090,10 @@ export class Registry {
    * Published and historical versions are immutable and cannot be refreshed.
    */
   refreshDraftRulebookVersion(
-    accessToken: string,
+    actor: AuthenticatedActor,
     rulebookId: string,
     version: string,
   ): RulebookVersion {
-    const actor = this.authenticate(accessToken)
     const rulebook = this.requireOwnedRulebook(actor, rulebookId)
     const label = requireSemanticVersion(version, 'version')
     const existing = this.store.getRulebookVersion(rulebook.id, label)
@@ -1150,11 +1145,10 @@ export class Registry {
    * same rulebook becomes historical.
    */
   publishRulebookVersion(
-    accessToken: string,
+    actor: AuthenticatedActor,
     rulebookId: string,
     version: string,
   ): RulebookVersion {
-    const actor = this.authenticate(accessToken)
     const rulebook = this.requireOwnedRulebook(actor, rulebookId)
     if (rulebook.publicationStatus === 'historical') {
       throw immutable('The rulebook is historical; its versions cannot be published.')

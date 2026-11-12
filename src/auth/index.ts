@@ -1,4 +1,5 @@
-// Public surface of the administrator browser authentication module (issue #88).
+// Public surface of the administrator browser authentication module (issues #88
+// and #89).
 //
 // See docs/security.md §2.1 for the session model and docs/api.md §3.11 for the
 // HTTP contract. Provider bearer authentication stays in `src/registry/`.
@@ -12,6 +13,14 @@ export {
   type AdminProviderSource,
   type AuthenticatedAdminSession,
 } from './admin-auth'
+
+export {
+  SessionAuthError,
+  csrfRejected,
+  isSessionAuthError,
+  unauthorizedSession,
+  type SessionAuthErrorCode,
+} from './errors'
 
 export {
   ADMIN_PASSWORD_HASH_ENV,
@@ -52,11 +61,15 @@ export {
 } from './rate-limit'
 
 export {
+  ADMIN_CSRF_HEADER_NAME,
+  ADMIN_CSRF_TOKEN_BYTES,
   ADMIN_SESSION_COOKIE_NAME,
   ADMIN_SESSION_ID_BYTES,
   ADMIN_SESSION_TTL_MS,
+  MAX_ADMIN_CSRF_TOKEN_LENGTH,
   MAX_ADMIN_SESSION_ID_LENGTH,
   adminAuthFingerprint,
+  generateAdminCsrfToken,
   generateAdminSessionId,
   hashAdminSessionId,
 } from './session'

@@ -100,12 +100,12 @@ function setup(
     name: 'Verifier Provider',
     publicationAuthority: 'verifier-authority',
   })
-  const token = provider.token.secret
+  const actor = provider.actor
   const attestationName = 'PID'
   const documents = options.documents ?? [
     { format: 'dc+sd-jwt', uri: SCHEMA_URI, content: CLAIMS_SCHEMA_TEXT },
   ]
-  const rulebook = fixture.registry.createRulebook(token, {
+  const rulebook = fixture.registry.createRulebook(actor, {
     name: 'PID Rulebook',
     description: 'Verifier constraint rulebook',
     applicableSpec: 'ts11@1.0.1',
@@ -125,7 +125,7 @@ function setup(
     throw new Error('test setup failed to create the attestation type')
   }
   for (const document of documents) {
-    fixture.registry.addSchemaReference(token, rulebook.id, {
+    fixture.registry.addSchemaReference(actor, rulebook.id, {
       formatIdentifier: document.format,
       uri: document.uri,
       integrity:
@@ -133,8 +133,8 @@ function setup(
       attestationId: attestation.id,
     })
   }
-  const version = fixture.registry.createRulebookVersion(token, rulebook.id, { version: '1.0' })
-  fixture.registry.publishRulebookVersion(token, rulebook.id, '1.0')
+  const version = fixture.registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
+  fixture.registry.publishRulebookVersion(actor, rulebook.id, '1.0')
 
   return {
     fixture,

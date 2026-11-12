@@ -13,6 +13,7 @@ import { SDJwtVcInstance, type SdJwtVcPayload } from '@sd-jwt/sd-jwt-vc'
 
 import { provisionProvider } from '../registry/bootstrap'
 import type { Registry } from '../registry/registry'
+import type { AuthenticatedActor } from '../registry/types'
 import { createSdJwtHasher } from './sd-jwt'
 
 export const TEST_VCT = 'https://example.org/vct/pid'
@@ -143,7 +144,10 @@ export interface SeededRulebook {
   readonly schemaUri: string
   readonly schemaContent: string
   readonly integrity: string
+  /** Bearer secret returned once by provisioning; used for HTTP requests. */
   readonly token: string
+  /** Trusted actor the same provider resolves to; used for direct service calls. */
+  readonly actor: AuthenticatedActor
 }
 
 /**
@@ -161,13 +165,14 @@ export function seedPublishedRulebook(
     publicationAuthority: authority,
   })
   const token = provider.token.secret
+  const actor = provider.actor
   const attestationName = options.attestationName ?? 'PID'
   const rulebookName = options.rulebookName ?? 'PID Rulebook'
   const schemaUri = options.schemaUri ?? TEST_VCT
   const schemaContent = options.schemaContent ?? PID_TYPE_METADATA_TEXT
   const integrity = options.schemaIntegrity ?? sha256Sri(schemaContent)
 
-  const rulebook = registry.createRulebook(token, {
+  const rulebook = registry.createRulebook(actor, {
     name: rulebookName,
     description: 'Fixture rulebook for structural validation tests',
     applicableSpec: 'ts11@1.0.1',
@@ -186,15 +191,15 @@ export function seedPublishedRulebook(
   if (attestation === undefined) {
     throw new Error('seed fixture failed to create the attestation type')
   }
-  registry.addSchemaReference(token, rulebook.id, {
+  registry.addSchemaReference(actor, rulebook.id, {
     formatIdentifier: options.schemaFormatIdentifier ?? 'dc+sd-jwt',
     uri: schemaUri,
     integrity,
     attestationId: attestation.id,
   })
 
-  const version = registry.createRulebookVersion(token, rulebook.id, { version: '1.0' })
-  registry.publishRulebookVersion(token, rulebook.id, '1.0')
+  const version = registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
+  registry.publishRulebookVersion(actor, rulebook.id, '1.0')
 
   return {
     rulebookId: rulebook.id,
@@ -206,6 +211,7 @@ export function seedPublishedRulebook(
     schemaContent,
     integrity,
     token,
+    actor,
   }
 }
 
@@ -235,6 +241,7 @@ export function seedRepresentativeRulebook(database: Database, registry: Registr
     publicationAuthority: 'authority-representative',
   })
   const token = provider.token.secret
+  const actor = provider.actor
   const formats = Array.from({ length: REPRESENTATIVE_FORMATS_PER_TYPE }, (_, index) =>
     index === 0 ? 'dc+sd-jwt' : `format-${index}`,
   )
@@ -245,7 +252,7 @@ export function seedRepresentativeRulebook(database: Database, registry: Registr
     supportedFormats: formats,
   }))
 
-  const rulebook = registry.createRulebook(token, {
+  const rulebook = registry.createRulebook(actor, {
     name: 'Representative rulebook',
     description: 'Performance fixture at the registry structural bounds',
     applicableSpec: 'ts11@1.0.1',
@@ -254,7 +261,7 @@ export function seedRepresentativeRulebook(database: Database, registry: Registr
   const created = registry.listAttestations(rulebook.id)
   for (const [typeIndex, attestation] of created.entries()) {
     for (let formatIndex = 0; formatIndex < formats.length; formatIndex += 1) {
-      registry.addSchemaReference(token, rulebook.id, {
+      registry.addSchemaReference(actor, rulebook.id, {
         formatIdentifier: formats[formatIndex] as string,
         uri: representativeSchemaUri(typeIndex, formatIndex),
         attestationId: attestation.id,
@@ -262,8 +269,8 @@ export function seedRepresentativeRulebook(database: Database, registry: Registr
     }
   }
 
-  const version = registry.createRulebookVersion(token, rulebook.id, { version: '1.0' })
-  registry.publishRulebookVersion(token, rulebook.id, '1.0')
+  const version = registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
+  registry.publishRulebookVersion(actor, rulebook.id, '1.0')
 
   return {
     rulebookId: rulebook.id,
@@ -275,5 +282,6 @@ export function seedRepresentativeRulebook(database: Database, registry: Registr
     schemaContent: PID_TYPE_METADATA_TEXT,
     integrity: sha256Sri(PID_TYPE_METADATA_TEXT),
     token,
+    actor,
   }
 }

@@ -106,5 +106,11 @@ export function provisionProvider(
     throw error
   }
 
-  return { provider, token }
+  // The operator receives the actor the new token resolves to, so trusted
+  // callers never have to re-authenticate a secret they were just handed.
+  return {
+    provider,
+    token,
+    actor: { providerId, authMethod: 'bearer', tokenId },
+  }
 }

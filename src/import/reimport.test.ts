@@ -3,6 +3,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { provisionProvider } from '../registry/bootstrap'
 import { createRegistryFixture, type RegistryFixture } from '../registry/test-support'
 import type { Registry } from '../registry/registry'
+import type { AuthenticatedActor } from '../registry/types'
 import { ImportError } from './errors'
 import { importContentFingerprint, storedImportContent } from './identity'
 import { RulebookImporter } from './importer'
@@ -29,18 +30,18 @@ const importedAt = '2026-11-05T10:05:00.000Z'
 interface ImportContext {
   readonly fixture: RegistryFixture
   readonly registry: Registry
-  readonly token: string
+  readonly actor: AuthenticatedActor
 }
 
 let tokenCounter = 0
 
 function setup(): ImportContext {
   fixture = createRegistryFixture()
-  const { token } = provisionProvider(fixture.database, {
+  const { actor } = provisionProvider(fixture.database, {
     name: 'Re-import Provider',
     publicationAuthority: `account-reimport-${tokenCounter++}`,
   })
-  return { fixture, registry: fixture.registry, token: token.secret }
+  return { fixture, registry: fixture.registry, actor }
 }
 
 function importerFor(context: ImportContext, body: string): RulebookImporter {
@@ -55,7 +56,7 @@ function importerFor(context: ImportContext, body: string): RulebookImporter {
 }
 
 async function importBody(context: ImportContext, body: string) {
-  return importerFor(context, body).import(context.token, { kind: 'url', url: IMPORT_URL })
+  return importerFor(context, body).import(context.actor, { kind: 'url', url: IMPORT_URL })
 }
 
 /** A second valid TS11 document with its own id, so entries are independent. */
@@ -131,7 +132,7 @@ describe('idempotent re-import', () => {
     }
 
     const draft = context.registry.getDraftContent(rulebook.id)
-    context.registry.replaceDraftContent(context.token, rulebook.id, {
+    context.registry.replaceDraftContent(context.actor, rulebook.id, {
       name: draft.rulebook.name,
       description: draft.rulebook.description,
       sourceUrl: draft.rulebook.sourceUrl,
@@ -229,8 +230,8 @@ describe('idempotent re-import', () => {
     const importer = importerFor(context, jsonBytes(validTs11Document))
     const source = { kind: 'json' as const, content: jsonBytes(validTs11Document), sourceUrl }
 
-    const first = await importer.import(context.token, source)
-    const second = await importer.import(context.token, source)
+    const first = await importer.import(context.actor, source)
+    const second = await importer.import(context.actor, source)
 
     expect(first.rulebooks).toHaveLength(1)
     expect(second.rulebooks).toHaveLength(0)
@@ -244,7 +245,7 @@ describe('idempotent re-import', () => {
     const other = provisionProvider(context.fixture.database, {
       name: 'Another Provider',
       publicationAuthority: 'account-reimport-other',
-    }).token.secret
+    }).actor
     const body = jsonBytes(validTs11Document)
 
     const first = await importBody(context, body)
@@ -325,7 +326,7 @@ describe('re-import conflict detection', () => {
     if (rulebook === undefined) {
       throw new Error('expected the first import to create a rulebook')
     }
-    context.registry.updateRulebook(context.token, rulebook.id, { name: 'Locally edited name' })
+    context.registry.updateRulebook(context.actor, rulebook.id, { name: 'Locally edited name' })
 
     const second = await importBody(context, jsonBytes(ts11Document({ bindingType: 'claim' })))
 
@@ -344,8 +345,8 @@ describe('re-import conflict detection', () => {
     if (rulebook === undefined) {
       throw new Error('expected the first import to create a rulebook')
     }
-    context.registry.createRulebookVersion(context.token, rulebook.id, { version: '1.0.0' })
-    context.registry.publishRulebookVersion(context.token, rulebook.id, '1.0.0')
+    context.registry.createRulebookVersion(context.actor, rulebook.id, { version: '1.0.0' })
+    context.registry.publishRulebookVersion(context.actor, rulebook.id, '1.0.0')
 
     const second = await importBody(context, jsonBytes(ts11Document({ bindingType: 'claim' })))
 

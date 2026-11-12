@@ -16,7 +16,7 @@ import { applyMigrations } from '../../src/db/migrations'
 import { Registry } from '../../src/registry'
 import { provisionProvider } from '../../src/registry/bootstrap'
 import { sha256Hex } from '../../src/registry/digest'
-import type { CreateRulebookInput } from '../../src/registry/types'
+import type { AuthenticatedActor, CreateRulebookInput } from '../../src/registry/types'
 import { CredentialValidator } from '../../src/validation'
 import { issueTestCredential, seedPublishedRulebook } from '../../src/validation/test-support'
 
@@ -58,15 +58,19 @@ writeFileSync(PID_CREDENTIAL_FIXTURE, pidCredential, 'utf8')
 writeFileSync(EDITOR_TOKEN_FIXTURE, issuer.token.secret, 'utf8')
 writeFileSync(AUTHORITY_TOKEN_FIXTURE, authority.token.secret, 'utf8')
 
-function createPublished(token: string, input: CreateRulebookInput, version: string): string {
-  const rulebook = registry.createRulebook(token, input)
-  registry.createRulebookVersion(token, rulebook.id, { version })
-  registry.publishRulebookVersion(token, rulebook.id, version)
+function createPublished(
+  actor: AuthenticatedActor,
+  input: CreateRulebookInput,
+  version: string,
+): string {
+  const rulebook = registry.createRulebook(actor, input)
+  registry.createRulebookVersion(actor, rulebook.id, { version })
+  registry.publishRulebookVersion(actor, rulebook.id, version)
   return rulebook.id
 }
 
 const pidId = createPublished(
-  issuer.token.secret,
+  issuer.actor,
   {
     name: 'PID Rulebook',
     description: 'Person identification data rulebook maintained by the example issuer.',
@@ -90,10 +94,10 @@ const pidId = createPublished(
   },
   '1.0',
 )
-registry.createRulebookVersion(issuer.token.secret, pidId, { version: '1.1' })
+registry.createRulebookVersion(issuer.actor, pidId, { version: '1.1' })
 
 createPublished(
-  authority.token.secret,
+  authority.actor,
   {
     name: 'Mobile Driving Licence Rulebook',
     description: 'Driving licence attestation rulebook published by the identity authority.',
@@ -112,7 +116,7 @@ createPublished(
 )
 
 createPublished(
-  authority.token.secret,
+  authority.actor,
   {
     name: 'Health Insurance Card Rulebook',
     description: 'Health insurance attestation rulebook for the national health service.',
@@ -130,7 +134,7 @@ createPublished(
   '1.2',
 )
 
-registry.createRulebook(lab.token.secret, {
+registry.createRulebook(lab.actor, {
   name: 'Age Verification Rulebook',
   description: 'Proof-of-age rulebook maintained by Wallet Lab.',
   applicableSpec: 'ts11@1.0.1',
@@ -144,7 +148,7 @@ registry.createRulebook(lab.token.secret, {
   ],
 })
 
-const payment = registry.createRulebook(issuer.token.secret, {
+const payment = registry.createRulebook(issuer.actor, {
   name: 'Payment Account Rulebook',
   description: 'Payment account access and account details rulebook.',
   sourceUrl: 'https://issuer.example.org/rulebooks/payment',
@@ -158,9 +162,9 @@ const payment = registry.createRulebook(issuer.token.secret, {
     },
   ],
 })
-registry.createRulebookVersion(issuer.token.secret, payment.id, { version: '0.1' })
+registry.createRulebookVersion(issuer.actor, payment.id, { version: '0.1' })
 
-registry.createRulebook(lab.token.secret, {
+registry.createRulebook(lab.actor, {
   name: 'Loyalty Card Rulebook',
   description: 'Loyalty programme attestation rulebook used for local testing.',
   applicableSpec: 'ts11@1.0.1',

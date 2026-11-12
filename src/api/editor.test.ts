@@ -40,7 +40,7 @@ function setup(): {
     name: 'Other Provider',
     publicationAuthority: 'other-provider',
   })
-  const rulebook = fixture.registry.createRulebook(owner.token.secret, {
+  const rulebook = fixture.registry.createRulebook(owner.actor, {
     name: 'Editor Draft',
     description: 'A draft to edit.',
     sourceUrl: 'https://issuer.example.org/rulebooks/editor',
@@ -60,12 +60,12 @@ function setup(): {
       },
     ],
   })
-  const published = fixture.registry.createRulebook(owner.token.secret, {
+  const published = fixture.registry.createRulebook(owner.actor, {
     name: 'Published Rulebook',
     applicableSpec: 'ts11@1.0.1',
   })
-  fixture.registry.createRulebookVersion(owner.token.secret, published.id, { version: '1.0' })
-  fixture.registry.publishRulebookVersion(owner.token.secret, published.id, '1.0')
+  fixture.registry.createRulebookVersion(owner.actor, published.id, { version: '1.0' })
+  fixture.registry.publishRulebookVersion(owner.actor, published.id, '1.0')
 
   return {
     app: createApp({ registry: fixture.registry }),
@@ -205,7 +205,7 @@ describe('draft editor write API', () => {
 
   test('keeps registry-internal metadata when the editable projection is saved back', async () => {
     const { app, registry, token } = setup()
-    const created = registry.createRulebook(token, {
+    const created = registry.createRulebook(registry.authenticateBearer(token), {
       name: 'Imported draft',
       applicableSpec: 'ts11@1.0.1',
       attestations: [

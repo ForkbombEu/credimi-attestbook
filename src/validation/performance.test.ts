@@ -127,7 +127,8 @@ function setupDraft(registryFixture: RegistryFixture): DraftFixture {
     publicationAuthority: 'authority-draft',
   })
   const token = provider.token.secret
-  const rulebook = registryFixture.registry.createRulebook(token, {
+  const actor = provider.actor
+  const rulebook = registryFixture.registry.createRulebook(actor, {
     name: 'Draft rulebook',
     description: 'Draft fixture for the snapshot-cache tests',
     applicableSpec: 'ts11@1.0.1',
@@ -146,13 +147,13 @@ function setupDraft(registryFixture: RegistryFixture): DraftFixture {
   if (attestation === undefined) {
     throw new Error('draft fixture failed to create the attestation type')
   }
-  registryFixture.registry.addSchemaReference(token, rulebook.id, {
+  registryFixture.registry.addSchemaReference(actor, rulebook.id, {
     formatIdentifier: 'dc+sd-jwt',
     uri: TEST_VCT,
     integrity: sha256Sri(PID_TYPE_METADATA_TEXT),
     attestationId: attestation.id,
   })
-  const version = registryFixture.registry.createRulebookVersion(token, rulebook.id, {
+  const version = registryFixture.registry.createRulebookVersion(actor, rulebook.id, {
     version: '1.0',
   })
   return {
@@ -166,6 +167,7 @@ function setupDraft(registryFixture: RegistryFixture): DraftFixture {
       schemaContent: PID_TYPE_METADATA_TEXT,
       integrity: sha256Sri(PID_TYPE_METADATA_TEXT),
       token,
+      actor,
     },
     attestationId: attestation.id,
   }
@@ -206,13 +208,13 @@ describe('immutable rulebook snapshot cache', () => {
     expect(before.attestation.attestationLoS).toBe('iso_18045_high')
 
     registryFixture.registry.updateAttestation(
-      draft.seeded.token,
+      draft.seeded.actor,
       draft.seeded.rulebookId,
       draft.attestationId,
       { attestationLoS: 'iso_18045_moderate' },
     )
     const refreshed = registryFixture.registry.refreshDraftRulebookVersion(
-      draft.seeded.token,
+      draft.seeded.actor,
       draft.seeded.rulebookId,
       draft.seeded.version,
     )
@@ -235,10 +237,10 @@ describe('immutable rulebook snapshot cache', () => {
     const published = await service.validate(input)
     expect(published.rulebook.status).toBe('published')
 
-    registryFixture.registry.createRulebookVersion(seeded.token, seeded.rulebookId, {
+    registryFixture.registry.createRulebookVersion(seeded.actor, seeded.rulebookId, {
       version: '1.1',
     })
-    registryFixture.registry.publishRulebookVersion(seeded.token, seeded.rulebookId, '1.1')
+    registryFixture.registry.publishRulebookVersion(seeded.actor, seeded.rulebookId, '1.1')
 
     const historical = await service.validate(input)
     expect(historical.rulebook.status).toBe('historical')
@@ -278,8 +280,8 @@ describe('immutable rulebook snapshot cache', () => {
 
     const versions = [seeded.version]
     for (const version of ['1.1', '1.2', '1.3']) {
-      registryFixture.registry.createRulebookVersion(seeded.token, seeded.rulebookId, { version })
-      registryFixture.registry.publishRulebookVersion(seeded.token, seeded.rulebookId, version)
+      registryFixture.registry.createRulebookVersion(seeded.actor, seeded.rulebookId, { version })
+      registryFixture.registry.publishRulebookVersion(seeded.actor, seeded.rulebookId, version)
       versions.push(version)
     }
 

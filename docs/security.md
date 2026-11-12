@@ -29,7 +29,7 @@ administrator login, sessions, rate limiting and origin checks) and
 | --- | --- | --- |
 | Anonymous reader | none | Public catalogue, attestation, schema-reference, version, snapshot and health reads; structural credential validation. |
 | Provider account | Provider bearer token (`Authorization: Bearer att_…`) | Create and mutate only the rulebooks owned by that provider; import drafts owned by that provider; preview imports; discover issuer metadata. |
-| Administrator (browser) | Environment-configured username and Argon2id password hash; opaque session cookie | Authenticate as the bound **existing** provider through `GET /api/v1/auth/me`, rotate the session at login and revoke it at logout. It does not create a provider, mint or expose a bearer token, or itself authorize provider write routes. |
+| Administrator (browser) | Environment-configured username and Argon2id password hash; opaque session cookie plus its session-bound CSRF token | Authorize the same protected provider write routes a bearer token authorizes, as the bound **existing** provider (issue #89). The session resolves to the same trusted actor as a token; every state-changing cookie request must echo `X-CSRF-Token`. It does not create a provider or mint or expose a bearer token. |
 | Operator | Out-of-band deployment access | Provision a provider and its first token, configure the optional administrator login, audit inspection and deployment configuration. Nothing in the HTTP API performs provider administration. |
 | Remote import or issuer source | none | Untrusted input; bounded and validated by the import/discovery pipelines, never trusted for provider identity or publication authority. |
 
@@ -39,10 +39,23 @@ import source, issuer metadata or a request body.
 
 ## 2. Authentication
 
-Provider bearer tokens and the administrator browser session are independent credential
-paths. The session backend introduced by issue #88 does not change bearer parsing, the
-protected-route set or any registry ownership rule; #89 extends browser sessions to the
-existing provider write routes.
+Provider bearer tokens and the administrator browser session are two credential paths to the
+same provider actor (issue #89). Both are resolved once per request, before any handler runs,
+and the result is an `AuthenticatedActor` bound to one provider; the registry service accepts
+only that actor and never a raw token. A request resolves its actor as follows:
+
+- A present `Authorization` header is authoritative. A valid bearer token resolves to its
+  provider with `authMethod: "bearer"`. A malformed, unknown or revoked bearer answers `401`
+  and **never** falls back to a cookie session, so a client that supplies a token cannot
+  accidentally act as the browser's logged-in user.
+- Otherwise, a valid `attestbook_admin_session` cookie resolves to the configured provider
+  with `authMethod: "session"`. A state-changing request must also echo the session-bound
+  CSRF token in `X-CSRF-Token` (see §2.1); a missing or wrong token answers `403 csrf_failed`
+  and changes nothing.
+- With neither credential the protected route answers `401`.
+
+The protected-route set, ownership checks, provider attribution and audit semantics are the
+same for both paths: the session only changes how the actor is proved, never what it may do.
 
 - A write request presents `Authorization: Bearer <token>`. The scheme is case-insensitive;
   exactly one non-empty token is accepted. No token is accepted from a query string, cookie
@@ -92,6 +105,22 @@ API token in the session or changes the bearer checks above.
   answer `403` otherwise. Login accepts only `Content-Type: application/json`, which a
   cross-site HTML form cannot send without a CORS preflight. The login and logout endpoints
   add no audit rows (neither successes nor failures).
+- **Session-bound CSRF token for writes (issue #89).** Every login mints a 256-bit random CSRF
+  token, returned once in the login body as `csrfToken` and stored on the session row; a fresh
+  login always mints a fresh token with the fresh session. `GET /api/v1/auth/me` also returns
+  the live token so a reloaded page keeps working. Every state-changing request that
+  authenticates with the cookie must send that token in `X-CSRF-Token`; the check is a
+  constant-time comparison and a missing or wrong value answers `403 csrf_failed` without
+  touching the database. The token is not an authenticator on its own — it is accepted only
+  together with the cookie, which another site cannot read — and it is never put in a cookie,
+  URL or log. It is stored on the session row (rather than hashed) because `GET /auth/me` must
+  return it to a cookie-authenticated caller; on its own it grants no authority. Logout
+  requires it when a live session cookie is present while remaining idempotent when there is
+  nothing to revoke. A session row created before the column existed is backfilled with a
+  random token that `/auth/me` returns, so it keeps working. Login itself (environment
+  credentials, JSON body, same-origin) and its rotation path keep the origin and content-type
+  controls rather than a bound token, because the credential being proved is in the body, not
+  the cookie.
 - **Rate limiting and parallel attempts.** Login failures are bounded in-process: five per
   account and twenty per client address in a fifteen-minute sliding window, answering
   `429 rate_limited` with `Retry-After`. An attempt reserves its failure slot before the
@@ -102,9 +131,10 @@ API token in the session or changes the bearer checks above.
   budget. The limiter is not persisted and resets on restart, and it does not rate-limit
   bearer-token API traffic.
 - **Provider binding only.** `/api/v1/auth/me` returns the public provider projection
-  (`id`, `name`, `createdAt`) and the session expiry. It exposes no publication authority,
-  metadata, password hash or token. The browser stores no session identifier or password in
-  `localStorage`/`sessionStorage`; the cookie is the only client-side credential.
+  (`id`, `name`, `createdAt`), the session expiry and the session CSRF token. It exposes no
+  publication authority, metadata, password hash or bearer token. The browser stores no
+  session identifier or password in `localStorage`/`sessionStorage`; the cookie is the only
+  client-side credential, and the CSRF token only accompanies it.
 
 ## 3. Authorization and provider ownership
 
@@ -143,28 +173,35 @@ The following rules implement that model:
 | Operation | Auth | Ownership rule | Denial |
 | --- | --- | --- | --- |
 | `GET /health` | no | n/a | n/a |
-| `POST /api/v1/auth/login` | environment credentials | Binds the configured existing provider; never creates a provider or mints a token | `401` generic; `403` cross-origin; `429` rate limited; `503` unconfigured |
-| `GET /api/v1/auth/me` | session cookie | Resolves only its own live session; returns the public provider projection | `401` for missing, expired or revoked sessions |
-| `POST /api/v1/auth/logout` | session cookie | Revokes its own session; idempotent | `403` cross-origin |
+| `POST /api/v1/auth/login` | environment credentials | Binds the configured existing provider; never creates a provider or mints a token; returns the session CSRF token | `401` generic; `403` cross-origin; `429` rate limited; `503` unconfigured |
+| `GET /api/v1/auth/me` | session cookie | Resolves only its own live session; returns the public provider projection and the session CSRF token | `401` for missing, expired or revoked sessions |
+| `POST /api/v1/auth/logout` | session cookie + CSRF token | Revokes its own session; idempotent; a live session requires its CSRF token, an absent one needs none | `403` cross-origin or `csrf_failed`; `204` when there is nothing to revoke |
 | `GET /api/v1/rulebooks`, `GET /api/v1/rulebooks/{id}` | no | n/a | `404` for an unknown id |
 | `GET …/attestations`, `…/schema-references`, `…/versions`, `…/versions/{version}`, `…/content` | no | n/a | `404` for an unknown resource |
-| `POST /api/v1/rulebooks` | yes | New rulebook is owned by the actor; the body cannot set its provider | `401`; `400` for invalid input |
+| `POST /api/v1/rulebooks` | bearer or session+CSRF | New rulebook is owned by the actor; the body cannot set its provider | `401`; `400` for invalid input |
 | `GET /api/v1/rulebooks/{id}/draft` | no | Public working-copy projection; no internal metadata | `404` for an unknown id |
-| `PUT /api/v1/rulebooks/{id}/draft` | yes | Actor must own the stored rulebook and its working copy must be `draft` | `401`; `403` when foreign; `409 immutable` for published/historical; `400` for invalid input |
+| `PUT /api/v1/rulebooks/{id}/draft` | bearer or session+CSRF | Actor must own the stored rulebook and its working copy must be `draft` | `401`; `403` when foreign; `409 immutable` for published/historical; `400` for invalid input |
 | `POST /api/v1/rulebooks/validate-draft` | no | Read-only, pure validation; writes nothing | `400` for a non-JSON body; `413` over the body limit |
-| `POST …/versions` | yes | Actor must own the stored rulebook | `401`; `403` when foreign; `409` for a duplicate label or immutable state |
-| `POST …/versions/{version}/publish` | yes | Actor must own the stored rulebook; ownership is checked before replay and version lookup | `401`; `403` when foreign; `404` only for the owner; `409` for stale or immutable state |
-| `POST /api/v1/imports/preview` | yes | No write; the token gates the outbound fetch | `401`; `400`/`422`/`502` for the source |
-| `POST /api/v1/imports` | yes | Import identity and created drafts are scoped to the actor's provider | `401`; `422` for a refused source |
-| `POST /api/v1/issuers/discover` | yes | No write and no stored issuer state; the token gates the bounded outbound fetch | `401`; `400`/`422`/`502` for the URL or metadata |
+| `POST …/versions` | bearer or session+CSRF | Actor must own the stored rulebook | `401`; `403` when foreign; `409` for a duplicate label or immutable state |
+| `POST …/versions/{version}/publish` | bearer or session+CSRF | Actor must own the stored rulebook; ownership is checked before replay and version lookup | `401`; `403` when foreign; `404` only for the owner; `409` for stale or immutable state |
+| `POST /api/v1/imports/preview` | bearer or session+CSRF | No write; the token gates the outbound fetch | `401`; `400`/`422`/`502` for the source |
+| `POST /api/v1/imports` | bearer or session+CSRF | Import identity and created drafts are scoped to the actor's provider | `401`; `422` for a refused source |
+| `POST /api/v1/issuers/discover` | bearer or session+CSRF | No write and no stored issuer state; the token gates the bounded outbound fetch | `401`; `400`/`422`/`502` for the URL or metadata |
 | `POST /api/v1/credentials/validate` | no | Read-only, public by design | `400`/`404`/`503` |
 | `GET /api/v1/captures`, `GET /api/v1/captures/{id}` | no | Mock-backed read; normalized metadata plus the redacted projection only, never the raw artifact | n/a |
-| `POST /api/v1/captures/{id}/validate` | yes | Records an in-memory rulebook correlation visible to every reader; writes no registry data | `401`; `400`; `404`; `409` for evidence that cannot be validated |
+| `POST /api/v1/captures/{id}/validate` | bearer or session+CSRF | Records an in-memory rulebook correlation visible to every reader; writes no registry data | `401`; `400`; `404`; `409` for evidence that cannot be validated |
 
-The browser editor and the capture correlation form never persist their provider token: it
-lives in the app's React memory for the current page session only, is sent only in the
+Every row marked `bearer or session+CSRF` accepts exactly one of the two credentials; the
+session path adds the CSRF header but not a wider authority, so the ownership rule and the
+denial statuses are identical. Requesting a protected route with no credential answers `401`
+whether the intended credential was a token or a cookie, and the response never says whether a
+cookie existed.
+
+The browser editor and the capture correlation form currently hold a provider token: it lives
+in the app's React memory for the current page session only, is sent only in the
 `Authorization` header of the write request, and is cleared by a full page reload. It is never
-placed in a URL, request body, browser storage, log or rendered document. Draft validation and
+placed in a URL, request body, browser storage, log or rendered document. A browser session is
+an alternative transport for the same routes; the UI does not use it yet. Draft validation and
 credential validation stay public because they write nothing; capture correlation requires a
 token because it records server state that every reader sees.
 
@@ -172,7 +209,14 @@ token because it records server state that every reader sees.
 
 - `src/api/routes.ts` declares every operation once in `API_ROUTES`. Its `security` flag is
   the only list of protected operations; `registerApiRoutes` wraps each protected handler with
-  one central bearer check that runs before the handler can read a request body.
+  one central check that resolves the trusted actor (bearer token or session cookie) before the
+  handler can read a request body or start an outbound fetch. The declared HTTP method decides
+  whether a cookie request also needs its CSRF token, so there is no second list of secured
+  endpoints that could drift.
+- The resolved actor is stored on the request context and read by handlers; no handler parses
+  a credential, takes a provider id from input or constructs an actor. The registry service
+  exposes `authenticateBearer` for the transport and accepts the already-verified actor
+  everywhere else; it never mints or accepts a synthetic token for a browser session.
 - The handler map is typed `Record<ApiOperationId, ApiHandler>`, so a declared operation
   without a handler fails the typecheck. The generated OpenAPI document is built from the same
   table, and tests compare it with the routes Hono actually registered.
@@ -189,6 +233,10 @@ relevant mapping is:
 | Condition | HTTP | `error.code` | Additional signal |
 | --- | --- | --- | --- |
 | Missing, malformed, unknown or revoked bearer token | `401` | `unauthorized` | `WWW-Authenticate: Bearer realm="attestbook"` |
+| Missing, unknown, expired or revoked session cookie | `401` | `unauthorized` | the same uniform body and bearer challenge as a failed token |
+| Cookie-authenticated protected write without its CSRF token, or with a foreign `Origin`/cross-site `Sec-Fetch-Site` | `403` | `csrf_failed` | none; nothing is written |
+| Logout of a live session without its CSRF token | `403` | `csrf_failed` | none; the session is not revoked and the cookie is not expired |
+| Cross-origin login or logout (foreign `Origin`/cross-site `Sec-Fetch-Site`) | `403` | `forbidden` | refused before any session is created or revoked |
 | Authenticated but not the owning provider | `403` | `forbidden` | none |
 | Unknown resource (for the owner) | `404` | `not_found` | none |
 | Invalid create/query/body input | `400` | `invalid_request` | none |
@@ -198,7 +246,10 @@ relevant mapping is:
 
 Messages are safe to display and never contain bearer tokens, token hashes, credential
 material, personal attributes or remote document bytes. The challenge header is documented in
-the OpenAPI responses of every protected operation.
+the OpenAPI responses of every protected operation. A protected route answers `401` with the
+same body and challenge whether the attempted credential was a bearer token or a cookie, so
+the response cannot be used to learn which credential path failed; the session-only
+`/auth/me` route answers `401` without the bearer challenge.
 
 ## 6. Secret and sensitive-data handling
 
@@ -261,6 +312,14 @@ trail is not exposed over HTTP; it is read by operators from the database.
   remote address; in a proxy deployment every browser presents the proxy's address, so the
   twenty-attempt client window is effectively global. `X-Forwarded-For` is deliberately not
   trusted as a limiter key.
+- **A credential revoked during an import fetch is not re-checked.** The actor is resolved once
+  when a protected request enters the route and is passed to the importer, which writes after
+  its bounded outbound fetch. Before issue #89 the importer re-authenticated the raw token at
+  write time, so a token revoked mid-fetch stopped that write; the actor boundary trades that
+  for the request-scoped guarantee. The window is bounded by the fetch timeout (15 s of total
+  redirect budget by default), and a token revoked mid-fetch still stops every subsequent
+  request. Re-validating the credential before the commit would need a revalidation seam on the
+  actor and is deferred.
 - **Provider administration is operator-only.** The API does not expose provider provisioning,
   token issuance for a new provider, or provider deletion.
 - **Denied attempts are not audited.** The audit trail records successful mutations and token
@@ -299,7 +358,22 @@ trail is not exposed over HTTP; it is read by operators from the database.
   attributes (`HttpOnly`, `SameSite`, `Path`, `Max-Age`, conditional `Secure`), `/auth/me`,
   logout revocation, expiry, both rate-limited and cross-origin refusals, absence of bearer
   token issuance, and public reads plus bearer writes staying available without the login
-  configuration.
+  configuration. Its logout CSRF tests pin the negative branch: a missing, wrong or
+  session-foreign `X-CSRF-Token` answers `403 csrf_failed` without revoking the session or
+  expiring the cookie, and a logout with no live session needs no token and answers `204`.
+- `src/auth/admin-auth.test.ts` covers the session CSRF binding directly: only the token
+  minted with the live session matches, empty and over-long values are refused, an unknown or
+  revoked session is `session_missing`, and the session resolves to the same provider actor a
+  bearer token resolves to.
+- `src/api/session-writes.test.ts` covers the dual transport end to end: a session creates,
+  edits, versions, publishes, imports and correlates; a cookie write without its CSRF token, a
+  wrong or foreign token and a cross-origin write all answer `403 csrf_failed` and write
+  nothing; every protected state-changing route in the route table is checked for that refusal;
+  a legacy bearer still works; an explicit invalid bearer plus a valid cookie answers `401` and
+  never falls back; an explicit bearer wins over a cookie; expiry and logout revocation answer
+  `401`; a session cannot mutate another provider's rulebook (`403`) or forge a provider id
+  through the body; audit rows are attributed to the session's provider; public reads stay
+  anonymous.
 - `src/api/discovery.test.ts` verifies that issuer discovery authenticates before any
   discovery work, maps the shared bounded-fetch failures and validates its response against
   the generated contract; `src/discovery/discover.test.ts` covers the SSRF, size,

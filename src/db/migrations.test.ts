@@ -436,4 +436,41 @@ describe('registry migrations', () => {
       database.close()
     }
   })
+
+  test('backfills a CSRF token for sessions created before the column existed', () => {
+    const database = createDatabase()
+    try {
+      applyMigrations(database, { now: () => FIXED_NOW })
+      const csrfMigration = MIGRATIONS.find(
+        (migration) => migration.version === '0005_admin_session_csrf',
+      )
+      if (csrfMigration === undefined) {
+        throw new Error('missing the admin-session CSRF migration')
+      }
+
+      // Recreate the pre-migration shape: no column, and a live session row
+      // that predates it. The migration's backfill must give every such row a
+      // random token instead of leaving it unable to authorize a write.
+      database.exec('ALTER TABLE admin_sessions DROP COLUMN csrf_token')
+      database.exec('PRAGMA foreign_keys = OFF')
+      database
+        .query(
+          `INSERT INTO admin_sessions
+             (session_hash, provider_id, auth_fingerprint, created_at, expires_at, revoked_at)
+           VALUES (?, ?, ?, ?, ?, NULL)`,
+        )
+        .run('a'.repeat(64), 'legacy-provider', 'b'.repeat(64), FIXED_NOW, FIXED_NOW)
+
+      database.transaction(() => {
+        database.exec(csrfMigration.sql)
+      })()
+
+      const row = database
+        .query<{ csrf_token: string }, []>('SELECT csrf_token FROM admin_sessions')
+        .get()
+      expect(row?.csrf_token).toMatch(/^[0-9a-f]{64}$/)
+    } finally {
+      database.close()
+    }
+  })
 })

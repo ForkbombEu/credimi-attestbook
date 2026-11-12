@@ -10,6 +10,7 @@ import {
   AdminAuth,
   type AdminLoginConfig,
   LoginRateLimiter,
+  hashAdminSessionId,
 } from '../auth'
 import { provisionProvider } from '../registry/bootstrap'
 import { createRegistryFixture, type RegistryFixture } from '../registry/test-support'
@@ -148,13 +149,16 @@ function tokenCount(harness: Harness): number {
   )
 }
 
-async function successfulLogin(harness: Harness): Promise<{ response: Response; cookie: string }> {
+async function successfulLogin(
+  harness: Harness,
+): Promise<{ response: Response; cookie: string; csrfToken: string }> {
   const response = await postLogin(harness.app, {
     username: 'uat-admin',
     password: PASSWORD,
   })
   expect(response.status).toBe(200)
-  return { response, cookie: sessionCookie(response) }
+  const body = await json<{ data: { csrfToken: string } }>(response)
+  return { response, cookie: sessionCookie(response), csrfToken: body.data.csrfToken }
 }
 
 describe('administrator login', () => {
@@ -299,11 +303,12 @@ describe('administrator session reads and logout', () => {
 
   test('logout revokes the server-side session and expires the cookie', async () => {
     const harness = setup()
-    const { cookie } = await successfulLogin(harness)
+    const { cookie, csrfToken } = await successfulLogin(harness)
+    const headers = { cookie, 'x-csrf-token': csrfToken }
 
     const logout = await harness.app.request('/api/v1/auth/logout', {
       method: 'POST',
-      headers: { cookie },
+      headers,
     })
     expect(logout.status).toBe(204)
     expect(await logout.text()).toBe('')
@@ -321,18 +326,87 @@ describe('administrator session reads and logout', () => {
     // Repeated logout is idempotent and still succeeds.
     const again = await harness.app.request('/api/v1/auth/logout', {
       method: 'POST',
-      headers: { cookie },
+      headers,
     })
     expect(again.status).toBe(204)
   })
 
-  test('rejects a cross-origin logout without revoking the session', async () => {
+  test('refuses logout of a live session without its CSRF token', async () => {
     const harness = setup()
     const { cookie } = await successfulLogin(harness)
 
     const response = await harness.app.request('/api/v1/auth/logout', {
       method: 'POST',
-      headers: { cookie, origin: 'https://evil.example', 'sec-fetch-site': 'cross-site' },
+      headers: { cookie },
+    })
+    expect(response.status).toBe(403)
+    expect((await errorJson(response)).error.code).toBe('csrf_failed')
+    // A refused logout must not expire the cookie or revoke the session.
+    expect(loginHeaders(response)).not.toContain('Max-Age=0')
+
+    const stillAuthenticated = await harness.app.request('/api/v1/auth/me', {
+      headers: { cookie },
+    })
+    expect(stillAuthenticated.status).toBe(200)
+
+    const sessionValue = cookie.split('=')[1] ?? ''
+    const row = harness.fixture.database
+      .query<{ revoked_at: string | null }, [string]>(
+        'SELECT revoked_at FROM admin_sessions WHERE session_hash = ?',
+      )
+      .get(hashAdminSessionId(sessionValue))
+    expect(row?.revoked_at).toBeNull()
+  })
+
+  test('refuses logout with a wrong or foreign CSRF token', async () => {
+    const harness = setup()
+    const first = await successfulLogin(harness)
+    // Logging in again without sending the first cookie creates a second live
+    // session instead of rotating the first one, so the second token is a
+    // valid token for a different session.
+    const second = await successfulLogin(harness)
+
+    for (const token of ['not-the-session-token', second.csrfToken]) {
+      const response = await harness.app.request('/api/v1/auth/logout', {
+        method: 'POST',
+        headers: { cookie: first.cookie, 'x-csrf-token': token },
+      })
+      expect(response.status, `logout with ${token}`).toBe(403)
+      expect((await errorJson(response)).error.code).toBe('csrf_failed')
+      expect(loginHeaders(response)).not.toContain('Max-Age=0')
+    }
+
+    const stillAuthenticated = await harness.app.request('/api/v1/auth/me', {
+      headers: { cookie: first.cookie },
+    })
+    expect(stillAuthenticated.status).toBe(200)
+  })
+
+  test('logout without a live session needs no CSRF token', async () => {
+    const harness = setup()
+
+    const anonymous = await harness.app.request('/api/v1/auth/logout', { method: 'POST' })
+    expect(anonymous.status).toBe(204)
+
+    const unknown = await harness.app.request('/api/v1/auth/logout', {
+      method: 'POST',
+      headers: { cookie: `${ADMIN_SESSION_COOKIE_NAME}=unknown-session-id` },
+    })
+    expect(unknown.status).toBe(204)
+  })
+
+  test('rejects a cross-origin logout without revoking the session', async () => {
+    const harness = setup()
+    const { cookie, csrfToken } = await successfulLogin(harness)
+
+    const response = await harness.app.request('/api/v1/auth/logout', {
+      method: 'POST',
+      headers: {
+        cookie,
+        'x-csrf-token': csrfToken,
+        origin: 'https://evil.example',
+        'sec-fetch-site': 'cross-site',
+      },
     })
     expect(response.status).toBe(403)
     expect((await errorJson(response)).error.code).toBe('forbidden')

@@ -13,7 +13,7 @@ import {
   RULEBOOK_VERSION_MEDIA_TYPE,
   type RulebookVersionDocument,
 } from './versioning'
-import type { JsonObject, Rulebook } from './types'
+import type { AuthenticatedActor, JsonObject, Rulebook } from './types'
 
 let fixture: RegistryFixture | undefined
 
@@ -49,8 +49,8 @@ function provision(suffix: string) {
 }
 
 /** Creates a rulebook with attestation types, an attestation schema and a rulebook-level schema. */
-function createSeedRulebook(registry: Registry, token: string): Rulebook {
-  const rulebook = registry.createRulebook(token, {
+function createSeedRulebook(registry: Registry, actor: AuthenticatedActor): Rulebook {
+  const rulebook = registry.createRulebook(actor, {
     name: 'PID Rulebook',
     description: 'Person Identification Data',
     sourceUrl: 'https://example.org/catalog/pid',
@@ -70,13 +70,13 @@ function createSeedRulebook(registry: Registry, token: string): Rulebook {
   if (pid === undefined) {
     throw new Error('expected the created attestation')
   }
-  registry.addSchemaReference(token, rulebook.id, {
+  registry.addSchemaReference(actor, rulebook.id, {
     formatIdentifier: 'dc+sd-jwt',
     uri: 'https://example.org/schemas/pid.json',
     integrity: 'sha256-abc123',
     attestationId: pid.id,
   })
-  registry.addSchemaReference(token, rulebook.id, {
+  registry.addSchemaReference(actor, rulebook.id, {
     formatIdentifier: 'vc+sd-jwt',
     uri: 'https://example.org/schemas/rulebook.json',
   })
@@ -101,10 +101,10 @@ function readAudit(action: string) {
 describe('rulebook version snapshots', () => {
   test('creates a deterministic draft version with digest, provenance and exact bytes', () => {
     const { registry, database } = setup()
-    const { token } = provision('a')
-    const rulebook = createSeedRulebook(registry, token.secret)
+    const { actor } = provision('a')
+    const rulebook = createSeedRulebook(registry, actor)
 
-    const version = registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
+    const version = registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
 
     expect(version.status).toBe('draft')
     expect(version.publishedAt).toBeNull()
@@ -198,10 +198,10 @@ describe('rulebook version snapshots', () => {
 
   test('uses the supplied version provenance and keeps public reads token-free', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = createSeedRulebook(registry, token.secret)
+    const { actor } = provision('a')
+    const rulebook = createSeedRulebook(registry, actor)
 
-    registry.createRulebookVersion(token.secret, rulebook.id, {
+    registry.createRulebookVersion(actor, rulebook.id, {
       version: '2.0',
       provenance: { importedFrom: 'remote-json', fetchedAt: '2026-01-01T00:00:00.000Z' },
     })
@@ -218,42 +218,38 @@ describe('rulebook version snapshots', () => {
 
   test('rejects duplicate and malformed version labels as typed errors', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = registry.createRulebook(token.secret, {
+    const { actor } = provision('a')
+    const rulebook = registry.createRulebook(actor, {
       name: 'Labels',
       applicableSpec: 'ts11@1.0.1',
     })
 
-    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
+    registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
     expectRegistryError(
-      () => registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' }),
+      () => registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' }),
       'conflict',
     )
 
     for (const candidate of ['v1.0', '1', '1.0.0.0', '01.0', '1.0-beta', '1.0.0-rc.1']) {
       expectRegistryError(
-        () => registry.createRulebookVersion(token.secret, rulebook.id, { version: candidate }),
+        () => registry.createRulebookVersion(actor, rulebook.id, { version: candidate }),
         'invalid_input',
       )
     }
     expectRegistryError(
       () =>
-        registry.createRulebookVersion(token.secret, rulebook.id, {
+        registry.createRulebookVersion(actor, rulebook.id, {
           version: '2.0',
           provenance: [] as unknown as JsonObject,
         }),
       'invalid_input',
     )
     expectRegistryError(
-      () => registry.createRulebookVersion(token.secret, 'missing-rulebook', { version: '1.0' }),
+      () => registry.createRulebookVersion(actor, 'missing-rulebook', { version: '1.0' }),
       'not_found',
     )
     expect(() =>
-      registry.createRulebookVersion(
-        token.secret,
-        rulebook.id,
-        null as unknown as { version: string },
-      ),
+      registry.createRulebookVersion(actor, rulebook.id, null as unknown as { version: string }),
     ).toThrow()
 
     expect(registry.listRulebookVersions(rulebook.id)).toHaveLength(1)
@@ -261,23 +257,23 @@ describe('rulebook version snapshots', () => {
 
   test('refreshes a draft snapshot and deduplicates identical bytes', () => {
     const { registry, database } = setup()
-    const { token } = provision('a')
-    const rulebook = createSeedRulebook(registry, token.secret)
-    const draft = registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
+    const { actor } = provision('a')
+    const rulebook = createSeedRulebook(registry, actor)
+    const draft = registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
 
     // Unchanged content is a no-op: same digest, no second artifact, no audit.
-    expect(registry.refreshDraftRulebookVersion(token.secret, rulebook.id, '1.0')).toEqual(draft)
+    expect(registry.refreshDraftRulebookVersion(actor, rulebook.id, '1.0')).toEqual(draft)
     expect(
       database.query<{ count: number }, []>('SELECT COUNT(*) AS count FROM artifacts').get()?.count,
     ).toBe(1)
     expect(readAudit('version.refresh')).toHaveLength(0)
 
-    registry.addAttestation(token.secret, rulebook.id, {
+    registry.addAttestation(actor, rulebook.id, {
       name: 'Residence Permit',
       attestationLoS: 'iso_18045_high',
       bindingType: 'key',
     })
-    const refreshed = registry.refreshDraftRulebookVersion(token.secret, rulebook.id, '1.0')
+    const refreshed = registry.refreshDraftRulebookVersion(actor, rulebook.id, '1.0')
     expect(refreshed.status).toBe('draft')
     expect(refreshed.contentDigest).not.toBe(draft.contentDigest)
     expect(refreshed.id).toBe(draft.id)
@@ -306,7 +302,7 @@ describe('rulebook version snapshots', () => {
     })
 
     expectRegistryError(
-      () => registry.refreshDraftRulebookVersion(token.secret, rulebook.id, '9.9'),
+      () => registry.refreshDraftRulebookVersion(actor, rulebook.id, '9.9'),
       'not_found',
     )
   })
@@ -315,11 +311,11 @@ describe('rulebook version snapshots', () => {
 describe('publication lifecycle and immutability', () => {
   test('publishes a draft version and freezes it in the service and the database', () => {
     const { registry, database } = setup()
-    const { token } = provision('a')
-    const rulebook = createSeedRulebook(registry, token.secret)
-    const draft = registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
+    const { actor } = provision('a')
+    const rulebook = createSeedRulebook(registry, actor)
+    const draft = registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
 
-    const published = registry.publishRulebookVersion(token.secret, rulebook.id, '1.0')
+    const published = registry.publishRulebookVersion(actor, rulebook.id, '1.0')
     const publishedAt = published.publishedAt
     if (publishedAt === null) {
       throw new Error('expected a publication timestamp')
@@ -345,21 +341,21 @@ describe('publication lifecycle and immutability', () => {
 
     // Service-level immutability.
     expectRegistryError(
-      () => registry.publishRulebookVersion(token.secret, rulebook.id, '1.0'),
+      () => registry.publishRulebookVersion(actor, rulebook.id, '1.0'),
       'immutable',
     )
     expectRegistryError(
-      () => registry.refreshDraftRulebookVersion(token.secret, rulebook.id, '1.0'),
+      () => registry.refreshDraftRulebookVersion(actor, rulebook.id, '1.0'),
       'immutable',
     )
     expectRegistryError(
-      () => registry.updateRulebook(token.secret, rulebook.id, { name: 'Changed' }),
+      () => registry.updateRulebook(actor, rulebook.id, { name: 'Changed' }),
       'immutable',
     )
-    expectRegistryError(() => registry.deleteRulebook(token.secret, rulebook.id), 'immutable')
+    expectRegistryError(() => registry.deleteRulebook(actor, rulebook.id), 'immutable')
     expectRegistryError(
       () =>
-        registry.addAttestation(token.secret, rulebook.id, {
+        registry.addAttestation(actor, rulebook.id, {
           name: 'New',
           attestationLoS: 'iso_18045_high',
           bindingType: 'key',
@@ -448,36 +444,36 @@ describe('publication lifecycle and immutability', () => {
 
   test('rejects publishing a leftover draft while the rulebook is published', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = createSeedRulebook(registry, token.secret)
-    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
-    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.1' })
-    registry.publishRulebookVersion(token.secret, rulebook.id, '1.1')
+    const { actor } = provision('a')
+    const rulebook = createSeedRulebook(registry, actor)
+    registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
+    registry.createRulebookVersion(actor, rulebook.id, { version: '1.1' })
+    registry.publishRulebookVersion(actor, rulebook.id, '1.1')
 
     expectRegistryError(
-      () => registry.publishRulebookVersion(token.secret, rulebook.id, '1.0'),
+      () => registry.publishRulebookVersion(actor, rulebook.id, '1.0'),
       'immutable',
     )
     expect(registry.getRulebookVersion(rulebook.id, '1.1')?.status).toBe('published')
 
     // Creating the next version reopens the working copy; only then can the
     // leftover draft transition to published.
-    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.2' })
-    const published = registry.publishRulebookVersion(token.secret, rulebook.id, '1.0')
+    registry.createRulebookVersion(actor, rulebook.id, { version: '1.2' })
+    const published = registry.publishRulebookVersion(actor, rulebook.id, '1.0')
     expect(published.status).toBe('published')
     expect(registry.getRulebookVersion(rulebook.id, '1.1')?.status).toBe('historical')
   })
 
   test('publishing a newer version supersedes the previous one and reopens the rulebook', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = createSeedRulebook(registry, token.secret)
+    const { actor } = provision('a')
+    const rulebook = createSeedRulebook(registry, actor)
 
-    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
-    const first = registry.publishRulebookVersion(token.secret, rulebook.id, '1.0')
+    registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
+    const first = registry.publishRulebookVersion(actor, rulebook.id, '1.0')
 
     // Authoring the next version reopens the working copy...
-    const secondDraft = registry.createRulebookVersion(token.secret, rulebook.id, {
+    const secondDraft = registry.createRulebookVersion(actor, rulebook.id, {
       version: '2.0',
     })
     expect(registry.getRulebook(rulebook.id)?.publicationStatus).toBe('draft')
@@ -485,22 +481,22 @@ describe('publication lifecycle and immutability', () => {
 
     // ... while the previous published version stays immutable.
     expectRegistryError(
-      () => registry.refreshDraftRulebookVersion(token.secret, rulebook.id, '1.0'),
+      () => registry.refreshDraftRulebookVersion(actor, rulebook.id, '1.0'),
       'immutable',
     )
 
-    registry.updateRulebook(token.secret, rulebook.id, { name: 'PID Rulebook v2' })
+    registry.updateRulebook(actor, rulebook.id, { name: 'PID Rulebook v2' })
 
     // Publishing a snapshot that no longer matches the draft content is refused.
     expectRegistryError(
-      () => registry.publishRulebookVersion(token.secret, rulebook.id, '2.0'),
+      () => registry.publishRulebookVersion(actor, rulebook.id, '2.0'),
       'conflict',
     )
 
-    const refreshed = registry.refreshDraftRulebookVersion(token.secret, rulebook.id, '2.0')
+    const refreshed = registry.refreshDraftRulebookVersion(actor, rulebook.id, '2.0')
     expect(refreshed.contentDigest).not.toBe(secondDraft.contentDigest)
 
-    const second = registry.publishRulebookVersion(token.secret, rulebook.id, '2.0')
+    const second = registry.publishRulebookVersion(actor, rulebook.id, '2.0')
     expect(second.status).toBe('published')
     expect(registry.getRulebook(rulebook.id)?.publicationStatus).toBe('published')
 
@@ -527,27 +523,27 @@ describe('publication lifecycle and immutability', () => {
 
     // A superseded (historical) version is never mutable again.
     expectRegistryError(
-      () => registry.publishRulebookVersion(token.secret, rulebook.id, '1.0'),
+      () => registry.publishRulebookVersion(actor, rulebook.id, '1.0'),
       'immutable',
     )
     expectRegistryError(
-      () => registry.refreshDraftRulebookVersion(token.secret, rulebook.id, '1.0'),
+      () => registry.refreshDraftRulebookVersion(actor, rulebook.id, '1.0'),
       'immutable',
     )
   })
 
   test('refuses to delete a rulebook whose published versions would be destroyed', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = createSeedRulebook(registry, token.secret)
+    const { actor } = provision('a')
+    const rulebook = createSeedRulebook(registry, actor)
 
-    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
-    registry.publishRulebookVersion(token.secret, rulebook.id, '1.0')
-    registry.createRulebookVersion(token.secret, rulebook.id, { version: '2.0' })
+    registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
+    registry.publishRulebookVersion(actor, rulebook.id, '1.0')
+    registry.createRulebookVersion(actor, rulebook.id, { version: '2.0' })
 
     // The working copy is a draft, but the published 1.0 row must survive.
     expect(registry.getRulebook(rulebook.id)?.publicationStatus).toBe('draft')
-    expectRegistryError(() => registry.deleteRulebook(token.secret, rulebook.id), 'immutable')
+    expectRegistryError(() => registry.deleteRulebook(actor, rulebook.id), 'immutable')
     expect(registry.getRulebook(rulebook.id)).not.toBeNull()
   })
 
@@ -555,46 +551,30 @@ describe('publication lifecycle and immutability', () => {
     const { registry } = setup()
     const owner = provision('owner')
     const stranger = provision('stranger')
-    const rulebook = createSeedRulebook(registry, owner.token.secret)
-    const draft = registry.createRulebookVersion(owner.token.secret, rulebook.id, {
+    const rulebook = createSeedRulebook(registry, owner.actor)
+    const draft = registry.createRulebookVersion(owner.actor, rulebook.id, {
       version: '1.0',
     })
 
-    // No token, an unknown token and a revoked token are all unauthorized.
-    expectRegistryError(
-      () => registry.createRulebookVersion('', rulebook.id, { version: '2.0' }),
-      'unauthorized',
-    )
-    expectRegistryError(
-      () => registry.createRulebookVersion('att_unknown', rulebook.id, { version: '2.0' }),
-      'unauthorized',
-    )
-    const revoked = registry.issueToken(owner.token.secret, 'revoked')
-    registry.revokeToken(owner.token.secret, revoked.id)
-    expectRegistryError(
-      () => registry.createRulebookVersion(revoked.secret, rulebook.id, { version: '2.0' }),
-      'unauthorized',
-    )
-    expectRegistryError(
-      () => registry.refreshDraftRulebookVersion(revoked.secret, rulebook.id, '1.0'),
-      'unauthorized',
-    )
-    expectRegistryError(
-      () => registry.publishRulebookVersion(revoked.secret, rulebook.id, '1.0'),
-      'unauthorized',
-    )
+    // A missing, unknown or revoked bearer token is refused when the transport
+    // resolves it, so no write method is ever reached with a forged actor.
+    expectRegistryError(() => registry.authenticateBearer(''), 'unauthorized')
+    expectRegistryError(() => registry.authenticateBearer('att_unknown'), 'unauthorized')
+    const revoked = registry.issueToken(owner.actor, 'revoked')
+    registry.revokeToken(owner.actor, revoked.id)
+    expectRegistryError(() => registry.authenticateBearer(revoked.secret), 'unauthorized')
 
     // Another provider can read the catalogue but cannot mutate the versions.
     expectRegistryError(
-      () => registry.createRulebookVersion(stranger.token.secret, rulebook.id, { version: '2.0' }),
+      () => registry.createRulebookVersion(stranger.actor, rulebook.id, { version: '2.0' }),
       'forbidden',
     )
     expectRegistryError(
-      () => registry.refreshDraftRulebookVersion(stranger.token.secret, rulebook.id, '1.0'),
+      () => registry.refreshDraftRulebookVersion(stranger.actor, rulebook.id, '1.0'),
       'forbidden',
     )
     expectRegistryError(
-      () => registry.publishRulebookVersion(stranger.token.secret, rulebook.id, '1.0'),
+      () => registry.publishRulebookVersion(stranger.actor, rulebook.id, '1.0'),
       'forbidden',
     )
 
@@ -608,9 +588,9 @@ describe('publication lifecycle and immutability', () => {
 
   test('rejects malformed version identifiers and digests on reads', () => {
     const { registry } = setup()
-    const { token } = provision('a')
-    const rulebook = createSeedRulebook(registry, token.secret)
-    registry.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
+    const { actor } = provision('a')
+    const rulebook = createSeedRulebook(registry, actor)
+    registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
 
     expectRegistryError(() => registry.listRulebookVersions(''), 'invalid_input')
     expectRegistryError(() => registry.getRulebookVersion(rulebook.id, 'latest'), 'invalid_input')
@@ -637,16 +617,16 @@ describe('version persistence', () => {
 
     try {
       const first = new Registry({ database })
-      const { token } = provisionProvider(database, {
+      const { actor } = provisionProvider(database, {
         name: 'Persistent Provider',
         publicationAuthority: 'account-persistent',
       })
-      const rulebook = first.createRulebook(token.secret, {
+      const rulebook = first.createRulebook(actor, {
         name: 'Persistent Rulebook',
         applicableSpec: 'ts11@1.0.1',
       })
-      const draft = first.createRulebookVersion(token.secret, rulebook.id, { version: '1.0' })
-      const published = first.publishRulebookVersion(token.secret, rulebook.id, '1.0')
+      const draft = first.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
+      const published = first.publishRulebookVersion(actor, rulebook.id, '1.0')
       const bytes = first.getRulebookVersionContent(rulebook.id, '1.0')?.bytes
 
       database.close()

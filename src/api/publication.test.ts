@@ -69,8 +69,8 @@ function setup(): Setup {
     name: 'Other Provider',
     publicationAuthority: 'other-publication-provider',
   })
-  const rulebook = fixture.registry.createRulebook(owner.token.secret, content())
-  fixture.registry.createRulebookVersion(owner.token.secret, rulebook.id, { version: '1.0' })
+  const rulebook = fixture.registry.createRulebook(owner.actor, content())
+  fixture.registry.createRulebookVersion(owner.actor, rulebook.id, { version: '1.0' })
   return {
     app: createApp({ registry: fixture.registry }),
     database: fixture.database,
@@ -231,7 +231,7 @@ describe('publication export API', () => {
     const { app, token, registry } = setup()
     // The importer stores source-internal and untrusted fields in provenance;
     // the public manifest must expose only the stable projection.
-    const imported = registry.createRulebook(token, {
+    const imported = registry.createRulebook(registry.authenticateBearer(token), {
       ...content('Imported Rulebook'),
       provenance: {
         adapter: 'ts11',
@@ -248,7 +248,9 @@ describe('publication export API', () => {
         entryIndex: 2,
       },
     })
-    registry.createRulebookVersion(token, imported.id, { version: '1.0' })
+    registry.createRulebookVersion(registry.authenticateBearer(token), imported.id, {
+      version: '1.0',
+    })
     expect((await publish(app, imported.id, '1.0', token)).status).toBe(200)
 
     const manifest = await readManifest(app, imported.id, '1.0')

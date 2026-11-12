@@ -102,12 +102,12 @@ describe('generated OpenAPI document', () => {
     }
   })
 
-  test('the import preview operation requires the bearer scheme', () => {
+  test('the import preview accepts either protected-transport scheme', () => {
     const preview = document.paths['/api/v1/imports/preview']?.['post']
-    expect(preview?.['security']).toEqual([{ bearerAuth: [] }])
+    expect(preview?.['security']).toEqual([{ bearerAuth: [] }, { sessionAuth: [] }])
   })
 
-  test('operations declare their bearer or session security scheme', () => {
+  test('operations declare their bearer and/or session security scheme', () => {
     const securitySchemes = document.components['securitySchemes'] as Record<string, unknown>
     expect(securitySchemes['bearerAuth']).toMatchObject({ type: 'http', scheme: 'bearer' })
     expect(securitySchemes['sessionAuth']).toMatchObject({
@@ -119,7 +119,9 @@ describe('generated OpenAPI document', () => {
     for (const route of API_ROUTES) {
       const operation = operationFor(route)
       if (route.security) {
-        expect(operation['security']).toEqual([{ bearerAuth: [] }])
+        // Alternative requirements: a bearer token or the session cookie
+        // authenticates the same provider actor.
+        expect(operation['security']).toEqual([{ bearerAuth: [] }, { sessionAuth: [] }])
       } else if (route.sessionAuth) {
         expect(operation['security']).toEqual([{ sessionAuth: [] }])
       } else {
@@ -149,6 +151,21 @@ describe('generated OpenAPI document', () => {
           schema: { $ref: '#/components/schemas/ErrorEnvelope' },
         },
       })
+    }
+  })
+
+  test('cookie-authenticated state-changing operations document the CSRF header', () => {
+    for (const route of API_ROUTES.filter(
+      (candidate) => (candidate.security || candidate.sessionAuth) && candidate.method !== 'get',
+    )) {
+      const operation = operationFor(route)
+      const parameters = (operation['parameters'] ?? []) as { name?: string; in?: string }[]
+      expect(
+        parameters.some(
+          (parameter) => parameter.name === 'X-CSRF-Token' && parameter.in === 'header',
+        ),
+        route.operationId,
+      ).toBe(true)
     }
   })
 

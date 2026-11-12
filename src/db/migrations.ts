@@ -13,6 +13,7 @@ import initialRegistry from '../../migrations/0001_registry.sql' with { type: 't
 import versionsAndArtifacts from '../../migrations/0002_versions_artifacts.sql' with { type: 'text' }
 import importIdentity from '../../migrations/0003_import_identity.sql' with { type: 'text' }
 import adminSessions from '../../migrations/0004_admin_sessions.sql' with { type: 'text' }
+import adminSessionCsrf from '../../migrations/0005_admin_session_csrf.sql' with { type: 'text' }
 
 export interface Migration {
   /** Stable, ordered version such as `0001_registry`. */
@@ -38,6 +39,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: '0002_versions_artifacts', sql: versionsAndArtifacts },
   { version: '0003_import_identity', sql: importIdentity },
   { version: '0004_admin_sessions', sql: adminSessions },
+  { version: '0005_admin_session_csrf', sql: adminSessionCsrf },
 ]
 
 export function migrationChecksum(sql: string): string {

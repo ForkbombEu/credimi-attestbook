@@ -43,7 +43,7 @@ describe('provider ownership and cross-provider isolation', () => {
     const owner = provision('owner')
     const stranger = provision('stranger')
 
-    const rulebook = registry.createRulebook(owner.token.secret, {
+    const rulebook = registry.createRulebook(owner.actor, {
       name: 'Owner Rulebook',
       applicableSpec: 'ts11@1.0.1',
       attestations: [{ name: 'PID', attestationLoS: 'iso_18045_high', bindingType: 'key' }],
@@ -52,7 +52,7 @@ describe('provider ownership and cross-provider isolation', () => {
     if (attestation === undefined) {
       throw new Error('expected the created attestation')
     }
-    const reference = registry.addSchemaReference(owner.token.secret, rulebook.id, {
+    const reference = registry.addSchemaReference(owner.actor, rulebook.id, {
       formatIdentifier: 'dc+sd-jwt',
       uri: 'https://example.org/schema.json',
       attestationId: attestation.id,
@@ -79,16 +79,13 @@ describe('provider ownership and cross-provider isolation', () => {
 
     // A different provider can read but never mutate the rulebook.
     expectRegistryError(
-      () => registry.updateRulebook(stranger.token.secret, rulebook.id, { name: 'Hijacked' }),
+      () => registry.updateRulebook(stranger.actor, rulebook.id, { name: 'Hijacked' }),
       'forbidden',
     )
-    expectRegistryError(
-      () => registry.deleteRulebook(stranger.token.secret, rulebook.id),
-      'forbidden',
-    )
+    expectRegistryError(() => registry.deleteRulebook(stranger.actor, rulebook.id), 'forbidden')
     expectRegistryError(
       () =>
-        registry.addAttestation(stranger.token.secret, rulebook.id, {
+        registry.addAttestation(stranger.actor, rulebook.id, {
           name: 'Hijacked',
           attestationLoS: 'iso_18045_high',
           bindingType: 'key',
@@ -97,18 +94,18 @@ describe('provider ownership and cross-provider isolation', () => {
     )
     expectRegistryError(
       () =>
-        registry.updateAttestation(stranger.token.secret, rulebook.id, attestation?.id ?? '', {
+        registry.updateAttestation(stranger.actor, rulebook.id, attestation?.id ?? '', {
           name: 'Hijacked',
         }),
       'forbidden',
     )
     expectRegistryError(
-      () => registry.removeAttestation(stranger.token.secret, rulebook.id, attestation?.id ?? ''),
+      () => registry.removeAttestation(stranger.actor, rulebook.id, attestation?.id ?? ''),
       'forbidden',
     )
     expectRegistryError(
       () =>
-        registry.addSchemaReference(stranger.token.secret, rulebook.id, {
+        registry.addSchemaReference(stranger.actor, rulebook.id, {
           formatIdentifier: 'dc+sd-jwt',
           uri: 'https://example.org/hijacked.json',
         }),
@@ -116,13 +113,13 @@ describe('provider ownership and cross-provider isolation', () => {
     )
     expectRegistryError(
       () =>
-        registry.updateSchemaReference(stranger.token.secret, rulebook.id, reference.id, {
+        registry.updateSchemaReference(stranger.actor, rulebook.id, reference.id, {
           uri: 'https://example.org/hijacked.json',
         }),
       'forbidden',
     )
     expectRegistryError(
-      () => registry.removeSchemaReference(stranger.token.secret, rulebook.id, reference.id),
+      () => registry.removeSchemaReference(stranger.actor, rulebook.id, reference.id),
       'forbidden',
     )
 
@@ -137,18 +134,11 @@ describe('provider ownership and cross-provider isolation', () => {
     const first = provision('first')
     const second = provision('second')
 
-    expect(registry.listTokens(first.token.secret).map((token) => token.id)).toEqual([
-      first.token.id,
-    ])
-    expect(registry.listTokens(second.token.secret).map((token) => token.id)).toEqual([
-      second.token.id,
-    ])
+    expect(registry.listTokens(first.actor).map((token) => token.id)).toEqual([first.token.id])
+    expect(registry.listTokens(second.actor).map((token) => token.id)).toEqual([second.token.id])
 
-    expectRegistryError(
-      () => registry.revokeToken(second.token.secret, first.token.id),
-      'not_found',
-    )
-    expect(registry.authenticate(first.token.secret).providerId).toBe(first.provider.id)
+    expectRegistryError(() => registry.revokeToken(second.actor, first.token.id), 'not_found')
+    expect(registry.authenticateBearer(first.token.secret).providerId).toBe(first.provider.id)
   })
 
   test('deleting the acting provider does not remove another provider', () => {
@@ -156,18 +146,18 @@ describe('provider ownership and cross-provider isolation', () => {
     const first = provision('first')
     const second = provision('second')
 
-    registry.deleteProvider(second.token.secret)
+    registry.deleteProvider(second.actor)
 
     expect(registry.getProvider(second.provider.id)).toBeNull()
     expect(registry.getProvider(first.provider.id)).toEqual(first.provider)
-    expect(registry.authenticate(first.token.secret).providerId).toBe(first.provider.id)
-    expect(() => registry.authenticate(second.token.secret)).toThrow('valid bearer token')
+    expect(registry.authenticateBearer(first.token.secret).providerId).toBe(first.provider.id)
+    expect(() => registry.authenticateBearer(second.token.secret)).toThrow('valid bearer token')
   })
 
   test('unauthenticated writes fail without changing the database', () => {
     const { registry, database } = setup()
     const owner = provision('owner')
-    const rulebook = registry.createRulebook(owner.token.secret, {
+    const rulebook = registry.createRulebook(owner.actor, {
       name: 'Stable',
       applicableSpec: 'ts11@1.0.1',
     })
@@ -175,20 +165,10 @@ describe('provider ownership and cross-provider isolation', () => {
       .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM audit_log')
       .get()?.count
 
+    // The transport refuses a missing, malformed or tampered bearer before any
+    // write method is reached, so the service never sees an unverified actor.
     for (const invalid of ['', 'att_invalid', `${owner.token.secret}tampered`]) {
-      expectRegistryError(
-        () => registry.updateRulebook(invalid, rulebook.id, { name: 'Hijacked' }),
-        'unauthorized',
-      )
-      expectRegistryError(() => registry.deleteRulebook(invalid, rulebook.id), 'unauthorized')
-      expectRegistryError(
-        () =>
-          registry.createRulebook(invalid, {
-            name: 'Hijacked',
-            applicableSpec: 'ts11@1.0.1',
-          }),
-        'unauthorized',
-      )
+      expectRegistryError(() => registry.authenticateBearer(invalid), 'unauthorized')
     }
 
     expect(registry.getRulebook(rulebook.id)).toEqual(rulebook)

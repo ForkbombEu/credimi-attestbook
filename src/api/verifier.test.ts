@@ -52,8 +52,8 @@ function setup(options: { readonly schemaContent?: string } = {}): Setup {
     name: 'Verifier HTTP Provider',
     publicationAuthority: 'verifier-http-authority',
   })
-  const token = provider.token.secret
-  const rulebook = fixture.registry.createRulebook(token, {
+  const actor = provider.actor
+  const rulebook = fixture.registry.createRulebook(actor, {
     name: 'HTTP Verifier Rulebook',
     description: 'HTTP verifier rulebook',
     applicableSpec: 'ts11@1.0.1',
@@ -72,14 +72,14 @@ function setup(options: { readonly schemaContent?: string } = {}): Setup {
   if (attestation === undefined) {
     throw new Error('test setup failed to create the attestation type')
   }
-  fixture.registry.addSchemaReference(token, rulebook.id, {
+  fixture.registry.addSchemaReference(actor, rulebook.id, {
     formatIdentifier: 'dc+sd-jwt',
     uri: SCHEMA_URI,
     integrity: sha256Sri(schemaContent),
     attestationId: attestation.id,
   })
-  const version = fixture.registry.createRulebookVersion(token, rulebook.id, { version: '1.0' })
-  fixture.registry.publishRulebookVersion(token, rulebook.id, '1.0')
+  const version = fixture.registry.createRulebookVersion(actor, rulebook.id, { version: '1.0' })
+  fixture.registry.publishRulebookVersion(actor, rulebook.id, '1.0')
 
   return {
     fixture,

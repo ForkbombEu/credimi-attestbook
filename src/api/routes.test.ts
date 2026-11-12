@@ -142,7 +142,7 @@ describe('rulebook read API', () => {
 
   test('filters by status and provider and paginates the filtered catalogue', async () => {
     const { app, registry, seeded } = setup()
-    registry.createRulebook(seeded.token, {
+    registry.createRulebook(seeded.actor, {
       name: 'Second Rulebook',
       applicableSpec: 'ts11@1.0.1',
     })

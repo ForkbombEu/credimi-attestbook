@@ -43,12 +43,12 @@ describe('import identities on rulebooks', () => {
   test('persists an import key and leaves locally authored rulebooks without one', () => {
     const { fixture, first } = setup()
 
-    const imported = fixture.registry.createRulebook(first.token.secret, {
+    const imported = fixture.registry.createRulebook(first.actor, {
       name: 'Imported',
       applicableSpec: 'ts11@1.0.1',
       importKey: IMPORT_KEY,
     })
-    const local = fixture.registry.createRulebook(first.token.secret, {
+    const local = fixture.registry.createRulebook(first.actor, {
       name: 'Authored locally',
       applicableSpec: 'ts11@1.0.1',
     })
@@ -60,14 +60,14 @@ describe('import identities on rulebooks', () => {
 
   test('rejects a duplicate import key for the same provider at the service boundary', () => {
     const { fixture, first } = setup()
-    fixture.registry.createRulebook(first.token.secret, {
+    fixture.registry.createRulebook(first.actor, {
       name: 'Imported',
       applicableSpec: 'ts11@1.0.1',
       importKey: IMPORT_KEY,
     })
 
     const error = catchRegistryError(() =>
-      fixture.registry.createRulebook(first.token.secret, {
+      fixture.registry.createRulebook(first.actor, {
         name: 'Duplicate',
         applicableSpec: 'ts11@1.0.1',
         importKey: IMPORT_KEY,
@@ -80,7 +80,7 @@ describe('import identities on rulebooks', () => {
 
   test('rejects a duplicate import key at the database boundary', () => {
     const { fixture, first } = setup()
-    fixture.registry.createRulebook(first.token.secret, {
+    fixture.registry.createRulebook(first.actor, {
       name: 'Imported',
       applicableSpec: 'ts11@1.0.1',
       importKey: IMPORT_KEY,
@@ -100,12 +100,12 @@ describe('import identities on rulebooks', () => {
   test('allows different providers to import the same external entry', () => {
     const { fixture, first, second } = setup()
 
-    const one = fixture.registry.createRulebook(first.token.secret, {
+    const one = fixture.registry.createRulebook(first.actor, {
       name: 'Imported',
       applicableSpec: 'ts11@1.0.1',
       importKey: IMPORT_KEY,
     })
-    const two = fixture.registry.createRulebook(second.token.secret, {
+    const two = fixture.registry.createRulebook(second.actor, {
       name: 'Imported',
       applicableSpec: 'ts11@1.0.1',
       importKey: IMPORT_KEY,
@@ -117,32 +117,30 @@ describe('import identities on rulebooks', () => {
 
   test('looks up an import identity only for the authenticated provider', () => {
     const { fixture, first, second } = setup()
-    const imported = fixture.registry.createRulebook(first.token.secret, {
+    const imported = fixture.registry.createRulebook(first.actor, {
       name: 'Imported',
       applicableSpec: 'ts11@1.0.1',
       importKey: IMPORT_KEY,
     })
 
-    expect(fixture.registry.findImportedRulebook(first.token.secret, IMPORT_KEY)?.id).toBe(
-      imported.id,
-    )
-    expect(fixture.registry.findImportedRulebook(second.token.secret, IMPORT_KEY)).toBeNull()
-    expect(fixture.registry.findImportedRulebook(first.token.secret, OTHER_IMPORT_KEY)).toBeNull()
+    expect(fixture.registry.findImportedRulebook(first.actor, IMPORT_KEY)?.id).toBe(imported.id)
+    expect(fixture.registry.findImportedRulebook(second.actor, IMPORT_KEY)).toBeNull()
+    expect(fixture.registry.findImportedRulebook(first.actor, OTHER_IMPORT_KEY)).toBeNull()
   })
 
   test('rejects a malformed import key and an invalid token', () => {
     const { fixture, first } = setup()
 
     expect(() =>
-      fixture.registry.createRulebook(first.token.secret, {
+      fixture.registry.createRulebook(first.actor, {
         name: 'Imported',
         applicableSpec: 'ts11@1.0.1',
         importKey: 'not-a-digest',
       }),
     ).toThrow(/importKey/)
 
-    expect(() => fixture.registry.findImportedRulebook('not-a-token', IMPORT_KEY)).toThrow()
-    expect(() => fixture.registry.findImportedRulebook(first.token.secret, 'not-a-digest')).toThrow(
+    expect(() => fixture.registry.authenticateBearer('not-a-token')).toThrow()
+    expect(() => fixture.registry.findImportedRulebook(first.actor, 'not-a-digest')).toThrow(
       /importKey/,
     )
   })
@@ -150,7 +148,7 @@ describe('import identities on rulebooks', () => {
   test('normalizes a create input exactly like a write, without writing', () => {
     const { fixture, first } = setup()
 
-    const prepared = fixture.registry.normalizeRulebookInput(first.token.secret, {
+    const prepared = fixture.registry.normalizeRulebookInput(first.actor, {
       name: '  Trimmed name  ',
       applicableSpec: ' ts11@1.0.1 ',
     })
@@ -162,19 +160,19 @@ describe('import identities on rulebooks', () => {
 
   test('keeps the import key on update and out of the version snapshot', () => {
     const { fixture, first } = setup()
-    const imported = fixture.registry.createRulebook(first.token.secret, {
+    const imported = fixture.registry.createRulebook(first.actor, {
       name: 'Imported',
       applicableSpec: 'ts11@1.0.1',
       importKey: IMPORT_KEY,
       provenance: { contentFingerprint: OTHER_IMPORT_KEY },
     })
 
-    const updated = fixture.registry.updateRulebook(first.token.secret, imported.id, {
+    const updated = fixture.registry.updateRulebook(first.actor, imported.id, {
       name: 'Renamed',
     })
     expect(updated.importKey).toBe(IMPORT_KEY)
 
-    fixture.registry.createRulebookVersion(first.token.secret, imported.id, { version: '1.0.0' })
+    fixture.registry.createRulebookVersion(first.actor, imported.id, { version: '1.0.0' })
     const content = fixture.registry.getRulebookVersionContent(imported.id, '1.0.0')
     const text = new TextDecoder().decode(content?.bytes)
     expect(text).not.toContain(IMPORT_KEY)

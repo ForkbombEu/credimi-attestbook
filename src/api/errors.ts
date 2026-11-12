@@ -11,6 +11,7 @@
 // payloads, credential material or remote document bytes.
 
 import { isCaptureAdapterError } from '../capture/adapters'
+import { isSessionAuthError } from '../auth/errors'
 import { isImportError } from '../import/errors'
 import type { ImportError, ImportErrorCode } from '../import/errors'
 import { isRegistryError } from '../registry/errors'
@@ -27,6 +28,7 @@ export const API_ERROR_CODES = [
   'invalid_request',
   'unauthorized',
   'forbidden',
+  'csrf_failed',
   'not_found',
   'conflict',
   'immutable',
@@ -167,6 +169,16 @@ export function toApiError(error: unknown): {
       challenge: error.challenge,
       ...(error.headers === undefined ? {} : { headers: error.headers }),
     }
+  }
+
+  if (isSessionAuthError(error)) {
+    // A missing, expired or revoked session is unauthenticated; a missing or
+    // wrong CSRF token is a refused state change. Neither body says whether a
+    // cookie existed.
+    if (error.code === 'csrf_failed') {
+      return { status: 403, body: errorEnvelope('csrf_failed', error.message) }
+    }
+    return { status: 401, body: errorEnvelope('unauthorized', error.message), challenge: true }
   }
 
   if (isCaptureAdapterError(error)) {

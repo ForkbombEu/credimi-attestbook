@@ -23,7 +23,12 @@
 
 import { isRegistryError } from '../registry/errors'
 import type { Registry } from '../registry/registry'
-import type { CreateRulebookInput, JsonObject, Rulebook } from '../registry/types'
+import type {
+  AuthenticatedActor,
+  CreateRulebookInput,
+  JsonObject,
+  Rulebook,
+} from '../registry/types'
 
 import { importError } from './errors'
 import {
@@ -205,8 +210,10 @@ export class RulebookImporter {
    * any write. New entries are created in one transaction; existing entries are
    * either an idempotent no-op or a reported conflict, never an overwrite.
    */
-  async import(accessToken: string, source: ImportSource): Promise<ImportResult> {
-    this.registry.authenticate(accessToken)
+  async import(actor: AuthenticatedActor, source: ImportSource): Promise<ImportResult> {
+    // The transport already resolved and verified this actor; the importer
+    // attributes every created draft to it and re-checks ownership through the
+    // registry. It never receives or mints a raw bearer token.
     const preview = await previewImport(source, this.options)
 
     const incompatible = preview.entries.filter((entry) => !entry.compatible)
@@ -236,11 +243,11 @@ export class RulebookImporter {
     }
 
     const outcomes = keyed.map(({ entry, entryKey }) =>
-      this.classifyEntry(accessToken, entry, preview, importedAt, entryKey),
+      this.classifyEntry(actor, entry, preview, importedAt, entryKey),
     )
 
     const createdRulebooks = this.createNewRulebooks(
-      accessToken,
+      actor,
       outcomes
         .filter((outcome) => outcome.disposition === 'created')
         .map((outcome) => outcome.input),
@@ -278,7 +285,7 @@ export class RulebookImporter {
   }
 
   private createNewRulebooks(
-    accessToken: string,
+    actor: AuthenticatedActor,
     inputs: readonly CreateRulebookInput[],
   ): readonly Rulebook[] {
     if (inputs.length === 0) {
@@ -287,7 +294,7 @@ export class RulebookImporter {
     try {
       // One transaction for all new entries: a registry refusal cannot leave
       // earlier entries behind as partial drafts.
-      return this.registry.createRulebooks(accessToken, inputs)
+      return this.registry.createRulebooks(actor, inputs)
     } catch (error) {
       if (isRegistryError(error) && (error.code === 'invalid_input' || error.code === 'conflict')) {
         throw importError(
@@ -304,7 +311,7 @@ export class RulebookImporter {
    * import key. Only an entry with no existing rulebook is written.
    */
   private classifyEntry(
-    accessToken: string,
+    actor: AuthenticatedActor,
     entry: ImportEntryPreview,
     preview: ImportPreview,
     importedAt: string,
@@ -314,13 +321,13 @@ export class RulebookImporter {
     // computed from the registry-normalized input (with a placeholder
     // provenance) and then written into the final provenance.
     const provisional = toCreateRulebookInput(entry, preview, importedAt, entryKey, '')
-    const contentFingerprint = this.normalizedContentFingerprint(accessToken, provisional)
+    const contentFingerprint = this.normalizedContentFingerprint(actor, provisional)
     const input: CreateRulebookInput = {
       ...provisional,
       provenance: buildProvenance(entry, preview, importedAt, contentFingerprint),
     }
 
-    const existing = this.registry.findImportedRulebook(accessToken, entryKey)
+    const existing = this.registry.findImportedRulebook(actor, entryKey)
     if (existing === null) {
       return {
         entry,
@@ -341,9 +348,12 @@ export class RulebookImporter {
    * later re-import of the same source compares like with like. Validation
    * failures use the same import rejection as a refused write.
    */
-  private normalizedContentFingerprint(accessToken: string, input: CreateRulebookInput): string {
+  private normalizedContentFingerprint(
+    actor: AuthenticatedActor,
+    input: CreateRulebookInput,
+  ): string {
     try {
-      const prepared = this.registry.normalizeRulebookInput(accessToken, input)
+      const prepared = this.registry.normalizeRulebookInput(actor, input)
       return importContentFingerprint(
         storedImportContent(prepared.rulebook, prepared.attestations, prepared.schemaReferences),
       )
