@@ -1,4 +1,4 @@
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 
@@ -46,7 +46,7 @@ describe('rulebook detail states', () => {
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Rulebook not found')
     expect(screen.getByRole('link', { name: 'Rulebook catalog' })).toHaveAttribute('href', '/')
-    expect(document.title).toBe('Rulebook not found · AttestBook')
+    await waitFor(() => expect(document.title).toBe('Rulebook not found · AttestBook'))
 
     await user.click(screen.getByRole('button', { name: 'Back to the catalog' }))
     expect(onNavigate).toHaveBeenCalledWith('/')
