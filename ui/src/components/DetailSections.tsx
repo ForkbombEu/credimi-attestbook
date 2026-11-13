@@ -1,4 +1,6 @@
-import { versionContentPath } from '../api'
+import { Fragment, useCallback, useEffect, useId, useRef, useState } from 'react'
+
+import { versionContentPath, type CatalogApi } from '../api'
 import { formatDate } from '../catalog'
 import {
   EVALUATION_SUPPORT,
@@ -10,11 +12,14 @@ import {
   attestationNameFor,
   describeReference,
   formatDigest,
+  hostedIntegrityState,
+  hostedSchemaDownloadName,
   latestVersion,
   referencesForAttestation,
   versionsNewestFirst,
+  type ReferenceWithHostedSchema,
 } from '../detail'
-import type { Rulebook, SchemaReference } from '../types'
+import type { HostedSchema, Rulebook, SchemaReference, VersionSchemaReferences } from '../types'
 
 import { CompatibilityBadge, StatusBadge } from './Badges'
 
@@ -45,56 +50,170 @@ function ExternalReference({ uri }: { readonly uri: string }) {
   )
 }
 
+/**
+ * One row of a schema-reference table. A rulebook working-copy reference has a
+ * registry id and an attestation id; a frozen version reference has neither,
+ * because the snapshot carries only the standard members.
+ */
+export interface SchemaReferenceRow extends ReferenceWithHostedSchema {
+  readonly key: string
+  readonly formatIdentifier: string
+  readonly uri: string
+  readonly attestationId?: string | null
+}
+
+/** The stored document kind in the product's exact terminology. */
+function hostedSchemaKindLabel(kind: HostedSchema['kind']): string {
+  return kind === 'json_schema_2020_12' ? 'JSON Schema 2020-12' : 'SD-JWT VC Type Metadata'
+}
+
+function ReferenceSource({ reference }: { readonly reference: ReferenceWithHostedSchema }) {
+  const hosted = reference.hostedSchema
+  if (hosted == null) {
+    return <span className="reference-source reference-source--external">External URL</span>
+  }
+  return (
+    <span className="reference-source reference-source--hosted">
+      <span className="reference-source__label">Hosted by AttestBook</span>
+      <span className="reference-source__kind">{hostedSchemaKindLabel(hosted.kind)}</span>
+    </span>
+  )
+}
+
+function ReferenceUri({
+  reference,
+}: {
+  readonly reference: { readonly uri: string; readonly hostedSchema?: HostedSchema | null }
+}) {
+  const hosted = reference.hostedSchema
+  if (hosted == null) {
+    return <ExternalReference uri={reference.uri} />
+  }
+  return (
+    <a
+      className="reference-uri"
+      href={hosted.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      title={hosted.url}
+    >
+      {reference.uri}
+      <span className="sr-only"> (opens the hosted schema in a new tab)</span>
+    </a>
+  )
+}
+
+function ReferenceIntegrity({ reference }: { readonly reference: ReferenceWithHostedSchema }) {
+  const state = hostedIntegrityState(reference)
+  return (
+    <>
+      {reference.integrity === null ? (
+        <span className="muted">None recorded</span>
+      ) : (
+        <code title={reference.integrity}>{reference.integrity}</code>
+      )}
+      {state === 'matches' ? (
+        <span className="reference-pin reference-pin--ok">Pin matches stored digest</span>
+      ) : null}
+      {state === 'missing' ? (
+        <span className="reference-pin reference-pin--missing">No pin recorded</span>
+      ) : null}
+      {state === 'mismatch' ? (
+        <span className="reference-pin reference-pin--mismatch">
+          Pin does not match stored digest
+        </span>
+      ) : null}
+    </>
+  )
+}
+
 function SchemaReferenceTable({
-  references,
+  rows,
   attestations,
   showAttestation = true,
+  caption,
 }: {
-  readonly references: readonly SchemaReference[]
+  readonly rows: readonly SchemaReferenceRow[]
   readonly attestations: RulebookDetailSnapshot['attestations']
   readonly showAttestation?: boolean
+  readonly caption: string
 }) {
   return (
     <div className="table-wrap table-wrap--nested">
-      <table className="detail-table">
-        <caption className="sr-only">
-          {showAttestation
-            ? 'Schema references with their format identifier, URI, integrity value and attestation type'
-            : 'Schema references for this attestation type'}
-        </caption>
+      <table className="detail-table schema-reference-table">
+        <caption className="sr-only">{caption}</caption>
         <thead>
           <tr>
             <th scope="col">Format</th>
-            <th scope="col">Schema URI</th>
-            <th scope="col">Integrity</th>
+            <th scope="col">Schema reference</th>
+            <th scope="col">Integrity pin</th>
             {showAttestation ? <th scope="col">Attestation type</th> : null}
+            <th scope="col">Download</th>
           </tr>
         </thead>
         <tbody>
-          {references.map((reference) => (
-            <tr key={reference.id}>
-              <th scope="row" className="cell-format">
-                {reference.formatIdentifier}
-              </th>
-              <td>
-                <ExternalReference uri={reference.uri} />
-              </td>
-              <td>
-                {reference.integrity === null ? (
-                  <span className="muted">None recorded</span>
-                ) : (
-                  <code title={reference.integrity}>{reference.integrity}</code>
-                )}
-              </td>
-              {showAttestation ? (
-                <td>{attestationNameFor(attestations, reference.attestationId)}</td>
-              ) : null}
-            </tr>
-          ))}
+          {rows.map((row) => {
+            const hosted = row.hostedSchema ?? null
+            return (
+              <tr key={row.key}>
+                <th scope="row" className="cell-format">
+                  {row.formatIdentifier}
+                </th>
+                <td>
+                  <ReferenceSource reference={row} />
+                  <ReferenceUri reference={row} />
+                  {hosted === null ? null : (
+                    <p className="reference-hosted-meta">
+                      <span>
+                        Media type: <code>{hosted.mediaType}</code>
+                      </span>
+                      <span>
+                        SHA-256:{' '}
+                        <code className="digest" title={hosted.contentDigest}>
+                          {formatDigest(hosted.contentDigest)}
+                        </code>
+                      </span>
+                    </p>
+                  )}
+                </td>
+                <td>
+                  <ReferenceIntegrity reference={row} />
+                </td>
+                {showAttestation ? (
+                  <td>{attestationNameFor(attestations, row.attestationId ?? null)}</td>
+                ) : null}
+                <td>
+                  {hosted === null ? (
+                    <span className="muted">—</span>
+                  ) : (
+                    <a
+                      className="button button--small button--ghost"
+                      href={hosted.url}
+                      download={hostedSchemaDownloadName(hosted)}
+                      aria-label={`Download the ${hostedSchemaKindLabel(hosted.kind)} document for ${row.formatIdentifier}`}
+                    >
+                      Download
+                    </a>
+                  )}
+                </td>
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
   )
+}
+
+function rulebookRows(references: readonly SchemaReference[]): readonly SchemaReferenceRow[] {
+  return references.map((reference) => ({
+    key: reference.id,
+    formatIdentifier: reference.formatIdentifier,
+    uri: reference.uri,
+    integrity: reference.integrity,
+    hostedSchema: reference.hostedSchema ?? null,
+    attestationId: reference.attestationId,
+  }))
 }
 
 export function MetadataSection({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
@@ -272,9 +391,10 @@ export function AttestationsSection({ snapshot }: { readonly snapshot: RulebookD
                   </p>
                 ) : (
                   <SchemaReferenceTable
-                    references={references}
+                    rows={rulebookRows(references)}
                     attestations={attestations}
                     showAttestation={false}
+                    caption={`Schema references for ${attestation.name}`}
                   />
                 )}
               </li>
@@ -304,11 +424,17 @@ export function SchemaReferencesSection({
         <p className="muted">No schema references are recorded for this rulebook.</p>
       ) : null}
       {schemaReferences.length > 0 ? (
-        <SchemaReferenceTable references={schemaReferences} attestations={attestations} />
+        <SchemaReferenceTable
+          rows={rulebookRows(schemaReferences)}
+          attestations={attestations}
+          caption="Schema references with their format identifier, source, URI, media type, digest, integrity pin and attestation type"
+        />
       ) : null}
       <p className="table-note">
-        A reference URI is linked only when it is an absolute http(s) URL; other values stay inert
-        text.
+        A reference is <strong>Hosted by AttestBook</strong> only when its exact URI names an
+        immutable stored schema document on this deployment; every other http(s) value stays an
+        external link. Hosted rows link to the public, unauthenticated content route and show the
+        stored media type and digest the bytes must match.
       </p>
     </section>
   )
@@ -356,10 +482,145 @@ export function CompatibilitySection() {
   )
 }
 
-export function VersionsSection({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
+type VersionReferencesState =
+  | { readonly status: 'loading' }
+  | { readonly status: 'ready'; readonly data: VersionSchemaReferences }
+  | { readonly status: 'error'; readonly message: string }
+
+function versionRows(
+  references: VersionSchemaReferences['schemaReferences'],
+): readonly SchemaReferenceRow[] {
+  return references.map((reference, index) => ({
+    key: `${String(index)}-${reference.formatIdentifier}-${reference.uri}`,
+    formatIdentifier: reference.formatIdentifier,
+    uri: reference.uri,
+    integrity: reference.integrity,
+    hostedSchema: reference.hostedSchema ?? null,
+  }))
+}
+
+/** Reads one exact frozen version and renders its references with provenance. */
+function VersionSchemaReferencesPanel({
+  api,
+  rulebookId,
+  version,
+}: {
+  readonly api: CatalogApi
+  readonly rulebookId: string
+  readonly version: string
+}) {
+  const [state, setState] = useState<VersionReferencesState>({ status: 'loading' })
+  const controller = useRef<AbortController | null>(null)
+
+  const load = useCallback(async () => {
+    controller.current?.abort()
+    const current = new AbortController()
+    controller.current = current
+    setState({ status: 'loading' })
+    try {
+      const data = await api.getVersionSchemaReferences(rulebookId, version, current.signal)
+      if (!current.signal.aborted) {
+        setState({ status: 'ready', data })
+      }
+    } catch (error) {
+      if (current.signal.aborted) {
+        return
+      }
+      setState({
+        status: 'error',
+        message:
+          error instanceof Error && error.message !== ''
+            ? error.message
+            : 'The version schema references could not be loaded.',
+      })
+    }
+  }, [api, rulebookId, version])
+
+  useEffect(() => {
+    void load()
+    return () => controller.current?.abort()
+  }, [load])
+
+  if (state.status === 'loading') {
+    return (
+      <p className="version-references__status" role="status">
+        Reading the schema references frozen in version {version}…
+      </p>
+    )
+  }
+  if (state.status === 'error') {
+    return (
+      <div className="version-references__status" role="alert">
+        <p>{state.message}</p>
+        <button
+          type="button"
+          className="button button--small button--ghost"
+          onClick={() => {
+            void load()
+          }}
+        >
+          Retry
+        </button>
+      </div>
+    )
+  }
+
+  const { data } = state
+  const referenceCount =
+    data.schemaReferences.length +
+    data.attestations.reduce((total, attestation) => total + attestation.schemaReferences.length, 0)
+  return (
+    <div className="version-references">
+      <h3 className="version-references__title">Schema references in version {data.version}</h3>
+      <p className="version-references__pin">
+        Exact frozen version <code>{data.version}</code> · SHA-256{' '}
+        <code className="digest" title={data.contentDigest}>
+          {formatDigest(data.contentDigest)}
+        </code>
+      </p>
+      {referenceCount === 0 ? (
+        <p className="muted">No schema references are recorded in this version.</p>
+      ) : null}
+      {data.attestations.map((attestation) =>
+        attestation.schemaReferences.length === 0 ? null : (
+          <div className="version-references__group" key={attestation.name}>
+            <h4>{attestation.name}</h4>
+            <SchemaReferenceTable
+              rows={versionRows(attestation.schemaReferences)}
+              attestations={[]}
+              showAttestation={false}
+              caption={`Schema references for ${attestation.name} in version ${data.version}`}
+            />
+          </div>
+        ),
+      )}
+      {data.schemaReferences.length === 0 ? null : (
+        <div className="version-references__group">
+          <h4>Rulebook-level</h4>
+          <SchemaReferenceTable
+            rows={versionRows(data.schemaReferences)}
+            attestations={[]}
+            showAttestation={false}
+            caption={`Rulebook-level schema references in version ${data.version}`}
+          />
+        </div>
+      )}
+    </div>
+  )
+}
+
+export function VersionsSection({
+  snapshot,
+  api,
+}: {
+  readonly snapshot: RulebookDetailSnapshot
+  readonly api: CatalogApi
+}) {
   const { rulebook, versions, availability } = snapshot
   const current = latestVersion(versions)
   const ordered = versionsNewestFirst(versions)
+  const [openVersionId, setOpenVersionId] = useState<string | null>(null)
+  const panelPrefix = `version-panel-${useId().replaceAll(':', '')}`
   return (
     <section className="detail-card" aria-labelledby="versions-heading">
       <h2 id="versions-heading">Version history</h2>
@@ -384,60 +645,94 @@ export function VersionsSection({ snapshot }: { readonly snapshot: RulebookDetai
                   <th scope="col">Content digest (SHA-256)</th>
                   <th scope="col">Created</th>
                   <th scope="col">Published</th>
-                  <th scope="col">Export</th>
+                  <th scope="col">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {ordered.map((version) => (
-                  <tr key={version.id}>
-                    <th scope="row">
-                      <code>{version.version}</code>
-                      {current?.id === version.id ? (
-                        <span className="badge badge--latest">Latest</span>
+                {ordered.map((version) => {
+                  const open = openVersionId === version.id
+                  const panelId = `${panelPrefix}-${version.id}`
+                  return (
+                    <Fragment key={version.id}>
+                      <tr>
+                        <th scope="row">
+                          <code>{version.version}</code>
+                          {current?.id === version.id ? (
+                            <span className="badge badge--latest">Latest</span>
+                          ) : null}
+                        </th>
+                        <td>
+                          <StatusBadge status={version.status} />
+                        </td>
+                        <td>
+                          <code>{version.specVersion}</code>
+                        </td>
+                        <td>
+                          <code className="digest" title={version.contentDigest}>
+                            {formatDigest(version.contentDigest)}
+                          </code>
+                        </td>
+                        <td>
+                          <time dateTime={version.createdAt}>{formatDate(version.createdAt)}</time>
+                        </td>
+                        <td>
+                          {version.publishedAt === null ? (
+                            <span className="muted">Not published</span>
+                          ) : (
+                            <time dateTime={version.publishedAt}>
+                              {formatDate(version.publishedAt)}
+                            </time>
+                          )}
+                        </td>
+                        <td>
+                          <div className="version-actions">
+                            <button
+                              type="button"
+                              className="button button--small button--ghost"
+                              aria-expanded={open}
+                              aria-controls={panelId}
+                              aria-label={`${open ? 'Hide' : 'Inspect'} references for version ${version.version}`}
+                              onClick={() => {
+                                setOpenVersionId(open ? null : version.id)
+                              }}
+                            >
+                              {open ? 'Hide references' : 'Inspect references'}
+                            </button>
+                            <a
+                              className="button button--small button--ghost"
+                              href={versionContentPath(rulebook.id, version.version)}
+                              download={`rulebook-${rulebook.id}-${version.version}.json`}
+                              aria-label={`Export version ${version.version} snapshot`}
+                            >
+                              Export
+                            </a>
+                          </div>
+                        </td>
+                      </tr>
+                      {open ? (
+                        <tr className="version-references-row">
+                          <td colSpan={7}>
+                            <div id={panelId}>
+                              <VersionSchemaReferencesPanel
+                                api={api}
+                                rulebookId={rulebook.id}
+                                version={version.version}
+                              />
+                            </div>
+                          </td>
+                        </tr>
                       ) : null}
-                    </th>
-                    <td>
-                      <StatusBadge status={version.status} />
-                    </td>
-                    <td>
-                      <code>{version.specVersion}</code>
-                    </td>
-                    <td>
-                      <code className="digest" title={version.contentDigest}>
-                        {formatDigest(version.contentDigest)}
-                      </code>
-                    </td>
-                    <td>
-                      <time dateTime={version.createdAt}>{formatDate(version.createdAt)}</time>
-                    </td>
-                    <td>
-                      {version.publishedAt === null ? (
-                        <span className="muted">Not published</span>
-                      ) : (
-                        <time dateTime={version.publishedAt}>
-                          {formatDate(version.publishedAt)}
-                        </time>
-                      )}
-                    </td>
-                    <td>
-                      <a
-                        className="button button--small button--ghost"
-                        href={versionContentPath(rulebook.id, version.version)}
-                        download={`rulebook-${rulebook.id}-${version.version}.json`}
-                        aria-label={`Export version ${version.version} snapshot`}
-                      >
-                        Export
-                      </a>
-                    </td>
-                  </tr>
-                ))}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>
           <p className="table-note">
             Exports are the exact immutable snapshot bytes. The shown SHA-256 digest identifies
             them, and the download response carries <code>Content-Digest</code> and{' '}
-            <code>ETag</code> headers for verification.
+            <code>ETag</code> headers for verification. <strong>Inspect references</strong> reads
+            the same frozen snapshot and distinguishes hosted from external schema references.
           </p>
         </>
       ) : null}

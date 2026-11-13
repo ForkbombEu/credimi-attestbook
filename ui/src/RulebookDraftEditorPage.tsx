@@ -14,6 +14,7 @@ import {
   draftRequest,
   EMPTY_DRAFT_DOCUMENT,
   EMPTY_METADATA,
+  hostedSchemasFromDraft,
   parseDraftDocument,
   serializeDraftDocument,
   validationSummary,
@@ -22,7 +23,12 @@ import {
 } from './draft'
 import { AppLink, CATALOG_PATH, rulebookEditorPath, rulebookPath } from './router'
 import type { SessionController } from './session'
-import type { DraftContentDocument, DraftRulebook, DraftValidationReport } from './types'
+import type {
+  DraftContentDocument,
+  DraftRulebook,
+  DraftValidationReport,
+  HostedSchema,
+} from './types'
 
 interface RulebookDraftEditorPageProps {
   readonly api: EditorApi
@@ -111,6 +117,7 @@ export function RulebookDraftEditorPage({
   const [dirty, setDirty] = useState(false)
   const [sessionExpired, setSessionExpired] = useState(false)
   const [renewedNotice, setRenewedNotice] = useState<string | null>(null)
+  const [hostedSchemas, setHostedSchemas] = useState<ReadonlyMap<string, HostedSchema>>(new Map())
   const pendingValidation = useRef<AbortController | null>(null)
 
   const loadDraft = useCallback(
@@ -129,6 +136,7 @@ export function RulebookDraftEditorPage({
         applicableSpec: draft.applicableSpec,
       })
       setJsonText(serializeDraftDocument(documentFromDraft(draft)))
+      setHostedSchemas(hostedSchemasFromDraft(draft))
       setState({ status: 'ready', draft })
     },
     [api, rulebookId],
@@ -320,6 +328,7 @@ export function RulebookDraftEditorPage({
       }
       const saved = await api.replaceDraft(rulebookId, request, csrfToken)
       setState({ status: 'ready', draft: saved })
+      setHostedSchemas(hostedSchemasFromDraft(saved))
       setDirty(false)
       setSessionExpired(false)
       setRenewedNotice(null)
@@ -636,6 +645,7 @@ export function RulebookDraftEditorPage({
                     : 'Fix the Draft JSON before editing schema references.'
               }
               csrfToken={csrfToken}
+              hostedSchemas={hostedSchemas}
               onDocumentChange={handleSchemaDocumentChange}
               onSessionExpired={() => {
                 setSessionExpired(true)

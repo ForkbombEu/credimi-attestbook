@@ -13,6 +13,7 @@ import type {
   DraftRulebook,
   DraftSchemaReference,
   DraftSchemaReferenceInput,
+  HostedSchema,
   SaveDraftRequest,
 } from './types'
 
@@ -114,6 +115,26 @@ export function documentFromDraft(draft: DraftRulebook): DraftContentDocument {
     attestations: draft.attestations,
     schemaReferences: draft.schemaReferences,
   }
+}
+
+/**
+ * Collects the API-derived stored-document association for every reference of
+ * a loaded draft (#103). The editor edits raw JSON, which carries only
+ * `formatIdentifier`/`uri`/`integrity`, so the association is kept beside it
+ * instead of being injected into the persisted representation.
+ */
+export function hostedSchemasFromDraft(draft: DraftRulebook): ReadonlyMap<string, HostedSchema> {
+  const schemas = new Map<string, HostedSchema>()
+  const references = [
+    ...draft.schemaReferences,
+    ...draft.attestations.flatMap((attestation) => attestation.schemaReferences),
+  ]
+  for (const reference of references) {
+    if (reference.hostedSchema != null) {
+      schemas.set(reference.uri, reference.hostedSchema)
+    }
+  }
+  return schemas
 }
 
 /** Builds the request body shared by create, save and validate. */

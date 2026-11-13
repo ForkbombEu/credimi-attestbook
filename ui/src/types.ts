@@ -34,6 +34,12 @@ export interface SchemaReference {
   readonly uri: string
   /** W3C SRI value such as `sha256-...`, when the source carries one. */
   readonly integrity: string | null
+  /**
+   * The stored AttestBook document this exact URI names (#103). `null` or
+   * absent means the reference is external; the public API derives this from
+   * the immutable store and never from a URL prefix.
+   */
+  readonly hostedSchema?: HostedSchema | null
   readonly createdAt: string
 }
 
@@ -57,6 +63,31 @@ export interface RulebookVersion {
   readonly specVersion: string
   readonly createdAt: string
   readonly publishedAt: string | null
+}
+
+/**
+ * One reference frozen in an exact rulebook version snapshot (#103). The
+ * persisted members are unchanged; `hostedSchema` is the public, derived
+ * association with a stored immutable AttestBook document.
+ */
+export interface VersionSchemaReference {
+  readonly formatIdentifier: string
+  readonly uri: string
+  readonly integrity: string | null
+  readonly hostedSchema?: HostedSchema | null
+}
+
+/** Public inspection of one exact version's frozen schema references (#103). */
+export interface VersionSchemaReferences {
+  readonly version: string
+  readonly contentDigest: string
+  readonly status: PublicationStatus
+  readonly publishedAt: string | null
+  readonly attestations: readonly {
+    readonly name: string
+    readonly schemaReferences: readonly VersionSchemaReference[]
+  }[]
+  readonly schemaReferences: readonly VersionSchemaReference[]
 }
 
 export interface Pagination {
@@ -243,6 +274,8 @@ export interface DraftSchemaReference {
   readonly formatIdentifier: string
   readonly uri: string
   readonly integrity: string | null
+  /** Stored-document association of this exact URI, when the API resolved one. */
+  readonly hostedSchema?: HostedSchema | null
 }
 
 export interface DraftAttestation {
@@ -317,6 +350,13 @@ export interface CredentialSchemaDocument {
   readonly url: string
   readonly createdAt: string
 }
+
+/**
+ * Public provenance of a stored document attached to a schema reference
+ * (#103). It has the same public shape as the registration response; provider
+ * ownership and registration provenance are never included.
+ */
+export type HostedSchema = CredentialSchemaDocument
 
 export type DraftDiagnosticSeverity = 'error' | 'warning'
 

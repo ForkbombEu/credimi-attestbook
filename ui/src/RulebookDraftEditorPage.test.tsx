@@ -7,6 +7,7 @@ import { describe, expect, test, vi } from 'vitest'
 import { CatalogApiError, type EditorApi } from './api'
 import { RulebookDraftEditorPage } from './RulebookDraftEditorPage'
 import { expectNoA11yViolations } from './test/a11y'
+import { HOSTED_SCHEMA } from './test/fixtures'
 import { anonymousSession, fakeSession, TEST_SESSION } from './test/session'
 import type { SessionController } from './session'
 import type {
@@ -606,6 +607,50 @@ describe('rulebook draft editor', () => {
       await within(lifecycle).findByText('The authenticated provider does not own this resource.'),
     ).toBeVisible()
     expect(screen.queryByRole('heading', { name: 'Sign in again' })).not.toBeInTheDocument()
+  })
+
+  test('uses the API association, not a URL prefix, to mark a draft reference hosted', async () => {
+    const lookalike = 'https://attestbook.example/api/v1/schema-documents/not-registered/content'
+    const loaded: DraftRulebook = {
+      ...DRAFT,
+      attestations: [
+        {
+          ...DRAFT.attestations[0]!,
+          supportedFormats: ['dc+sd-jwt', 'mso_mdoc'],
+          schemaReferences: [
+            {
+              formatIdentifier: 'dc+sd-jwt',
+              uri: HOSTED_SCHEMA.url,
+              integrity: HOSTED_SCHEMA.integrity,
+              hostedSchema: HOSTED_SCHEMA,
+            },
+            {
+              formatIdentifier: 'mso_mdoc',
+              uri: lookalike,
+              integrity: null,
+              hostedSchema: null,
+            },
+          ],
+        },
+      ],
+    }
+    renderEditor(editor({ getDraft: vi.fn(async () => loaded) }), { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    const hostedRow = screen.getByText(HOSTED_SCHEMA.url).closest('.schema-row') as HTMLElement
+    expect(within(hostedRow).getByText('Hosted by AttestBook')).toBeVisible()
+    expect(within(hostedRow).getByText('JSON Schema 2020-12')).toBeVisible()
+    expect(within(hostedRow).getByText('application/schema+json')).toBeVisible()
+    expect(within(hostedRow).getByText(`${'c'.repeat(16)}…`)).toBeVisible()
+    expect(
+      within(hostedRow).getByRole('link', { name: /Download the hosted JSON Schema 2020-12/ }),
+    ).toHaveAttribute('href', HOSTED_SCHEMA.url)
+
+    const externalRow = screen.getByText(lookalike).closest('.schema-row') as HTMLElement
+    expect(within(externalRow).getByText('External URL')).toBeVisible()
+    expect(
+      within(externalRow).queryByRole('link', { name: /Download the hosted/ }),
+    ).not.toBeInTheDocument()
   })
 
   test('registers a pasted hosted schema and inserts its URI and integrity into the Draft JSON', async () => {

@@ -37,6 +37,7 @@ import type {
   RulebookVersion,
   SchemaReference,
 } from '../registry/types'
+import type { RulebookVersionDocument } from '../registry/versioning'
 import { credentialSchemaDocumentUrl, sha256Sri } from '../public-urls'
 import type { CredentialValidationResult } from '../validation'
 import type { VerifierConstraintsResult } from '../verifier'
@@ -52,6 +53,7 @@ import {
   credentialValidationResultSchema,
   draftRulebookSchema,
   headlessWalletComparisonSchema,
+  hostedSchemaReferenceSchema,
   importPreviewSchema,
   importResultSchema,
   issuerDiscoveryResultSchema,
@@ -62,12 +64,22 @@ import {
   rulebookSchema,
   rulebookVersionDocumentSchema,
   rulebookVersionSchema,
+  rulebookVersionSchemaReferencesSchema,
   schemaReferenceSchema,
   verifierConstraintsResultSchema,
   versionDiffSchema,
+  type HostedSchemaReferenceResource,
   type IssuerFixtureResource,
   type VerifierConstraintsResource,
 } from './schemas'
+
+/** Resolves a reference URI to its stored-document projection, when one exists. */
+export type HostedSchemaLookup = (uri: string) => HostedSchemaReferenceResource | null
+
+/** No stored-document association is available to this projection. */
+export function noHostedSchemas(): HostedSchemaLookup {
+  return () => null
+}
 
 /**
  * Public projection of one stored credential schema document (#98). The
@@ -87,6 +99,20 @@ export function toCredentialSchemaDocumentResource(
     url: credentialSchemaDocumentUrl(publicBaseUrl, document.id),
     createdAt: document.createdAt,
   })
+}
+
+/**
+ * Public provenance of one stored schema document attached to a reference
+ * (#103). It carries only fields the public document route already exposes, so
+ * the owner, provenance and tokens stay internal.
+ */
+export function toHostedSchemaResource(
+  document: CredentialSchemaDocument,
+  publicBaseUrl: string,
+): HostedSchemaReferenceResource {
+  return hostedSchemaReferenceSchema.parse(
+    toCredentialSchemaDocumentResource(document, publicBaseUrl),
+  )
 }
 
 /** Public catalogue projection of a provider; authority and metadata stay internal. */
@@ -112,7 +138,10 @@ export function toRulebookResource(rulebook: Rulebook) {
   })
 }
 
-export function toSchemaReferenceResource(reference: SchemaReference) {
+export function toSchemaReferenceResource(
+  reference: SchemaReference,
+  hostedFor: HostedSchemaLookup = noHostedSchemas(),
+) {
   return schemaReferenceSchema.parse({
     id: reference.id,
     rulebookId: reference.rulebookId,
@@ -120,6 +149,7 @@ export function toSchemaReferenceResource(reference: SchemaReference) {
     formatIdentifier: reference.formatIdentifier,
     uri: reference.uri,
     integrity: reference.integrity,
+    hostedSchema: hostedFor(reference.uri),
     createdAt: reference.createdAt,
   })
 }
@@ -127,6 +157,7 @@ export function toSchemaReferenceResource(reference: SchemaReference) {
 export function toAttestationResource(
   attestation: AttestationType,
   schemaReferences: readonly SchemaReference[],
+  hostedFor: HostedSchemaLookup = noHostedSchemas(),
 ) {
   return attestationDetailSchema.parse({
     id: attestation.id,
@@ -136,12 +167,17 @@ export function toAttestationResource(
     bindingType: attestation.bindingType,
     supportedFormats: [...attestation.supportedFormats],
     createdAt: attestation.createdAt,
-    schemaReferences: schemaReferences.map(toSchemaReferenceResource),
+    schemaReferences: schemaReferences.map((reference) =>
+      toSchemaReferenceResource(reference, hostedFor),
+    ),
   })
 }
 
 /** Public editable projection of one draft working copy (#40). */
-export function toDraftRulebookResource(content: DraftContent) {
+export function toDraftRulebookResource(
+  content: DraftContent,
+  hostedFor: HostedSchemaLookup = noHostedSchemas(),
+) {
   const { rulebook, attestations, schemaReferences } = content
   const referencesByAttestation = new Map<string, SchemaReference[]>()
   const rulebookLevel: SchemaReference[] = []
@@ -170,22 +206,64 @@ export function toDraftRulebookResource(content: DraftContent) {
       attestationLoS: attestation.attestationLoS,
       bindingType: attestation.bindingType,
       supportedFormats: [...attestation.supportedFormats],
-      schemaReferences: (referencesByAttestation.get(attestation.id) ?? []).map(
-        toDraftSchemaReferenceResource,
+      schemaReferences: (referencesByAttestation.get(attestation.id) ?? []).map((reference) =>
+        toDraftSchemaReferenceResource(reference, hostedFor),
       ),
     })),
-    schemaReferences: rulebookLevel.map(toDraftSchemaReferenceResource),
+    schemaReferences: rulebookLevel.map((reference) =>
+      toDraftSchemaReferenceResource(reference, hostedFor),
+    ),
     createdAt: rulebook.createdAt,
     updatedAt: rulebook.updatedAt,
   })
 }
 
-function toDraftSchemaReferenceResource(reference: SchemaReference) {
+function toDraftSchemaReferenceResource(reference: SchemaReference, hostedFor: HostedSchemaLookup) {
   return {
     formatIdentifier: reference.formatIdentifier,
     uri: reference.uri,
     integrity: reference.integrity,
+    hostedSchema: hostedFor(reference.uri),
   }
+}
+
+function toVersionSchemaReferenceResource(
+  reference: RulebookVersionDocument['schemaReferences'][number],
+  hostedFor: HostedSchemaLookup,
+) {
+  return {
+    formatIdentifier: reference.formatIdentifier,
+    uri: reference.uri,
+    integrity: reference.integrity,
+    hostedSchema: hostedFor(reference.uri),
+  }
+}
+
+/**
+ * Public inspection projection of one exact frozen snapshot (#103). The
+ * snapshot's persisted members are copied unchanged; only the derived
+ * hosted-document association is added for display.
+ */
+export function toRulebookVersionSchemaReferencesResource(
+  version: RulebookVersion,
+  document: RulebookVersionDocument,
+  hostedFor: HostedSchemaLookup = noHostedSchemas(),
+) {
+  return rulebookVersionSchemaReferencesSchema.parse({
+    version: version.version,
+    contentDigest: version.contentDigest,
+    status: version.status,
+    publishedAt: version.publishedAt,
+    attestations: document.attestations.map((attestation) => ({
+      name: attestation.name,
+      schemaReferences: attestation.schemaReferences.map((reference) =>
+        toVersionSchemaReferenceResource(reference, hostedFor),
+      ),
+    })),
+    schemaReferences: document.schemaReferences.map((reference) =>
+      toVersionSchemaReferenceResource(reference, hostedFor),
+    ),
+  })
 }
 
 export function toRulebookVersionResource(version: RulebookVersion) {

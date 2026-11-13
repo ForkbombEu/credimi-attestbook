@@ -194,7 +194,7 @@ function DetailContent({
       <AttestationsSection snapshot={snapshot} />
       <SchemaReferencesSection snapshot={snapshot} />
       <CompatibilitySection />
-      <VersionsSection snapshot={snapshot} />
+      <VersionsSection snapshot={snapshot} api={api} />
       <VersionComparisonPanel api={api} rulebookId={rulebook.id} versions={versions} />
     </>
   )

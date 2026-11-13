@@ -86,6 +86,27 @@ const timestamp = z.string()
 const nullableString = z.string().nullable()
 
 /**
+ * Public provenance of one immutable AttestBook-hosted schema document as it is
+ * attached to a schema reference (#103). It is derived from the stored
+ * document association; the owning provider, registration provenance and every
+ * token stay registry-internal. The same shape is the public metadata of the
+ * document itself (`CredentialSchemaDocument`).
+ */
+const hostedSchemaShape = {
+  id: z.string(),
+  kind: z.enum(CREDENTIAL_SCHEMA_KINDS),
+  mediaType: z.enum(['application/schema+json', 'application/json']),
+  contentDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  /** W3C SRI pin (`sha256-<base64>`) of the exact bytes. */
+  integrity: z.string().regex(/^sha256-[A-Za-z0-9+/]+={0,2}$/),
+  /** Canonical permanent HTTPS URL of the exact bytes. */
+  url: z.string().min(1),
+  createdAt: timestamp,
+}
+
+export const hostedSchemaReferenceSchema = z.object(hostedSchemaShape)
+
+/**
  * The public provider representation used by the catalogue. Publication
  * authority, internal metadata and tokens stay inside the registry.
  */
@@ -147,6 +168,12 @@ export const schemaReferenceSchema = z.object({
   formatIdentifier: z.string(),
   uri: z.string(),
   integrity: nullableString,
+  /**
+   * The stored AttestBook document this exact URI names, when the association
+   * exists; `null` for an external reference. It is a read-only projection and
+   * never enters the persisted rulebook or a version snapshot.
+   */
+  hostedSchema: hostedSchemaReferenceSchema.nullable(),
   createdAt: timestamp,
 })
 
@@ -169,6 +196,42 @@ export const rulebookVersionSchemaReferenceSchema = z.object({
   formatIdentifier: z.string(),
   uri: z.string(),
   integrity: nullableString,
+})
+
+/**
+ * One schema reference projected from an exact frozen snapshot (#103). It is
+ * the persisted `{formatIdentifier, uri, integrity}` plus the public hosted
+ * association read from the immutable store; the snapshot bytes themselves are
+ * never rewritten.
+ */
+export const versionSchemaReferenceSchema = z.object({
+  formatIdentifier: z.string(),
+  uri: z.string(),
+  integrity: nullableString,
+  hostedSchema: hostedSchemaReferenceSchema.nullable(),
+})
+
+/**
+ * Public inspection of one exact rulebook version's schema references. The
+ * `version`/`contentDigest` pair pins which immutable snapshot was read, so the
+ * view can name the exact version a hosted document is referenced by.
+ */
+export const rulebookVersionSchemaReferencesSchema = z.object({
+  version: z.string(),
+  contentDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  status: PUBLICATION_STATUS_SCHEMA,
+  publishedAt: nullableString,
+  attestations: z.array(
+    z.object({
+      name: z.string(),
+      schemaReferences: z.array(versionSchemaReferenceSchema),
+    }),
+  ),
+  schemaReferences: z.array(versionSchemaReferenceSchema),
+})
+
+export const rulebookVersionSchemaReferencesResponseSchema = z.object({
+  data: rulebookVersionSchemaReferencesSchema,
 })
 
 export const rulebookVersionDocumentSchema = z.object({
@@ -219,17 +282,7 @@ export const rulebookVersionListResponseSchema = z.object({
  * never a request header. Provider ownership, provenance and every secret stay
  * registry-internal and are absent here.
  */
-export const credentialSchemaDocumentSchema = z.object({
-  id: z.string(),
-  kind: z.enum(CREDENTIAL_SCHEMA_KINDS),
-  mediaType: z.enum(['application/schema+json', 'application/json']),
-  contentDigest: z.string().regex(/^[0-9a-f]{64}$/),
-  /** W3C SRI pin (`sha256-<base64>`) of the exact bytes. */
-  integrity: z.string().regex(/^sha256-[A-Za-z0-9+/]+={0,2}$/),
-  /** Canonical permanent HTTPS URL of the exact bytes. */
-  url: z.string().min(1),
-  createdAt: timestamp,
-})
+export const credentialSchemaDocumentSchema = z.object(hostedSchemaShape)
 
 export const credentialSchemaDocumentResponseSchema = z.object({
   data: credentialSchemaDocumentSchema,
@@ -426,6 +479,8 @@ export const draftSchemaReferenceSchema = z.object({
   formatIdentifier: z.string(),
   uri: z.string(),
   integrity: nullableString,
+  /** Stored-document association of this exact URI, when one exists; read-only. */
+  hostedSchema: hostedSchemaReferenceSchema.nullable(),
 })
 
 /** An attestation type as edited in a draft document. */
@@ -1510,10 +1565,14 @@ export const OPENAPI_COMPONENTS = {
   AttestationListResponse: attestationListResponseSchema,
   SchemaReference: schemaReferenceSchema,
   SchemaReferenceListResponse: schemaReferenceListResponseSchema,
+  HostedSchemaReference: hostedSchemaReferenceSchema,
   RulebookVersion: rulebookVersionSchema,
   RulebookVersionResponse: rulebookVersionResponseSchema,
   RulebookVersionListResponse: rulebookVersionListResponseSchema,
   RulebookVersionDocument: rulebookVersionDocumentSchema,
+  RulebookVersionSchemaReferences: rulebookVersionSchemaReferencesSchema,
+  RulebookVersionSchemaReferencesResponse: rulebookVersionSchemaReferencesResponseSchema,
+  VersionSchemaReference: versionSchemaReferenceSchema,
   CredentialSchemaDocument: credentialSchemaDocumentSchema,
   CredentialSchemaDocumentResponse: credentialSchemaDocumentResponseSchema,
   CredentialSchemaDocumentPageResponse: credentialSchemaDocumentPageSchema,
@@ -1605,8 +1664,13 @@ export type RulebookResource = z.infer<typeof rulebookSchema>
 export type AttestationResource = z.infer<typeof attestationSchema>
 export type AttestationDetailResource = z.infer<typeof attestationDetailSchema>
 export type SchemaReferenceResource = z.infer<typeof schemaReferenceSchema>
+export type HostedSchemaReferenceResource = z.infer<typeof hostedSchemaReferenceSchema>
 export type RulebookVersionResource = z.infer<typeof rulebookVersionSchema>
 export type RulebookVersionDocumentResource = z.infer<typeof rulebookVersionDocumentSchema>
+export type RulebookVersionSchemaReferencesResource = z.infer<
+  typeof rulebookVersionSchemaReferencesSchema
+>
+export type VersionSchemaReferenceResource = z.infer<typeof versionSchemaReferenceSchema>
 export type CredentialSchemaDocumentResource = z.infer<typeof credentialSchemaDocumentSchema>
 export type VersionDiffResource = z.infer<typeof versionDiffSchema>
 export type VersionDiffChangeResource = z.infer<typeof versionDiffChangeSchema>

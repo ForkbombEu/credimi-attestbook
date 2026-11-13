@@ -41,6 +41,7 @@ describe('playground rulebook loading', () => {
       listAttestations: () => new Promise(() => {}),
       listSchemaReferences: () => new Promise(() => {}),
       listVersions: () => new Promise(() => {}),
+      getVersionSchemaReferences: () => new Promise(() => {}),
       getVersionDiff: () => new Promise(() => {}),
     }
     renderPlayground(pending)

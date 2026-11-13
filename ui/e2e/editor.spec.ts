@@ -378,7 +378,14 @@ test.describe('rulebook draft editor against the real API', () => {
     await page.getByRole('button', { name: 'Save draft' }).click()
     await expect(page.getByText(/Draft saved at/)).toBeVisible()
     await page.reload()
-    await expect(page.locator('.schema-row__source').first()).toHaveText('AttestBook-hosted')
+    const reloadedRow = page.locator('.schema-row').first()
+    await expect(reloadedRow.locator('.schema-row__source')).toHaveText('Hosted by AttestBook')
+    await expect(reloadedRow).toContainText('JSON Schema 2020-12')
+    await expect(reloadedRow).toContainText('application/schema+json')
+    await expect(reloadedRow).toContainText('Pin matches stored digest')
+    await expect(
+      reloadedRow.getByRole('link', { name: /Download the hosted JSON Schema 2020-12/ }),
+    ).toHaveAttribute('href', reference!.uri)
     const reloaded = await page.getByLabel('Draft JSON').inputValue()
     expect(schemaReferencesOf(reloaded, 0)).toEqual([reference])
     expect((await page.request.get(reference!.uri)).ok()).toBe(true)
@@ -461,7 +468,7 @@ test.describe('rulebook draft editor against the real API', () => {
     await page.getByRole('button', { name: 'Save draft' }).click()
     await expect(page.getByText(/Draft saved at/)).toBeVisible()
     await page.reload()
-    await expect(page.locator('.schema-row__source').first()).toHaveText('External')
+    await expect(page.locator('.schema-row__source').first()).toHaveText('External URL')
     expect(schemaReferencesOf(await page.getByLabel('Draft JSON').inputValue(), 0)[0]?.uri).toBe(
       'https://loyalty.example.org/schemas/card',
     )

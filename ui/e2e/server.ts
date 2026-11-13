@@ -18,6 +18,7 @@ import { Registry } from '../../src/registry'
 import { provisionProvider } from '../../src/registry/bootstrap'
 import { sha256Hex } from '../../src/registry/digest'
 import type { AuthenticatedActor, CreateRulebookInput } from '../../src/registry/types'
+import { credentialSchemaDocumentUrl, sha256Sri } from '../../src/public-urls'
 import { CredentialValidator } from '../../src/validation'
 import { issueTestCredential, seedPublishedRulebook } from '../../src/validation/test-support'
 
@@ -30,6 +31,9 @@ import {
 } from './fixtures'
 
 const port = Number(Bun.env.E2E_PORT ?? '4173')
+// The same loopback origin the application is configured with, so a seeded
+// hosted document has a canonical URL the browser can fetch anonymously.
+const publicBaseUrl = `http://127.0.0.1:${port}`
 const database = openDatabase(':memory:')
 applyMigrations(database)
 const registry = new Registry({ database })
@@ -61,6 +65,28 @@ const adminAuth = new AdminAuth({
   },
 })
 
+// One disposable hosted JSON Schema document. Its canonical loopback URL is
+// written into the PID rulebook next to the pre-existing external reference, so
+// the detail and version views are exercised against real stored bytes and a
+// real stored-document association.
+const hostedSchemaText = JSON.stringify({
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  title: 'PID mDoc schema',
+  type: 'object',
+  required: ['family_name'],
+  properties: {
+    family_name: { type: 'string', minLength: 1, maxLength: 40 },
+  },
+  additionalProperties: false,
+})
+const hostedSchemaDocument = await registry.registerCredentialSchemaDocument(issuer.actor, {
+  kind: 'json_schema_2020_12',
+  bytes: new TextEncoder().encode(hostedSchemaText),
+  provenance: { source: 'e2e-server' },
+})
+const hostedSchemaUri = credentialSchemaDocumentUrl(publicBaseUrl, hostedSchemaDocument.id)
+const hostedSchemaIntegrity = sha256Sri(hostedSchemaDocument.contentDigest)
+
 /**
  * A pinned, published rulebook for the playground. Its TS11 binding type is
  * valid so a real credential with an issuer-signed `cnf` claim passes the
@@ -90,31 +116,40 @@ function createPublished(
   return rulebook.id
 }
 
-const pidId = createPublished(
-  issuer.actor,
-  {
-    name: 'PID Rulebook',
-    description: 'Person identification data rulebook maintained by the example issuer.',
-    sourceUrl: 'https://issuer.example.org/rulebooks/pid',
-    applicableSpec: 'ts11@1.0.1',
-    attestations: [
-      {
-        name: 'Person Identification Data',
-        attestationLoS: 'iso_18045_high',
-        bindingType: 'cryptographic',
-        supportedFormats: ['dc+sd-jwt', 'mso_mdoc'],
-        schemaReferences: [
-          {
-            formatIdentifier: 'dc+sd-jwt',
-            uri: 'https://issuer.example.org/schemas/pid',
-            integrity: 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=',
-          },
-        ],
-      },
-    ],
-  },
-  '1.0',
-)
+const pid = registry.createRulebook(issuer.actor, {
+  name: 'PID Rulebook',
+  description: 'Person identification data rulebook maintained by the example issuer.',
+  sourceUrl: 'https://issuer.example.org/rulebooks/pid',
+  applicableSpec: 'ts11@1.0.1',
+  attestations: [
+    {
+      name: 'Person Identification Data',
+      attestationLoS: 'iso_18045_high',
+      bindingType: 'cryptographic',
+      supportedFormats: ['dc+sd-jwt', 'mso_mdoc'],
+      schemaReferences: [
+        {
+          formatIdentifier: 'dc+sd-jwt',
+          uri: 'https://issuer.example.org/schemas/pid',
+          integrity: 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=',
+        },
+      ],
+    },
+  ],
+})
+const pidAttestation = registry.listAttestations(pid.id)[0]
+if (pidAttestation === undefined) {
+  throw new Error('e2e setup did not create the PID attestation type')
+}
+registry.addSchemaReference(issuer.actor, pid.id, {
+  formatIdentifier: 'mso_mdoc',
+  uri: hostedSchemaUri,
+  integrity: hostedSchemaIntegrity,
+  attestationId: pidAttestation.id,
+})
+registry.createRulebookVersion(issuer.actor, pid.id, { version: '1.0' })
+registry.publishRulebookVersion(issuer.actor, pid.id, '1.0')
+const pidId = pid.id
 registry.createRulebookVersion(issuer.actor, pidId, { version: '1.1' })
 
 createPublished(
@@ -250,7 +285,7 @@ const app = createApp({
   captures,
   adminAuth,
   uiRoot: './dist/ui',
-  publicBaseUrl: `http://127.0.0.1:${port}`,
+  publicBaseUrl,
 })
 
 const server = Bun.serve({

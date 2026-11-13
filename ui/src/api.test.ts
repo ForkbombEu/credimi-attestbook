@@ -94,6 +94,25 @@ describe('createHttpCatalogApi', () => {
     )
   })
 
+  test('reads one exact version schema references with an encoded path', async () => {
+    const references = {
+      version: '1.0',
+      contentDigest: 'a'.repeat(64),
+      status: 'published',
+      publishedAt: '2026-02-03T10:00:00.000Z',
+      attestations: [],
+      schemaReferences: [],
+    }
+    const fetchImpl = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({ data: references })))
+    const api = createHttpCatalogApi(fetchImpl)
+
+    expect(await api.getVersionSchemaReferences('rulebook/with space', '1.0')).toEqual(references)
+    expect(fetchImpl).toHaveBeenCalledWith(
+      '/api/v1/rulebooks/rulebook%2Fwith%20space/versions/1.0/schema-references',
+      expect.objectContaining({ headers: { accept: 'application/json' } }),
+    )
+  })
+
   test('surfaces the safe API error message and status', async () => {
     const fetchImpl = vi.fn<FetchLike>(() =>
       Promise.resolve(

@@ -138,6 +138,62 @@ test.describe('rulebook detail against the real API', () => {
     await expect(page.getByRole('heading', { name: 'PID Rulebook', level: 1 })).toBeVisible()
   })
 
+  test('distinguishes hosted and external schema references and fetches hosted bytes anonymously', async ({
+    page,
+    request,
+  }) => {
+    await page.goto(await pidDetail(page))
+
+    const references = page.getByRole('region', { name: 'Schema references' })
+    await expect(references.getByText('Hosted by AttestBook').first()).toBeVisible()
+    await expect(references.getByText('External URL').first()).toBeVisible()
+    await expect(references.getByText('application/schema+json').first()).toBeVisible()
+
+    const externalLink = references.getByRole('link', {
+      name: /https:\/\/issuer\.example\.org\/schemas\/pid/,
+    })
+    await expect(externalLink.first()).toHaveAttribute(
+      'href',
+      'https://issuer.example.org/schemas/pid',
+    )
+
+    const download = references
+      .getByRole('link', { name: /Download the JSON Schema 2020-12 document for mso_mdoc/ })
+      .first()
+    const href = await download.getAttribute('href')
+    expect(href).not.toBeNull()
+    expect(href).toMatch(/\/api\/v1\/schema-documents\/[^/]+\/content$/)
+    expect(await download.getAttribute('download')).toMatch(/^attestbook-json-schema-.*\.json$/)
+
+    const response = await request.get(href!)
+    expect(response.status()).toBe(200)
+    expect(response.headers()['content-type']).toContain('application/schema+json')
+    expect(response.headers()['content-digest']).toMatch(/^sha-256=:/)
+    expect(response.headers()['cache-control']).toContain('immutable')
+    expect(await response.json()).toMatchObject({ type: 'object', required: ['family_name'] })
+  })
+
+  test('inspects a previously published version with hosted and external references', async ({
+    page,
+  }) => {
+    await page.goto(await pidDetail(page))
+
+    await page.getByRole('button', { name: 'Inspect references for version 1.0' }).click()
+
+    const panel = page.locator('.version-references')
+    await expect(
+      panel.getByRole('heading', { name: 'Schema references in version 1.0' }),
+    ).toBeVisible()
+    await expect(panel.getByText(/Exact frozen version/)).toBeVisible()
+    await expect(panel.getByText('Hosted by AttestBook').first()).toBeVisible()
+    await expect(panel.getByText('External URL').first()).toBeVisible()
+    await expect(
+      panel
+        .getByRole('link', { name: /Download the JSON Schema 2020-12 document for mso_mdoc/ })
+        .first(),
+    ).toHaveAttribute('href', /\/api\/v1\/schema-documents\/[^/]+\/content$/)
+  })
+
   test('has no detectable accessibility violations', async ({ page }) => {
     await page.goto(await pidDetail(page))
     await expect(page.getByRole('heading', { name: 'PID Rulebook', level: 1 })).toBeVisible()

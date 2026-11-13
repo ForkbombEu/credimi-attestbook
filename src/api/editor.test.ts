@@ -199,6 +199,7 @@ describe('draft editor write API', () => {
         formatIdentifier: 'vc+sd-jwt',
         uri: 'https://issuer.example.org/schemas/rb',
         integrity: null,
+        hostedSchema: null,
       },
     ])
   })

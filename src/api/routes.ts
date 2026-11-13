@@ -64,6 +64,7 @@ import { CREDENTIAL_SCHEMA_KINDS } from '../registry/types'
 import { parseRulebookVersionDocument, type RulebookVersionDocument } from '../registry/versioning'
 import {
   CREDENTIAL_VALIDATION_PATH,
+  hostedSchemaDocumentId,
   parseValidateCredentialInput,
   type CredentialValidationService,
 } from '../validation'
@@ -85,6 +86,7 @@ import {
   toCredentialSchemaDocumentResource,
   toDraftRulebookResource,
   toHeadlessWalletComparisonResource,
+  toHostedSchemaResource,
   toProviderResource,
   toCredentialValidationResource,
   toImportPreviewResource,
@@ -95,9 +97,11 @@ import {
   toPublicationReadinessResource,
   toRulebookResource,
   toRulebookVersionResource,
+  toRulebookVersionSchemaReferencesResource,
   toSchemaReferenceResource,
   toVerifierConstraintsResource,
   toVersionDiffResource,
+  type HostedSchemaLookup,
 } from './resources'
 
 /** Maximum product-API request body. Import sources are separately bounded. */
@@ -129,6 +133,7 @@ export type ApiOperationId =
   | 'listRulebookVersions'
   | 'getRulebookVersion'
   | 'getRulebookVersionContent'
+  | 'getRulebookVersionSchemaReferences'
   | 'listSchemaDocuments'
   | 'getSchemaDocument'
   | 'getSchemaDocumentContent'
@@ -627,6 +632,25 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
           },
           { name: 'ETag', description: 'Quoted lowercase hex SHA-256 of the returned bytes.' },
         ],
+      },
+      ...errors(400, 404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'getRulebookVersionSchemaReferences',
+    method: 'get',
+    path: '/api/v1/rulebooks/:rulebookId/versions/:version/schema-references',
+    summary: 'Inspect one rulebook version’s schema references and hosted provenance',
+    description:
+      'Public read of the schema references frozen in one exact version snapshot, grouped by attestation type and including the rulebook-level references. A reference whose exact URI names a stored immutable AttestBook schema document carries the public hosted-document projection (media type, SHA-256 digest, W3C SRI pin and permanent URL); every other reference is reported as external. The endpoint reads the frozen snapshot only and never rewrites its bytes; the version label and content digest pin which snapshot was inspected.',
+    tag: 'versions',
+    security: false,
+    parameters: pathParameters(['rulebookId', 'version']),
+    responses: [
+      {
+        status: 200,
+        description: 'The version’s frozen schema references with derived hosted provenance.',
+        schema: 'RulebookVersionSchemaReferencesResponse',
       },
       ...errors(400, 404, 500, 503),
     ],
@@ -1913,11 +1937,39 @@ function getRulebookHandler(dependencies: ApiDependencies): ApiHandler {
   }
 }
 
+/**
+ * Builds the read-only URI→stored-document lookup used by the public
+ * detail/version projections (#103). A reference is hosted only when its exact
+ * URI is the canonical content URL of a document this deployment stores: the
+ * origin comes from configuration, and a mere prefix or a look-alike host stays
+ * external. Results are cached per request.
+ */
+function hostedSchemaLookup(dependencies: ApiDependencies, registry: Registry): HostedSchemaLookup {
+  const publicBaseUrl = dependencies.publicBaseUrl
+  if (publicBaseUrl === undefined || publicBaseUrl === null || publicBaseUrl === '') {
+    return () => null
+  }
+  const cache = new Map<string, ReturnType<HostedSchemaLookup>>()
+  return (uri) => {
+    if (cache.has(uri)) {
+      return cache.get(uri) ?? null
+    }
+    const documentId = hostedSchemaDocumentId(uri, publicBaseUrl)
+    const document = documentId === null ? null : registry.getCredentialSchemaDocument(documentId)
+    const resource = document === null ? null : toHostedSchemaResource(document, publicBaseUrl)
+    cache.set(uri, resource)
+    return resource
+  }
+}
+
 function getRulebookDraftHandler(dependencies: ApiDependencies): ApiHandler {
   return (context) => {
     const registry = requireRegistry(dependencies)
     const content = registry.getDraftContent(context.req.param('rulebookId') ?? '')
-    return context.json({ data: toDraftRulebookResource(content) }, 200)
+    return context.json(
+      { data: toDraftRulebookResource(content, hostedSchemaLookup(dependencies, registry)) },
+      200,
+    )
   }
 }
 
@@ -1930,7 +1982,10 @@ function replaceRulebookDraftHandler(dependencies: ApiDependencies): ApiHandler 
       context.req.param('rulebookId') ?? '',
       parseDraftContentInput(await readJsonBody(context)),
     )
-    return context.json({ data: toDraftRulebookResource(content) }, 200)
+    return context.json(
+      { data: toDraftRulebookResource(content, hostedSchemaLookup(dependencies, registry)) },
+      200,
+    )
   }
 }
 
@@ -1949,10 +2004,12 @@ function listRulebookAttestationsHandler(dependencies: ApiDependencies): ApiHand
       throw apiError(404, 'not_found', 'The requested rulebook does not exist.')
     }
     const references = registry.listSchemaReferences(rulebookId)
+    const hostedFor = hostedSchemaLookup(dependencies, registry)
     const data = registry.listAttestations(rulebookId).map((attestation) =>
       toAttestationResource(
         attestation,
         references.filter((reference) => reference.attestationId === attestation.id),
+        hostedFor,
       ),
     )
     return context.json({ data }, 200)
@@ -1966,8 +2023,13 @@ function listRulebookSchemaReferencesHandler(dependencies: ApiDependencies): Api
     if (registry.getRulebook(rulebookId) === null) {
       throw apiError(404, 'not_found', 'The requested rulebook does not exist.')
     }
+    const hostedFor = hostedSchemaLookup(dependencies, registry)
     return context.json(
-      { data: registry.listSchemaReferences(rulebookId).map(toSchemaReferenceResource) },
+      {
+        data: registry
+          .listSchemaReferences(rulebookId)
+          .map((reference) => toSchemaReferenceResource(reference, hostedFor)),
+      },
       200,
     )
   }
@@ -2022,6 +2084,35 @@ function getRulebookVersionContentHandler(dependencies: ApiDependencies): ApiHan
       'content-digest': sha256StructuredDigest(content.version.contentDigest),
       etag: `"${content.version.contentDigest}"`,
     })
+  }
+}
+
+/**
+ * Reads one frozen snapshot and adds the derived hosted-document association to
+ * its references. The snapshot bytes are parsed, never rewritten.
+ */
+function getRulebookVersionSchemaReferencesHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    const content = registry.getRulebookVersionContent(
+      context.req.param('rulebookId') ?? '',
+      context.req.param('version') ?? '',
+    )
+    if (content === null) {
+      throw apiError(404, 'not_found', 'The requested rulebook version does not exist.')
+    }
+    assertVersionDocument(content.bytes)
+    const document = parseRulebookVersionDocument(content.bytes)
+    return context.json(
+      {
+        data: toRulebookVersionSchemaReferencesResource(
+          content.version,
+          document,
+          hostedSchemaLookup(dependencies, registry),
+        ),
+      },
+      200,
+    )
   }
 }
 
@@ -2593,6 +2684,7 @@ export function createApiHandlers(
     listRulebookVersions: listRulebookVersionsHandler(dependencies),
     getRulebookVersion: getRulebookVersionHandler(dependencies),
     getRulebookVersionContent: getRulebookVersionContentHandler(dependencies),
+    getRulebookVersionSchemaReferences: getRulebookVersionSchemaReferencesHandler(dependencies),
     listSchemaDocuments: listSchemaDocumentsHandler(dependencies),
     getSchemaDocument: getSchemaDocumentHandler(dependencies),
     getSchemaDocumentContent: getSchemaDocumentContentHandler(dependencies),

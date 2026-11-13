@@ -6,10 +6,13 @@
 [issue #38](https://github.com/ForkbombEu/credimi-attestbook/issues/38) (UI-005), the
 draft-editor slice of [issue #40](https://github.com/ForkbombEu/credimi-attestbook/issues/40)
 (UI-003), the lifecycle/comparison slice of
-[issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) (UI-003) and the
+[issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) (UI-003), the
 mock-backed capture explorer of [issue #48](https://github.com/ForkbombEu/credimi-attestbook/issues/48)
-(UI-006, FR-019) and the session-auth migration of
-[issue #91](https://github.com/ForkbombEu/credimi-attestbook/issues/91). It delivers
+(UI-006, FR-019), the session-auth migration of
+[issue #91](https://github.com/ForkbombEu/credimi-attestbook/issues/91), the hosted schema
+controls of [issue #100](https://github.com/ForkbombEu/credimi-attestbook/issues/100) and the
+hosted/external schema provenance of
+[issue #103](https://github.com/ForkbombEu/credimi-attestbook/issues/103). It delivers
 a responsive, searchable catalog of rulebooks, a rulebook detail view with attestation types,
 schema references, provenance, standards-compatibility disclosure, version history and
 deterministic version comparison, a credential validation playground that calls the real
@@ -57,13 +60,21 @@ Implemented by these slices:
   - attestation types with level of assurance, binding type, supported formats and their
     schema references;
   - every schema reference, including rulebook-level references that belong to no
-    attestation type, with format identifier, safe http(s)-only URI and SRI integrity;
+    attestation type, with format identifier, source, safe http(s)-only URI, media type,
+    SHA-256 digest, SRI integrity pin and a download link;
+  - a **Hosted by AttestBook** row is derived from the exact stored-document association
+    returned by the API (never from a URL prefix): it shows the immutable hosted URI, the
+    stored media type and digest, and whether the persisted SRI pin identifies those bytes.
+    Every other value stays an **External URL** and is never fetched just to render the view;
   - source provenance: the source URL (or "locally authored") and registry timestamps;
   - standards-compatibility disclosure: the rulebook is always **Not tested**, and each
     FR-010 evaluation dimension states whether this build supports it per credential, has
     not tested it, or cannot apply it;
   - version history, newest first, with label, status, specification, SHA-256 content
     digest, creation/publication dates and an export of each exact immutable snapshot;
+  - **Inspect references** on each version reads the exact frozen snapshot and shows its
+    schema references grouped by attestation type plus rulebook-level references, with the
+    same hosted/external provenance, the version label and the pinned content digest;
 - loading, error (with retry), empty and not-found states, including section-level
   degradation when a related read fails;
 - accessible markup (landmarks, breadcrumb, table semantics, labelled controls, live status,
@@ -355,6 +366,11 @@ dimensions.
   - external mode records an absolute `https` URL and an optional W3C SRI value without any
     upload or registration call; both modes replace the existing reference for the same
     attestation format instead of duplicating it, and a remove action edits the same JSON;
+  - each row names its source from the API's stored-document association, never from a URL
+    prefix (issue #103). A hosted row shows the document kind, stored media type, SHA-256
+    digest, a download link and whether the persisted SRI pin matches; an external row stays
+    **External URL**. The association is kept beside the raw Draft JSON, which continues to
+    contain only `formatIdentifier`, `uri` and `integrity`;
   - every insertion or removal edits the existing Draft JSON text (preserving unknown
     members, including unrecognised members of references on other formats) and marks the
     form dirty, so it follows the ordinary save path. Registration is asynchronous while the
@@ -519,6 +535,21 @@ set adds the **Schema references** card and the hosted preview state:
 | Payment Account draft editor | `editor-schema-before.png` | `editor-schema-after.png` |
 | Hosted schema form with a valid preview | — | `editor-schema-after-form.png` |
 
+The hosted/external schema provenance slice (issue #103) has before/after captures at
+1280×1000 in the same light theme, taken from the seeded end-to-end server with the same
+mixed hosted/external PID rulebook, the same signed-in administrator and the same viewport.
+The baseline is `908b4c9` (`main` before the slice); the after images are from this PR's
+head. The same hosted document, external reference, version `1.0` and draft are present in
+both revisions, so only the provenance presentation differs. The baseline run used the
+same disposable seed through a test-only copy of the seed script; no baseline application
+source was changed.
+
+| View | Before (`908b4c9`) | After (this slice) |
+| --- | --- | --- |
+| Rulebook details: schema references | [`detail-before.png`](ui/schema-provenance/detail-before.png) | [`detail-after.png`](ui/schema-provenance/detail-after.png) |
+| Version history: exact version references | [`version-before.png`](ui/schema-provenance/version-before.png) | [`version-after.png`](ui/schema-provenance/version-after.png) |
+| Draft editor: schema rows | [`editor-before.png`](ui/schema-provenance/editor-before.png) | [`editor-after.png`](ui/schema-provenance/editor-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
@@ -536,6 +567,12 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
 - detail metadata, provider fallback, attestation types, schema references (including
   rulebook-level ones), provenance, safe http(s)-only URI linking, compatibility disclosure
   and newest-first version history with digest and export URLs;
+- hosted/external schema provenance (#103): the stored-document association marks a
+  reference **Hosted by AttestBook** with its kind, media type, SHA-256 digest and download
+  link, a look-alike URL without an association stays **External URL**, a matching or
+  missing SRI pin is reported explicitly, and the exact-version panel reads the frozen
+  snapshot and shows the same provenance with the version label and content digest
+  (`ui/src/detail.test.ts`, `ui/src/RulebookDetailPage.test.tsx`);
 - section-level degradation when versions or schema references fail, and empty-version and
   malformed-record rendering;
 - the credential playground: catalog loading/error/empty states, dependent version and
@@ -551,8 +588,9 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   keeping it available; immediate JSON-syntax feedback; session-authenticated save with the
   CSRF token and no bearer header; anonymous deep-link gating with the safe `next` target;
   inline re-sign-in after a `401` with the unsaved description preserved; create-and-navigate;
-  read-only published state; absence of a bearer-token field; axe-core checks for the editor
-  page;
+  read-only published state; absence of a bearer-token field; the API-derived hosted
+  association and download/digest display, including a near-miss URL that stays external;
+  axe-core checks for the editor page;
 - the mock-backed capture explorer: loading, error and retry, empty and truncation states, the
   normalized summary columns and evidence gaps, the redacted projection (never the raw claim
   values), external and non-credential evidence refusals, the correlation form and its
@@ -604,6 +642,10 @@ Chromium):
 - catalog → detail navigation, deep-link reload, back-to-catalog, detail metadata,
   attestations, schema references, provenance, compatibility labels, version history and
   export links;
+- hosted and external references in the same published rulebook, the hosted content URL
+  fetched anonymously with its media type, `Content-Digest` and immutable caching, and the
+  exact published version's reference inspection with the same hosted provenance
+  (`ui/e2e/detail.spec.ts`);
 - unknown-rulebook not-found state, detail loading and detail API error + retry;
 - credential playground success against the real validation engine with a freshly signed
   SD-JWT VC fixture, including the untested-dimensions notice, the dimension table and an
@@ -790,6 +832,16 @@ The catalog and detail slices' captures remain in the same directory
 - Provenance is the public projection only (source URL and registry timestamps). The public
   API deliberately does not expose registry-internal import provenance, so the detail view
   says so rather than inventing it.
+- The hosted/external distinction is derived at read time from the configured
+  `PUBLIC_BASE_URL` and the stored document association. If the public origin changes or is
+  unset, a previously published hosted reference cannot be matched and is shown as an
+  external URL even though its old content URL may still resolve; the UI never guesses from
+  the URL shape to avoid a false provenance claim. The persisted draft, snapshot and TS11
+  `SchemaMeta` still carry only the URI and optional pin.
+- External schema references are shown as inert links with their recorded pin; the UI never
+  fetches them merely to render or validate their content. A validity, availability or
+  trust claim about an external document therefore requires a validation flow that was
+  explicitly supplied those bytes.
 - The detail view stays a read-only projection and only links to the draft editor. Version
   comparison is a public read; lifecycle writes live in the editor's publication panel.
   A dedicated publication-export view beyond the exact-bytes link, a publication signature
