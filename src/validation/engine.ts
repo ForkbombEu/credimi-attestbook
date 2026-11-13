@@ -17,6 +17,11 @@ import { TS11_ATTESTATION_LOS_VALUES, TS11_BINDING_TYPE_VALUES } from '../standa
 
 import { createDimension, dimensionDefinition, limitationsFromDimensions } from './dimensions'
 import { recognizeCredentialFormat } from './format'
+import {
+  resolveHostedSchemaDocuments,
+  type HostedSchemaOptions,
+  type HostedSchemaResolution,
+} from './hosted-schema'
 import { parseValidateCredentialInput } from './request'
 import type { SchemaValidationOutcome } from './schema'
 import { validateSchemaDocuments, type SchemaSandboxLimits } from './schema-sandbox'
@@ -60,6 +65,12 @@ export interface CredentialValidatorOptions {
    * caching for a validator instance.
    */
   readonly snapshotCache?: RulebookSnapshotCache | false
+  /**
+   * Resolves canonical AttestBook-hosted schema URLs from the immutable local
+   * store (#101). Absent when the deployment has no configured public origin,
+   * in which case every reference keeps the caller-supplied document flow.
+   */
+  readonly hostedSchemas?: HostedSchemaOptions
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -182,6 +193,7 @@ function unparsedSchemaReferences(
     integrity: reference.integrity,
     kind: null,
     applied: false,
+    source: null,
   }))
 }
 
@@ -198,6 +210,7 @@ export function schemaDimensionFromOutcome(
   documentsSupplied: number,
 ): ValidationDimension {
   const appliedDocuments = outcome.schemaReferences.filter((entry) => entry.applied).length
+  const hostedReferences = outcome.schemaReferences.filter((entry) => entry.source === 'hosted')
   const status: ValidationStatus =
     outcome.status === 'INCONCLUSIVE' && appliedDocuments === 0 ? 'NOT_TESTED' : outcome.status
   const applicable = status !== 'NOT_APPLICABLE'
@@ -213,7 +226,7 @@ export function schemaDimensionFromOutcome(
       scope: dimensionDefinition('schema_validation').scope,
       reason:
         status === 'PASS'
-          ? 'Every supplied schema document for the pinned references was applied and satisfied.'
+          ? 'Every schema document for the pinned references was applied and satisfied.'
           : (primaryFinding?.message ??
             'Schema validation did not reach a conclusive result for every pinned reference.'),
       details: {
@@ -221,6 +234,8 @@ export function schemaDimensionFromOutcome(
         references: referenceCount,
         documents_supplied: documentsSupplied,
         applied_documents: appliedDocuments,
+        hosted_references: hostedReferences.length,
+        hosted_documents_applied: hostedReferences.filter((entry) => entry.applied).length,
       },
     },
   })
@@ -233,6 +248,7 @@ export class CredentialValidator {
   private readonly generateId: () => string
   private readonly sandbox: SchemaSandboxLimits
   private readonly snapshotCache: RulebookSnapshotCache | null
+  private readonly hostedSchemas: HostedSchemaOptions | undefined
 
   constructor(options: CredentialValidatorOptions) {
     this.source = options.source
@@ -243,6 +259,7 @@ export class CredentialValidator {
       options.snapshotCache === false
         ? null
         : (options.snapshotCache ?? new RulebookSnapshotCache())
+    this.hostedSchemas = options.hostedSchemas
   }
 
   /**
@@ -471,10 +488,21 @@ export class CredentialValidator {
       )
       schemaReferences = []
     } else {
+      // Canonical hosted URLs are resolved from the immutable store before the
+      // caller's documents are considered; caller bytes can never override one.
+      const hosted: ReadonlyMap<number, HostedSchemaResolution> | undefined =
+        this.hostedSchemas === undefined
+          ? undefined
+          : resolveHostedSchemaDocuments({
+              references: matchingReferences,
+              publicBaseUrl: this.hostedSchemas.publicBaseUrl,
+              store: this.hostedSchemas.store,
+            })
       const outcome = await validateSchemaDocuments(
         {
           references: matchingReferences,
           documents: request.schemaDocuments ?? [],
+          ...(hosted === undefined ? {} : { hosted }),
           parsed,
         },
         this.sandbox,

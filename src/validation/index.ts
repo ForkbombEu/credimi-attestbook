@@ -1,9 +1,18 @@
 // Public surface of the AttestBook credential-validation module (issue #32).
 //
 // See docs/validation.md for the executed dimensions, the pinned-rulebook
-// evidence, the supplied-schema-document rule and the honest non-claims.
+// evidence, the hosted/external schema-document source rule and the honest
+// non-claims.
 
 export { CredentialValidator, type CredentialValidatorOptions } from './engine'
+
+export {
+  hostedSchemaDocumentId,
+  resolveHostedSchemaDocuments,
+  type HostedSchemaDocumentStore,
+  type HostedSchemaOptions,
+  type HostedSchemaResolution,
+} from './hosted-schema'
 
 export {
   MAX_ATTESTATION_TYPE_LENGTH,

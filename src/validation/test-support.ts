@@ -131,8 +131,8 @@ export interface SeedRulebookOptions {
   readonly schemaFormatIdentifier?: string
   readonly schemaUri?: string
   readonly schemaContent?: string
-  /** Overrides the computed sha256 SRI pin; used to test unverifiable pins. */
-  readonly schemaIntegrity?: string
+  /** Overrides the computed sha256 SRI pin; `null` leaves the reference unpinned. */
+  readonly schemaIntegrity?: string | null
 }
 
 export interface SeededRulebook {
@@ -143,7 +143,8 @@ export interface SeededRulebook {
   readonly digest: string
   readonly schemaUri: string
   readonly schemaContent: string
-  readonly integrity: string
+  /** The pinned SRI, or `null` for an unpinned reference fixture. */
+  readonly integrity: string | null
   /** Bearer secret returned once by provisioning; used for HTTP requests. */
   readonly token: string
   /** Trusted actor the same provider resolves to; used for direct service calls. */
@@ -170,7 +171,8 @@ export function seedPublishedRulebook(
   const rulebookName = options.rulebookName ?? 'PID Rulebook'
   const schemaUri = options.schemaUri ?? TEST_VCT
   const schemaContent = options.schemaContent ?? PID_TYPE_METADATA_TEXT
-  const integrity = options.schemaIntegrity ?? sha256Sri(schemaContent)
+  const integrity =
+    options.schemaIntegrity === undefined ? sha256Sri(schemaContent) : options.schemaIntegrity
 
   const rulebook = registry.createRulebook(actor, {
     name: rulebookName,
@@ -194,7 +196,7 @@ export function seedPublishedRulebook(
   registry.addSchemaReference(actor, rulebook.id, {
     formatIdentifier: options.schemaFormatIdentifier ?? 'dc+sd-jwt',
     uri: schemaUri,
-    integrity,
+    ...(integrity === null ? {} : { integrity }),
     attestationId: attestation.id,
   })
 

@@ -41,6 +41,11 @@ const validation = new CredentialValidator({
     maxEntries: config.validationCacheMaxEntries,
     maxBytes: config.validationCacheMaxMb * 1024 * 1024,
   }),
+  // A canonical hosted URL exists only when the deployment configured its
+  // origin; without it every reference keeps the caller-supplied flow.
+  ...(config.publicBaseUrl === null
+    ? {}
+    : { hostedSchemas: { publicBaseUrl: config.publicBaseUrl, store: registry } }),
 })
 const issuerFixtures = new IssuerFixtureGenerator({ source: registry, sandbox: schemaSandbox })
 // UI-006 is deliberately mock-backed: the explorer is seeded from the
