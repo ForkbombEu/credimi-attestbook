@@ -248,7 +248,9 @@ token because it records server state that every reader sees.
 - Credential validation recognises an AttestBook-hosted reference only by the exact canonical
   content URL of that configured origin, and resolves it from the immutable local store
   (`src/validation/hosted-schema.ts`). It never performs an HTTP request to the URL, never
-  classifies a reference from a string prefix or look-alike origin, recomputes the SHA-256 of
+  classifies a reference from a string prefix or look-alike origin, and rejects an identifier
+  longer than the registry's 128-character bound so an untrusted rulebook reference cannot
+  make the store throw. It recomputes the SHA-256 of
   the stored bytes and requires it to equal the recorded digest and the pinned `sha256-...`
   SRI before applying the document. Missing or changed stored bytes are explicit `NOT_TESTED`
   or `FAIL` evidence, and caller-supplied `schemaDocuments` cannot override a hosted

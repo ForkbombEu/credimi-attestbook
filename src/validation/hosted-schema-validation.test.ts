@@ -294,6 +294,27 @@ describe('hosted schema resolution in credential validation', () => {
     expect(seeded.schemaUri).not.toBe(lookAlike)
   })
 
+  test('an overlong hosted-looking id stays external instead of failing the run', async () => {
+    const { fixture, validator } = await seedHosted({})
+    const overlongUri = `${PUBLIC_BASE_URL}/api/v1/schema-documents/${'a'.repeat(129)}/content`
+    const external = seedPublishedRulebook(fixture.database, fixture.registry, {
+      authority: 'overlong-id-external',
+      schemaUri: overlongUri,
+      schemaIntegrity: sha256Sri(HOSTED_SCHEMA_TEXT),
+    })
+    // The registry rejects an overlong identifier; the resolver must never let
+    // that become a request failure.
+    const result = await validator.validate(request(external, await issueTestCredential()))
+
+    const schema = dimension(result, 'schema_validation')
+    expect(schema?.status).toBe('NOT_TESTED')
+    expect(schema?.executed).toBe(false)
+    expect(result.schemaReferences[0]).toMatchObject({ source: null, applied: false })
+    expect(result.limitations.map((entry) => entry.code)).toContain('schema_document_not_supplied')
+    expect(dimension(result, 'cryptographic_verification')?.status).toBe('NOT_TESTED')
+    expect(dimension(result, 'issuer_trust')?.status).toBe('NOT_TESTED')
+  })
+
   test('mixed hosted and external references select their source deterministically', async () => {
     const { fixture, hostedUri } = await seedHosted({})
     const provider = provisionProvider(fixture.database, {

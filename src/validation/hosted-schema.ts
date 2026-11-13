@@ -15,7 +15,9 @@
 // exact bytes from the caller.
 
 import { sha256Hex } from '../registry/digest'
+import { RegistryError } from '../registry/errors'
 import type { CredentialSchemaDocumentContent } from '../registry/types'
+import { MAX_ID_LENGTH } from '../registry/validation'
 
 import type { SnapshotSchemaReference } from './types'
 
@@ -99,7 +101,12 @@ export function hostedSchemaDocumentId(uri: string, publicBaseUrl: string): stri
     HOSTED_SCHEMA_PATH_PREFIX.length,
     path.length - HOSTED_SCHEMA_PATH_SUFFIX.length,
   )
-  if (segment === '' || segment.includes('/') || !HOSTED_SCHEMA_ID_PATTERN.test(segment)) {
+  if (
+    segment === '' ||
+    segment.length > MAX_ID_LENGTH ||
+    segment.includes('/') ||
+    !HOSTED_SCHEMA_ID_PATTERN.test(segment)
+  ) {
     return null
   }
   return segment
@@ -130,7 +137,19 @@ export function resolveHostedSchemaDocuments(options: {
     if (documentId === null) {
       return
     }
-    const stored = options.store.getCredentialSchemaDocumentContent(documentId)
+    // A store read is part of evaluation, never a way to fail the whole
+    // request: an input-validation failure means the URL cannot name a stored
+    // document. Any other error (I/O, corruption) still fails closed upward.
+    let stored: CredentialSchemaDocumentContent | null
+    try {
+      stored = options.store.getCredentialSchemaDocumentContent(documentId)
+    } catch (error) {
+      if (error instanceof RegistryError && error.code === 'invalid_input') {
+        resolutions.set(index, { kind: 'missing', documentId })
+        return
+      }
+      throw error
+    }
     if (stored === null) {
       resolutions.set(index, { kind: 'missing', documentId })
       return

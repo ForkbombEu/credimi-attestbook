@@ -5,7 +5,9 @@
 import { describe, expect, test } from 'bun:test'
 
 import { sha256Hex } from '../registry/digest'
+import { invalidInput } from '../registry/errors'
 import type { CredentialSchemaDocument, CredentialSchemaDocumentContent } from '../registry/types'
+import { MAX_ID_LENGTH } from '../registry/validation'
 
 import { hostedSchemaDocumentId, resolveHostedSchemaDocuments } from './hosted-schema'
 import type { SnapshotSchemaReference } from './types'
@@ -80,6 +82,24 @@ describe('hostedSchemaDocumentId', () => {
       expect(hostedSchemaDocumentId(uri, PUBLIC_BASE_URL)).toBeNull()
     }
   })
+
+  test('rejects a document id longer than the registry identifier bound', () => {
+    const longest = 'a'.repeat(MAX_ID_LENGTH)
+    expect(
+      hostedSchemaDocumentId(
+        `${PUBLIC_BASE_URL}/api/v1/schema-documents/${longest}/content`,
+        PUBLIC_BASE_URL,
+      ),
+    ).toBe(longest)
+    // An overlong id is not a canonical hosted URL: it must stay external
+    // instead of reaching a registry read that would reject it.
+    expect(
+      hostedSchemaDocumentId(
+        `${PUBLIC_BASE_URL}/api/v1/schema-documents/${'a'.repeat(MAX_ID_LENGTH + 1)}/content`,
+        PUBLIC_BASE_URL,
+      ),
+    ).toBeNull()
+  })
 })
 
 describe('resolveHostedSchemaDocuments', () => {
@@ -147,5 +167,33 @@ describe('resolveHostedSchemaDocuments', () => {
       },
     })
     expect(resolutions.get(0)).toEqual({ kind: 'corrupt', documentId: DOCUMENT_ID })
+  })
+
+  test('treats a store input-validation failure as a missing document', () => {
+    const resolutions = resolveHostedSchemaDocuments({
+      references: [reference(DOCUMENT_URI)],
+      publicBaseUrl: PUBLIC_BASE_URL,
+      store: {
+        getCredentialSchemaDocumentContent: () => {
+          throw invalidInput('documentId must be at most 128 characters')
+        },
+      },
+    })
+    expect(resolutions.get(0)).toEqual({ kind: 'missing', documentId: DOCUMENT_ID })
+  })
+
+  test('rethrows a store failure that is not an input-validation error', () => {
+    const failure = new Error('database unavailable')
+    expect(() =>
+      resolveHostedSchemaDocuments({
+        references: [reference(DOCUMENT_URI)],
+        publicBaseUrl: PUBLIC_BASE_URL,
+        store: {
+          getCredentialSchemaDocumentContent: () => {
+            throw failure
+          },
+        },
+      }),
+    ).toThrow(failure)
   })
 })

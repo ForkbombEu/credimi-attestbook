@@ -93,10 +93,12 @@ deterministic sources, chosen per reference:
 1. **AttestBook-hosted reference (#101).** A reference is hosted only when its URI is exactly
    the canonical content URL of this deployment's configured `PUBLIC_BASE_URL`:
    `${PUBLIC_BASE_URL}/api/v1/schema-documents/{documentId}/content`, with no credentials,
-   query, fragment or extra path. The engine reads the document from the immutable local
+   query, fragment or extra path and one identifier segment of at most 128 characters. The
+   engine reads the document from the immutable local
    store — never over HTTP — recomputes SHA-256 over the stored bytes, requires it to equal
    the document's recorded `contentDigest`, and requires the reference `sha256-...` SRI to
-   equal that digest. A look-alike origin, a prefixed string or a near-miss path is **not**
+   equal that digest. A look-alike origin, a prefixed string, an overlong identifier or a
+   near-miss path is **not**
    hosted and stays an external reference. A canonical hosted reference whose document is
    missing, whose stored bytes changed, whose SRI is absent or mismatched, or that has an
    unsupported pin is settled explicitly (see below); the caller's `schemaDocuments` entry

@@ -163,6 +163,25 @@ describe('POST /api/v1/credentials/validate with hosted schemas', () => {
     expect(seeded.rulebookId).not.toBe(external.rulebookId)
   })
 
+  test('an overlong hosted-looking id answers 200 with NOT_TESTED, not a request error', async () => {
+    const { app } = await setupHosted()
+    const overlongUri = `${PUBLIC_BASE_URL}/api/v1/schema-documents/${'a'.repeat(129)}/content`
+    const external = seedPublishedRulebook(fixture!.database, fixture!.registry, {
+      authority: 'overlong-hosted-http',
+      schemaUri: overlongUri,
+      schemaIntegrity: sha256Sri(HOSTED_SCHEMA_TEXT),
+    })
+    const response = await postValidate(app, body(external, await issueTestCredential()))
+    expect(response.status).toBe(200)
+    const result = await resultBody(response)
+
+    const schema = result.dimensions.find((entry) => entry.id === 'schema_validation')
+    expect(schema?.status).toBe('NOT_TESTED')
+    expect(schema?.executed).toBe(false)
+    expect(result.schemaReferences[0]).toMatchObject({ source: null, applied: false })
+    expect(result.overallStatus).not.toBe('PASS')
+  })
+
   test('an external-only version keeps the caller-supplied schemaDocuments flow', async () => {
     const { app } = await setupHosted()
     const external = seedPublishedRulebook(fixture!.database, fixture!.registry, {
