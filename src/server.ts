@@ -46,12 +46,18 @@ const issuerFixtures = new IssuerFixtureGenerator({ source: registry, sandbox: s
 // UI-006 is deliberately mock-backed: the explorer is seeded from the
 // deterministic local mock source and labels every capture `transport: mock`.
 const captures = createMockCaptureExplorer({ validation })
+if (config.publicBaseUrl === null) {
+  console.warn(
+    'PUBLIC_BASE_URL is not set: hosted credential schema URLs and their metadata are unavailable',
+  )
+}
 const app = createApp({
   registry,
   validation,
   issuerFixtures,
   captures,
   adminAuth,
+  publicBaseUrl: config.publicBaseUrl,
   ...(existsSync(UI_DIST_PATH) ? { uiRoot: UI_DIST_PATH } : {}),
 })
 

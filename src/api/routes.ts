@@ -46,6 +46,7 @@ import type { ImportPreview, ImportResult, ImportSource } from '../import'
 import { assessPublicationReadiness, compareVersionDocuments } from '../lifecycle'
 import { buildPublicationExportManifest, publicationExportFilename } from '../publication'
 import type { PublicationExportManifest } from '../publication'
+import { parsePublicBaseUrl } from '../public-urls'
 import type { Registry } from '../registry/registry'
 import { invalidInput, unauthorized } from '../registry/errors'
 import type {
@@ -76,6 +77,7 @@ import {
   toCaptureExplorerDetailResource,
   toCaptureExplorerPageResource,
   toConformanceResultResource,
+  toCredentialSchemaDocumentResource,
   toDraftRulebookResource,
   toHeadlessWalletComparisonResource,
   toProviderResource,
@@ -99,6 +101,12 @@ export const MAX_API_BODY_BYTES = 4 * 1024 * 1024
 const DEFAULT_PAGE_LIMIT = 50
 const MAX_PAGE_LIMIT = 100
 
+/**
+ * The exact bytes of a stored schema document never change, so a permanent URL
+ * is safe to cache for a year. `immutable` stops a client from revalidating.
+ */
+const IMMUTABLE_SCHEMA_CACHE_CONTROL = 'public, max-age=31536000, immutable'
+
 /** Every operation is identified by a stable id in the OpenAPI document. */
 export type ApiOperationId =
   | 'getHealth'
@@ -116,6 +124,9 @@ export type ApiOperationId =
   | 'listRulebookVersions'
   | 'getRulebookVersion'
   | 'getRulebookVersionContent'
+  | 'listSchemaDocuments'
+  | 'getSchemaDocument'
+  | 'getSchemaDocumentContent'
   | 'createRulebook'
   | 'createRulebookVersion'
   | 'refreshRulebookVersion'
@@ -174,6 +185,7 @@ export interface ApiRouteSpec {
     | 'providers'
     | 'rulebooks'
     | 'versions'
+    | 'schemas'
     | 'imports'
     | 'issuers'
     | 'credentials'
@@ -257,6 +269,14 @@ const PATH_VERSION: ApiParameterSpec = {
   schema: { type: 'string' },
 }
 
+const PATH_SCHEMA_DOCUMENT_ID: ApiParameterSpec = {
+  name: 'documentId',
+  in: 'path',
+  required: true,
+  description: 'Stable AttestBook credential schema document identifier.',
+  schema: { type: 'string' },
+}
+
 const PATH_CAPTURE_ID: ApiParameterSpec = {
   name: 'captureId',
   in: 'path',
@@ -272,6 +292,9 @@ function pathParameters(ids: readonly string[]): readonly ApiParameterSpec[] {
     }
     if (id === 'version') {
       return PATH_VERSION
+    }
+    if (id === 'documentId') {
+      return PATH_SCHEMA_DOCUMENT_ID
     }
     throw new Error(`unknown path parameter ${id}`)
   })
@@ -598,6 +621,98 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
           },
           { name: 'ETag', description: 'Quoted lowercase hex SHA-256 of the returned bytes.' },
         ],
+      },
+      ...errors(400, 404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'listSchemaDocuments',
+    method: 'get',
+    path: '/api/v1/schema-documents',
+    summary: 'List stored credential schema documents',
+    description:
+      'Public, paginated metadata of provider-owned immutable credential schema documents. Each entry carries the exact-bytes digest, its W3C SRI pin, the canonical media type and the permanent hosted content URL. The URL is composed from the configured public base URL, never from request `Host` or `Forwarded` headers; provider ownership and provenance are not exposed.',
+    tag: 'schemas',
+    security: false,
+    parameters: [
+      {
+        name: 'limit',
+        in: 'query',
+        required: false,
+        description: 'Page size (default 50, maximum 100).',
+        schema: { type: 'integer', minimum: 1, maximum: MAX_PAGE_LIMIT },
+      },
+      {
+        name: 'offset',
+        in: 'query',
+        required: false,
+        description: 'Number of stored schema documents to skip (default 0).',
+        schema: { type: 'integer', minimum: 0 },
+      },
+    ],
+    responses: [
+      {
+        status: 200,
+        description: 'A page of public stored-schema metadata.',
+        schema: 'CredentialSchemaDocumentPageResponse',
+      },
+      ...errors(400, 500, 503),
+    ],
+  },
+  {
+    operationId: 'getSchemaDocument',
+    method: 'get',
+    path: '/api/v1/schema-documents/:documentId',
+    summary: 'Get stored credential schema metadata and hosted URL',
+    description:
+      'Public metadata of one immutable stored schema document: kind, canonical media type, SHA-256 digest, W3C SRI pin, creation time and the permanent hosted URL. The URL is composed from the configured public base URL; `Host`, `Forwarded` and `X-Forwarded-*` request headers have no effect. Provider ownership and provenance stay private. Answers `503 public_base_url_unavailable` when the deployment has not configured a public origin, because a canonical URL cannot be issued.',
+    tag: 'schemas',
+    security: false,
+    parameters: pathParameters(['documentId']),
+    responses: [
+      {
+        status: 200,
+        description: 'The public stored-schema metadata and hosted URL.',
+        schema: 'CredentialSchemaDocumentResponse',
+      },
+      ...errors(400, 404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'getSchemaDocumentContent',
+    method: 'get',
+    path: '/api/v1/schema-documents/:documentId/content',
+    summary: 'Download a stored credential schema document’s exact bytes',
+    description:
+      'Public, unauthenticated permanent URL of the exact immutable bytes registered by a provider. The body is returned byte-for-byte under the recorded media type and is never re-serialized. `Content-Digest` and `ETag` carry the SHA-256 integrity evidence and `Cache-Control` marks the content immutable; a matching `If-None-Match` answers `304`. Unknown identifiers answer `404` without revealing internal storage data, and the route has no mutation method.',
+    tag: 'schemas',
+    security: false,
+    parameters: pathParameters(['documentId']),
+    responses: [
+      {
+        status: 200,
+        description:
+          'The exact immutable document bytes; `Content-Type` is the recorded canonical media type.',
+        headers: [
+          {
+            name: 'Content-Digest',
+            description: 'RFC 9530 `sha-256=:<base64>:` of the returned bytes.',
+          },
+          { name: 'ETag', description: 'Quoted lowercase hex SHA-256 of the returned bytes.' },
+          {
+            name: 'Cache-Control',
+            description: '`public, max-age=31536000, immutable`: the bytes never change.',
+          },
+          {
+            name: 'X-Content-Type-Options',
+            description: '`nosniff`, so a browser cannot reinterpret the JSON bytes.',
+          },
+        ],
+      },
+      {
+        status: 304,
+        description: 'The request’s `If-None-Match` matches the current ETag; no body is sent.',
+        headers: [{ name: 'ETag', description: 'Quoted lowercase hex SHA-256 of the bytes.' }],
       },
       ...errors(400, 404, 500, 503),
     ],
@@ -1086,6 +1201,12 @@ export interface ApiDependencies {
   readonly verifierPolicy?: VerifierPolicyService
   /** Environment-configured administrator browser login; absent means unavailable. */
   readonly adminAuth?: AdminAuth
+  /**
+   * Trusted public origin used to build permanent hosted-schema URLs (#98).
+   * Absent or `null` means this server cannot issue those URLs and the metadata
+   * routes answer `503`; request headers are never used as a fallback.
+   */
+  readonly publicBaseUrl?: string | null
 }
 
 export type ApiHandler = (context: Context) => Response | Promise<Response>
@@ -1843,6 +1964,110 @@ function getRulebookVersionContentHandler(dependencies: ApiDependencies): ApiHan
   }
 }
 
+function requirePublicBaseUrl(dependencies: ApiDependencies): string {
+  const baseUrl = dependencies.publicBaseUrl
+  if (baseUrl === undefined || baseUrl === null || baseUrl === '') {
+    throw apiError(
+      503,
+      'public_base_url_unavailable',
+      'The server has no configured public base URL, so it cannot issue hosted schema URLs.',
+    )
+  }
+  // Configuration already validated it; re-checking here keeps a directly
+  // constructed application from emitting a malformed permanent URL.
+  try {
+    const parsed = parsePublicBaseUrl(baseUrl)
+    if (parsed === null) {
+      throw new Error('missing public base URL')
+    }
+    return parsed
+  } catch {
+    throw apiError(
+      503,
+      'public_base_url_unavailable',
+      'The server public base URL is invalid, so it cannot issue hosted schema URLs.',
+    )
+  }
+}
+
+function listSchemaDocumentsHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    const publicBaseUrl = requirePublicBaseUrl(dependencies)
+    const limit = parsePositiveInteger(
+      context.req.query('limit'),
+      'limit',
+      DEFAULT_PAGE_LIMIT,
+      1,
+      MAX_PAGE_LIMIT,
+    )
+    const offset = parsePositiveInteger(context.req.query('offset'), 'offset', 0, 0)
+    const documents = registry.listCredentialSchemaDocuments()
+    const data = documents
+      .slice(offset, offset + limit)
+      .map((document) => toCredentialSchemaDocumentResource(document, publicBaseUrl))
+    return context.json({ data, pagination: { limit, offset, total: documents.length } }, 200)
+  }
+}
+
+function getSchemaDocumentHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    const publicBaseUrl = requirePublicBaseUrl(dependencies)
+    const document = registry.getCredentialSchemaDocument(context.req.param('documentId') ?? '')
+    if (document === null) {
+      throw apiError(404, 'not_found', 'The requested credential schema document does not exist.')
+    }
+    return context.json({ data: toCredentialSchemaDocumentResource(document, publicBaseUrl) }, 200)
+  }
+}
+
+/** Weak comparison of one `If-None-Match` field value against a strong ETag. */
+function matchesIfNoneMatch(header: string | undefined, etag: string): boolean {
+  if (header === undefined) {
+    return false
+  }
+  const normalized = header.trim()
+  if (normalized === '*') {
+    return true
+  }
+  const target = etag.startsWith('W/') ? etag.slice(2) : etag
+  return normalized
+    .split(',')
+    .map((candidate) => candidate.trim())
+    .some((candidate) => (candidate.startsWith('W/') ? candidate.slice(2) : candidate) === target)
+}
+
+function getSchemaDocumentContentHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    const content = registry.getCredentialSchemaDocumentContent(
+      context.req.param('documentId') ?? '',
+    )
+    if (content === null) {
+      throw apiError(404, 'not_found', 'The requested credential schema document does not exist.')
+    }
+    // The stored bytes are returned unchanged; validating or re-serializing
+    // them would break the recorded digest.
+    const bytes = new Uint8Array(content.bytes)
+    const digest = content.document.contentDigest
+    const etag = `"${digest}"`
+    const cacheHeaders = {
+      'cache-control': IMMUTABLE_SCHEMA_CACHE_CONTROL,
+      'content-digest': sha256StructuredDigest(digest),
+      etag,
+      'x-content-type-options': 'nosniff',
+    }
+    if (matchesIfNoneMatch(context.req.header('if-none-match'), etag)) {
+      return new Response(null, { status: 304, headers: cacheHeaders })
+    }
+    return context.body(bytes, 200, {
+      'content-type': content.document.mediaType,
+      ...cacheHeaders,
+    })
+  }
+}
+
 function createRulebookHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const registry = requireRegistry(dependencies)
@@ -2258,6 +2483,9 @@ export function createApiHandlers(
     listRulebookVersions: listRulebookVersionsHandler(dependencies),
     getRulebookVersion: getRulebookVersionHandler(dependencies),
     getRulebookVersionContent: getRulebookVersionContentHandler(dependencies),
+    listSchemaDocuments: listSchemaDocumentsHandler(dependencies),
+    getSchemaDocument: getSchemaDocumentHandler(dependencies),
+    getSchemaDocumentContent: getSchemaDocumentContentHandler(dependencies),
     createRulebook: createRulebookHandler(dependencies),
     createRulebookVersion: createRulebookVersionHandler(dependencies),
     refreshRulebookVersion: refreshRulebookVersionHandler(dependencies),

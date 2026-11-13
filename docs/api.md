@@ -44,7 +44,10 @@ Implemented and exposed by this slice:
   [issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44));
 - structural credential validation against a pinned rulebook version;
 - reproducible continuous-conformance evidence with a stable content-addressed result
-  reference (added by [issue #51](https://github.com/ForkbombEu/credimi-attestbook/issues/51)).
+  reference (added by [issue #51](https://github.com/ForkbombEu/credimi-attestbook/issues/51));
+- public, unauthenticated retrieval of immutable stored credential schema documents at
+  permanent URLs built from the configured public origin (added by
+  [issue #98](https://github.com/ForkbombEu/credimi-attestbook/issues/98)).
 
 The public API is the integration boundary for Credimi. The standalone adapter documented in
 [`docs/credimi-integration.md`](credimi-integration.md) (issue #49) consumes these routes only:
@@ -60,6 +63,8 @@ Deliberately **not** in this slice:
 - provider-management HTTP routes, generic API rate limiting and token expiry/rotation —
   future hardening; the administrator login has its own failure limit and the implemented
   write-auth model is documented in [`docs/security.md`](security.md);
+- provider-authorized schema registration (`POST`/upload, issue #99): the public read and
+  permanent-URL surface exists, but no route uploads, replaces or deletes a document;
 - a publication signature: no export claims one. OWF 0.5.4 signs only a bare OWF-profile
   `SchemaMeta` compact JWS and does not implement the TS11 v1.0.1 catalogue-response JWS,
   while a version snapshot is not a `SchemaMeta` document; the manifest reports this boundary
@@ -82,13 +87,14 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.9.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.12.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
   export operations added by #42, issuer discovery added by #43, issuer fixture generation
   added by #44, the mock-backed capture explorer added by #48, the optional pinned
   correlation digest added by #49, the read-only headless-wallet comparison added by
-  #50 and the reproducible conformance run added by #51); it is separate from the package
-  version reported by `/health`.
+  #50, the reproducible conformance run added by #51 and the public hosted
+  credential-schema document reads added by #98); it is separate from the package version
+  reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -125,6 +131,9 @@ All operations are synchronous in Phase 1.
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publication-readiness` | no | `200` | Pre-publication checks and explicit limitations; never a publication or a conformance claim. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export` | no | `200` | Download the exact immutable bytes of a published or historical artifact; `Content-Digest`, `ETag` and an attachment filename are returned. Drafts answer `409 conflict`. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export/manifest` | no | `200` | Publication export manifest: frozen identity, digest, bounded provenance, integrity result and the explicit signature boundary. Drafts answer `409 conflict`. |
+| `GET` | `/api/v1/schema-documents` | no | `200` | Paginated public metadata of stored immutable credential schema documents (`limit`, `offset`), each with its digest, W3C SRI pin and canonical hosted URL. Provider ownership and provenance are never returned. |
+| `GET` | `/api/v1/schema-documents/{documentId}` | no | `200` | One stored schema document's public metadata and permanent hosted URL, composed from the configured `PUBLIC_BASE_URL` and never from request headers. `503 public_base_url_unavailable` when no public origin is configured. |
+| `GET` | `/api/v1/schema-documents/{documentId}/content` | no | `200` | The exact immutable registered bytes under the recorded `application/schema+json` or `application/json` media type, with `Content-Digest`, `ETag`, immutable `Cache-Control` and `X-Content-Type-Options: nosniff`; a matching `If-None-Match` answers `304`. Unknown ids answer `404`; no mutation method exists. |
 | `POST` | `/api/v1/imports/preview` | yes | `200` | Bounded, read-only URL/JSON import preview. |
 | `POST` | `/api/v1/imports` | yes | `200` | Import compatible entries as drafts, reporting per-entry dispositions. |
 | `POST` | `/api/v1/issuers/discover` | yes | `200` | Bounded OpenID4VCI issuer metadata discovery with candidate rulebook associations, ambiguity and unmatched reporting. |

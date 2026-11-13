@@ -27,7 +27,7 @@ administrator login, sessions, rate limiting and origin checks) and
 
 | Actor | Credentials | Authority |
 | --- | --- | --- |
-| Anonymous reader | none | Public catalogue, attestation, schema-reference, version, snapshot and health reads; structural credential validation. |
+| Anonymous reader | none | Public catalogue, attestation, schema-reference, version, snapshot, stored credential-schema metadata/content and health reads; structural credential validation. |
 | Provider account | Provider bearer token (`Authorization: Bearer att_…`) | Create and mutate only the rulebooks owned by that provider; import drafts owned by that provider; preview imports; discover issuer metadata. |
 | Administrator (browser) | Environment-configured username and Argon2id password hash; opaque session cookie plus its session-bound CSRF token | Authorize the same protected provider write routes a bearer token authorizes, as the bound **existing** provider (issue #89). The session resolves to the same trusted actor as a token; every state-changing cookie request must echo `X-CSRF-Token`. It does not create a provider or mint or expose a bearer token. |
 | Operator | Out-of-band deployment access | Provision a provider and its first token, configure the optional administrator login, audit inspection and deployment configuration. Nothing in the HTTP API performs provider administration. |
@@ -187,6 +187,8 @@ The following rules implement that model:
 | `GET /api/v1/auth/me` | session cookie | Resolves only its own live session; returns the public provider projection and the session CSRF token | `401` for missing, expired or revoked sessions |
 | `POST /api/v1/auth/logout` | session cookie + CSRF token | Revokes its own session; idempotent; a live session requires its CSRF token, an absent one needs none | `403` cross-origin or `csrf_failed`; `204` when there is nothing to revoke |
 | `GET /api/v1/rulebooks`, `GET /api/v1/rulebooks/{id}` | no | n/a | `404` for an unknown id |
+| `GET /api/v1/schema-documents`, `GET /api/v1/schema-documents/{documentId}` | no | Public stored-schema metadata only; canonical URL built from configured `PUBLIC_BASE_URL`; provider ownership, provenance and tokens never returned | `404` for an unknown id; `503 public_base_url_unavailable` without a configured origin; `400` for invalid pagination |
+| `GET /api/v1/schema-documents/{documentId}/content` | no | Public exact immutable bytes; `Content-Digest`/`ETag` integrity evidence; no write method registered | `404` for an unknown id; `400` for an invalid identifier |
 | `GET …/attestations`, `…/schema-references`, `…/versions`, `…/versions/{version}`, `…/content` | no | n/a | `404` for an unknown resource |
 | `POST /api/v1/rulebooks` | bearer or session+CSRF | New rulebook is owned by the actor; the body cannot set its provider | `401`; `400` for invalid input |
 | `GET /api/v1/rulebooks/{id}/draft` | no | Public working-copy projection; no internal metadata | `404` for an unknown id |
@@ -234,6 +236,14 @@ token because it records server state that every reader sees.
   Route-level authentication and service-level authorization are independent layers.
 - The shared 4 MiB body limit on `/api/*` runs before route authentication, so a request
   whose declared body exceeds it is rejected with `413` without being read or authenticated.
+- Canonical hosted-schema URLs are built only from the operator-configured
+  `PUBLIC_BASE_URL` (`src/public-urls.ts`). The request's `Host`, `Forwarded`,
+  `X-Forwarded-Host` and `X-Forwarded-Proto` headers are never used to compose a stored,
+  published or returned URL, so an attacker cannot make AttestBook mint a URL that later
+  appears in a rulebook or snapshot. The configuration accepts only an HTTPS origin (plain
+  HTTP only for loopback hosts) without credentials, path, query or fragment, and an invalid
+  value fails startup. A missing origin leaves the content route working but makes the
+  metadata routes answer an explicit `503 public_base_url_unavailable`.
 
 ## 5. Error consistency
 
@@ -272,6 +282,11 @@ the response cannot be used to learn which credential path failed; the session-o
   authentication or any request content.
 - The audit trail stores identifiers, actions, field names, version labels and content digests.
   It does not store raw tokens, token hashes, credential material or personal attributes.
+- Hosted credential schema metadata is a public projection: identifier, kind, media type,
+  SHA-256 digest, SRI pin, creation time and canonical URL. Provider ownership, provenance and
+  every token stay registry-internal. The exact document bytes are public by design, because
+  the permanent URL is referenced from published rulebooks; they are served without
+  re-serialization and never logged.
 - The publication export manifest is public, so it carries only a bounded projection of the
   version provenance (`adapter`, `sourceUrl`, `contentDigest`, `retrievedAt`, `profile`,
   `conformance`, `importedAt`). Import-internal redirect chains, optional source labels and
@@ -335,8 +350,10 @@ trail is not exposed over HTTP; it is read by operators from the database.
 - **Denied attempts are not audited.** The audit trail records successful mutations and token
   lifecycle events, not rejected requests, failed logins or administrator login/logout events.
 - **Transport security is deployment-owned.** AttestBook serves HTTP; a deployment must
-  terminate TLS in front of it. Bearer tokens and the session cookie are not meaningful over
-  plaintext transport beyond the documented loopback test mode.
+  terminate TLS in front of it and set `PUBLIC_BASE_URL` to that HTTPS origin. Bearer tokens
+  and the session cookie are not meaningful over plaintext transport beyond the documented
+  loopback test mode. If the origin is wrong or unset, hosted-schema metadata is unavailable
+  rather than silently derived from request headers.
 - **The cross-cutting audit is separate.** SSRF and schema recursion, artifact retention,
   the full security test matrix and the residual-risk register are recorded in
   [`docs/security-threat-model.md`](security-threat-model.md); this document covers the
@@ -375,6 +392,14 @@ trail is not exposed over HTTP; it is read by operators from the database.
   minted with the live session matches, empty and over-long values are refused, an unknown or
   revoked session is `session_missing`, and the session resolves to the same provider actor a
   bearer token resolves to.
+- `src/api/schema-documents.test.ts` covers the public hosted-schema surface: exact bytes and
+  canonical media types without authentication, `Content-Digest`/`ETag`/immutable caching,
+  conditional `304`, 404 for unknown and 400 for oversized identifiers, rejection of mutation
+  methods and oversized bodies, metadata/listing URLs that ignore attacker-controlled
+  `Host`/`Forwarded` headers, the explicit `503` without a configured public origin, no
+  provider/provenance leakage, and byte-identical content after a database reopen.
+  `src/public-urls.test.ts` and `src/config.test.ts` cover canonical URL composition, SRI
+  computation and origin validation (HTTPS, loopback-only HTTP, no credentials/path/query).
 - `src/api/session-writes.test.ts` covers the dual transport end to end: a session creates,
   edits, versions, publishes, imports and correlates; a cookie write without its CSRF token, a
   wrong or foreign token and a cross-origin write all answer `403 csrf_failed` and write

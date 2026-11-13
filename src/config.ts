@@ -1,8 +1,16 @@
+import { parsePublicBaseUrl } from './public-urls'
+
 export interface AppConfig {
   readonly hostname: string
   readonly port: number
   /** SQLite database file opened by the server, or `:memory:` for tests. */
   readonly databasePath: string
+  /**
+   * Trusted public origin used to build permanent hosted-schema URLs (#98), or
+   * `null` when the deployment does not publish them. It is never derived from
+   * request headers. See `src/public-urls.ts`.
+   */
+  readonly publicBaseUrl: string | null
   /** Hard wall-clock limit for the schema-evaluation sandbox child. */
   readonly schemaSandboxTimeoutMs: number
   /** RSS limit for the schema-evaluation sandbox child. */
@@ -69,6 +77,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): A
     hostname: hostname === '' ? DEFAULT_HOSTNAME : hostname,
     port,
     databasePath,
+    publicBaseUrl: parsePublicBaseUrl(env.PUBLIC_BASE_URL),
     schemaSandboxTimeoutMs: positiveInteger(
       env,
       'SCHEMA_SANDBOX_TIMEOUT_MS',

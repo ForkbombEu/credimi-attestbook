@@ -554,8 +554,8 @@ bytes. It is deliberately not a second general-purpose blob store:
 - `Registry.registerCredentialSchemaDocument` requires the verified actor and records a
   `schema_document.create` audit row. `getCredentialSchemaDocument`,
   `getCredentialSchemaDocumentContent`, `listCredentialSchemaDocuments` and
-  `verifyCredentialSchemaDocumentDigest` are the read seam for later HTTP endpoints; they
-  return the exact bytes, media type, digest, owner and provenance. There is no update or
+  `verifyCredentialSchemaDocumentDigest` are the read seam used by the public HTTP
+  endpoints (#98); they return the exact bytes, media type, digest, owner and provenance. There is no update or
   delete operation, and the database rejects both;
 - an existing external schema reference (`uri` + optional SRI) and every rulebook version
   artifact are untouched. A stored schema document is not linked into a version snapshot yet;
@@ -566,8 +566,37 @@ unavailable, registration fails closed as a server fault instead of compiling in
 There is no per-provider document quota yet: the registration endpoint (#99) must bound how
 many documents one provider may create.
 
-The public HTTPS URL, provider registration API, editor controls and validation-time
-resolution are the follow-up issues #98–#103 and are not implemented here.
+Issue #98 adds the public HTTPS URL surface on top of this store; the provider registration
+API, editor controls and validation-time resolution remain the follow-up issues #99–#103 and
+are not implemented here. See §6.7.
+
+### 6.7 Public hosted-schema URLs
+
+Issue #98 exposes the stored bytes without authentication at a permanent canonical URL:
+
+```text
+${PUBLIC_BASE_URL}/api/v1/schema-documents/{documentId}/content
+```
+
+- `GET /api/v1/schema-documents` and `GET /api/v1/schema-documents/{documentId}` return the
+  public projection (id, kind, media type, SHA-256 digest, W3C SRI pin, creation time and
+  canonical URL) and never the provider association, provenance or any token. They answer
+  `503 public_base_url_unavailable` when the deployment has no public origin, because they
+  cannot issue a permanent URL; the content route keeps working.
+- `GET /api/v1/schema-documents/{documentId}/content` returns the exact stored bytes, never
+  re-serialized, under the canonical `application/schema+json` or `application/json` media
+  type. `Content-Digest` (RFC 9530), `ETag` and the `integrity` metadata field carry the
+  SHA-256, `Cache-Control: public, max-age=31536000, immutable` permits permanent caching and
+  a matching `If-None-Match` answers `304`. Unknown identifiers answer `404`; the bounded
+  identifier rules reject oversized ids with `400`; no mutation method exists.
+- The origin comes only from `PUBLIC_BASE_URL` (`src/public-urls.ts`): an absolute HTTPS
+  origin without credentials, path, query or fragment, with plain HTTP accepted only for
+  loopback hosts. Invalid values fail startup. Request `Host`, `Forwarded`,
+  `X-Forwarded-Host` and `X-Forwarded-Proto` headers are never used, so a caller cannot mint
+  an attacker-controlled URL for a published rulebook or snapshot.
+- Existing external `schemaReferences[].uri` values are unchanged and remain external
+  references; storing a document does not rewrite them and does not link it into a version
+  snapshot. Provider registration and the returned URI/SRI pair are issue #99.
 
 ## 7. Validation and failure model
 
@@ -647,8 +676,9 @@ the #28/#29/#30/#31/#41/#42/#97 acceptance criteria; HTTP contract coverage is a
 `src/api/routes.test.ts` and the generated-OpenAPI tests. The suite does **not** claim
 URL/JSON import security beyond the #30 controls, automatic source updates, scheduled
 synchronization or credential validation (#32), and it does not claim a publication signature.
-The schema document store has no public URL or HTTP registration surface yet; those are
-issues #98 and #99.
+The hosted-schema public read surface is covered by `src/api/schema-documents.test.ts`,
+`src/public-urls.test.ts` and `src/config.test.ts`; a provider registration API is still
+issue #99.
 
 ## 9. Related work
 

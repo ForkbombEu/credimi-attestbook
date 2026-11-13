@@ -40,6 +40,7 @@ export const API_ERROR_CODES = [
   'rate_limited',
   'auth_unavailable',
   'registry_unavailable',
+  'public_base_url_unavailable',
   'validation_unavailable',
   'fixture_unavailable',
   'internal_error',

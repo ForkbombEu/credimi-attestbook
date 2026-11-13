@@ -1,3 +1,6 @@
+# `start` runs `scripts/uat-start.sh`, which supervises the application and
+# exposes a test-only restart control at `POST http://127.0.0.1:3001/restart`
+# so a scenario can observe restart persistence against the same database.
 version: 1
 default_environment: local
 environments:
