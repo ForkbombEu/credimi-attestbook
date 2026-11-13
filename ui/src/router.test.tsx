@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   AppLink,
   CAPTURES_PATH,
+  LOGIN_PATH,
   NEW_RULEBOOK_PATH,
   capturePath,
   parseRoute,
@@ -91,6 +92,13 @@ describe('parseRoute', () => {
       '/rulebooks/rulebook%2Fwith%20space/edit',
     )
   })
+
+  test('maps the administrator login path', () => {
+    expect(parseRoute('/login')).toEqual({ name: 'login' })
+    expect(parseRoute('/login/')).toEqual({ name: 'login' })
+    expect(parseRoute('/login/extra')).toEqual({ name: 'catalog' })
+    expect(LOGIN_PATH).toBe('/login')
+  })
 })
 
 describe('useRoute', () => {
@@ -119,6 +127,17 @@ describe('useRoute', () => {
 
     expect(window.location.pathname).toBe('/')
     expect(result.current.route).toEqual({ name: 'catalog' })
+  })
+
+  test('navigates to a path with a query string and parses only its pathname', () => {
+    resetPath('/')
+    const { result } = renderHook(() => useRoute())
+
+    act(() => result.current.navigate('/login?next=%2Fplayground'))
+
+    expect(window.location.pathname).toBe('/login')
+    expect(window.location.search).toBe('?next=%2Fplayground')
+    expect(result.current.route).toEqual({ name: 'login' })
   })
 })
 

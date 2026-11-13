@@ -135,6 +135,16 @@ describe('built web UI', () => {
     }
   })
 
+  test('serves the UI entry document for the client-routed administrator login', async () => {
+    for (const path of ['/login', '/login/']) {
+      const response = await uiApp.request(path)
+
+      expect(response.status, path).toBe(200)
+      expect(response.headers.get('content-type'), path).toContain('text/html')
+      expect(await response.text(), path).toContain('<title>AttestBook</title>')
+    }
+  })
+
   test('rejects asset path traversal and missing assets with the JSON 404', async () => {
     for (const path of [
       '/assets/%2e%2e/index.html',

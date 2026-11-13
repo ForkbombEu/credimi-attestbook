@@ -1,10 +1,10 @@
-// Small client-side router for the standalone UI (issues #36–#38).
+// Small client-side router for the standalone UI (issues #36–#38, #90).
 //
-// The server serves the built entry document for `/`, `/rulebooks/*` and
-// `/playground`, so the browser path names the view and a deep link (or a
-// reload) still works. The rulebook editor is under `/rulebooks/new` and
-// `/rulebooks/<id>/edit`; any other path falls back to the catalog rather than
-// rendering an empty page.
+// The server serves the built entry document for `/`, `/rulebooks/*`,
+// `/playground`, `/captures/*` and `/login`, so the browser path names the view
+// and a deep link (or a reload) still works. The rulebook editor is under
+// `/rulebooks/new` and `/rulebooks/<id>/edit`; any other path falls back to the
+// catalog rather than rendering an empty page.
 
 import type { AnchorHTMLAttributes, MouseEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
@@ -17,11 +17,13 @@ export type Route =
   | { readonly name: 'rulebook'; readonly rulebookId: string }
   | { readonly name: 'editor'; readonly rulebookId: string }
   | { readonly name: 'editor-new' }
+  | { readonly name: 'login' }
 
 export const CATALOG_PATH = '/'
 export const PLAYGROUND_PATH = '/playground'
 export const CAPTURES_PATH = '/captures'
 export const NEW_RULEBOOK_PATH = '/rulebooks/new'
+export const LOGIN_PATH = '/login'
 
 export function capturePath(captureId: string): string {
   return `${CAPTURES_PATH}/${encodeURIComponent(captureId)}`
@@ -49,6 +51,9 @@ export function parseRoute(pathname: string): Route {
   }
   if (path === NEW_RULEBOOK_PATH) {
     return { name: 'editor-new' }
+  }
+  if (path === LOGIN_PATH) {
+    return { name: 'login' }
   }
   const captureMatch = /^\/captures\/([^/]+)$/.exec(path)
   if (captureMatch?.[1] !== undefined) {
@@ -101,11 +106,19 @@ export function useRoute(): RouteState {
   }, [])
 
   const navigate = useCallback((path: string) => {
-    if (window.location.pathname === path) {
+    // A target may carry a query string (the login page's `next`), so compare
+    // and parse the resolved URL instead of assuming `path` is a bare pathname.
+    let url: URL
+    try {
+      url = new URL(path, window.location.origin)
+    } catch {
+      return
+    }
+    if (window.location.pathname === url.pathname && window.location.search === url.search) {
       return
     }
     window.history.pushState({}, '', path)
-    setRoute(parseRoute(path))
+    setRoute(parseRoute(url.pathname))
     document.documentElement.scrollTop = 0
   }, [])
 

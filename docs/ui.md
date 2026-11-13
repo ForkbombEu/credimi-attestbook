@@ -19,8 +19,15 @@ not add the import UI or a dedicated publication-export view; the extra publicat
 endpoints delivered by #42 are public API reads (the detail view keeps its exact-snapshot
 export link), and later follow-ups cover an import UI.
 
+The administrator sign-in slice of
+[issue #90](https://github.com/ForkbombEu/credimi-attestbook/issues/90) adds a `/login`
+screen, a session-aware shared header and client-side session restoration from
+`GET /api/v1/auth/me`. Editor and capture writes still use the provider bearer token; moving
+them to the administrator session is a separate issue.
+
 **Authoritative spec:** [`docs/specification.md`](specification.md) §14
-(UI-001/UI-002/UI-005/UI-006), §11 (FR-019) and §2.2 (independent standalone UI).
+(UI-001/UI-002/UI-005/UI-006), §15 (authentication and authorization), §11 (FR-019) and §2.2
+(independent standalone UI).
 **Architecture:** [`docs/architecture.md`](architecture.md) §5 (the web UI is a client of
 the public API, not a bypass) and §6.
 **Decisions:** [`docs/implementation-plan.md`](implementation-plan.md) D-8/D-17
@@ -119,9 +126,27 @@ Implemented by these slices:
   - the server's safe conflict and immutability messages are surfaced, and a successful
     transition updates the editor's read-only state without re-fetching the working copy;
   - creating a version from a published rulebook reopens the working copy for the next
-    version while the published snapshot stays immutable.
+    version while the published snapshot stays immutable;
+- an administrator sign-in screen at `/login` (#90):
+  - a username/password form with submit, working and error states and no bearer-token field;
+  - the auth client restores the session from `GET /api/v1/auth/me` on every load, treats an
+    anonymous `401` as no session, and relies only on the server's HttpOnly session cookie:
+    no `localStorage`, `sessionStorage` or bearer token is read or written;
+  - the shared header shows the signed-in provider identity with a `Log out` action, or a
+    `Log in` link that preserves the current path; logout is a same-origin
+    `POST /api/v1/auth/logout` carrying the session-bound `X-CSRF-Token` returned by the auth
+    responses, so the browser's `Origin`/`Sec-Fetch-Site` evidence and the token satisfy the
+    server's CSRF check;
+  - after sign-in the browser returns to a validated same-origin `next` destination; absolute,
+    protocol-relative, backslash and off-origin targets are refused;
+  - catalogue, detail, playground, capture and editor reads stay usable anonymously; editor
+    write authorization is intentionally unchanged in this slice.
 
 Deliberately **not** in these slices:
+
+- migrating editor and capture write requests to the administrator session. Issue #90 is the
+  authentication UI/navigation slice only; those writes keep the provider bearer-token flow
+  described below until the dependent migration issue.
 
 - schema-document supply in the playground. The API accepts caller-supplied schema documents
   for the pinned references, but UI-005 does not require an editor for them, so schema
@@ -195,14 +220,20 @@ The browser is a client of the public API only:
     `.../{version}/publish` transitions;
 12. the comparison panel calls
     `GET /api/v1/rulebooks/{id}/versions/{version}/compare?to={version}`; the result is
-    rendered as returned and never re-derived client-side.
+    rendered as returned and never re-derived client-side;
+13. on every view the session provider calls `GET /api/v1/auth/me` once; on `/login` the
+    form posts `POST /api/v1/auth/login` with the username and password, and the header's
+    `Log out` action posts `POST /api/v1/auth/logout` with the session CSRF token. The
+    HttpOnly session cookie and its in-memory `X-CSRF-Token` are the only credentials
+    involved, and no bearer token is read or written by these calls.
 
 The client router uses real paths with the History API. The Bun server serves the built
-entry document for `/`, `/rulebooks/*`, `/playground` and `/captures/*`; `/api/*` stays
-separate and unknown non-UI paths keep the JSON not-found envelope. A deep link or a browser reload therefore
-reaches the same view. Browser back/forward is handled with a `popstate` listener; in-page
-links push a history entry. Modified clicks (new tab, copy address) keep the native anchor
-behaviour.
+entry document for `/`, `/rulebooks/*`, `/playground`, `/captures/*` and `/login`; `/api/*`
+stays separate and unknown non-UI paths keep the JSON not-found envelope. A deep link or a
+browser reload therefore reaches the same view, including a reload of an authenticated
+`/login` page. Browser back/forward is handled with a `popstate` listener; in-page links push
+a history entry, and the router parses the pathname while preserving the login page's `next`
+query string. Modified clicks (new tab, copy address) keep the native anchor behaviour.
 
 The latest displayed version is the most recently created **published** version, or the most
 recently created version of any status when nothing is published. Rulebook no. 1 in
@@ -328,6 +359,36 @@ dimensions.
   component tests and the lifecycle Playwright spec; a dedicated publication-export view and
   a publication signature are not exposed here (the #42 export endpoints are API-level).
 
+### 3.5 Administrator sign-in and session state
+
+`/login` is the browser entry point for the optional, environment-configured administrator
+delivered by #88; it is not a provider-bearer-token form:
+
+- the page asks only for a username and a password. Required fields are checked in the
+  browser first; while the request is in flight the button is disabled and the page states
+  that it is verifying the credentials. A rejected request shows the product API's safe
+  message (for example `Invalid username or password.`, the `429` rate-limit message or
+  `503 auth_unavailable` when the server has no administrator configured), never a raw
+  password or a token;
+- the login request is same-origin JSON with credentials included. The server answers with an
+  opaque, HttpOnly session cookie plus the session-bound CSRF token; the UI keeps that token
+  in React memory only and stores no password, token or session material in `localStorage` or
+  `sessionStorage`, and an expired or revoked cookie simply resolves
+  `GET /api/v1/auth/me` to `401` and therefore to the anonymous state;
+- the shared header renders the authenticated provider's name and a `Log out` button, or a
+  `Log in` link. The link carries a `next` value for the current path so the visitor returns
+  to the view they came from. `Log out` posts to `/api/v1/auth/logout` with the same-origin
+  cookie and the live session's `X-CSRF-Token`; the browser supplies the
+  `Origin`/`Sec-Fetch-Site` evidence the server checks, and the API's idempotent `204` then
+  clears the local session state;
+- after sign-in the browser navigates to the `next` value only when it resolves to a plain
+  same-origin path. Absolute URLs, protocol-relative paths, backslash variants, control
+  characters and normalised off-origin paths are dropped, so the form cannot be used as an
+  open redirect; without a valid target it returns to the catalogue;
+- the catalogue, detail, playground, capture and editor views remain reachable anonymously,
+  and no route is guarded or hidden in this slice. The editor and capture writes keep their
+  provider bearer-token flow until the dependent migration issue.
+
 ## 4. Build, serve and develop
 
 ```bash
@@ -341,8 +402,9 @@ bun run test:e2e     # Playwright against the real API with seeded data
 
 `src/server.ts` serves `dist/ui/index.html` at `/`, Vite's content-addressed
 files under `/assets/*`, the installed Credimi brand directory under `/brand/*`,
-and the same entry document for `/rulebooks/*` deep links. When `dist/ui` is absent (a source checkout without a
-UI build), the UI routes are not registered, so `/` and `/rulebooks/*` keep the
+and the same entry document for `/rulebooks/*`, `/playground`, `/captures/*` and
+`/login` deep links. When `dist/ui` is absent (a source checkout without a
+UI build), the UI routes are not registered, so those paths keep the
 JSON 404 instead of serving a broken page. The Dockerfile copies the `ui/`
 sources before building, so the container serves the built UI from the same
 origin as the API. The browser never uses a private backdoor.
@@ -437,19 +499,36 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   `ui/src/capture.test.ts`);
 - the shared chrome: the Credimi Extras top and footer strips (text, the single
   `https://credimi.io` link with `target="_blank"` and `rel="noopener"`, wordmark
-  alt text, DOM order), the header logo lockup and axe-core checks
+  alt text, DOM order), the header logo lockup, the anonymous `Log in` link and the
+  authenticated identity/`Log out` controls, and axe-core checks
   (`ui/src/components/Layout.test.tsx`);
+- the administrator session client (`ui/src/auth.test.ts`): `auth/me` session parsing
+  including the CSRF token, anonymous `401`/missing-route handling, safe error messages,
+  same-origin JSON login with no `Authorization` header, logout's same-origin `POST` with
+  `X-CSRF-Token`, and the redirect guard rejecting absolute, protocol-relative, backslash,
+  control-character and normalised off-origin `next` values;
+- the session provider (`ui/src/session.test.tsx`): restoration from `auth/me`, the
+  anonymous fallback for a missing or failed session, sign-in/sign-out transitions carrying
+  the session CSRF token, and the stale-initial-read race guard;
+- the administrator sign-in page (`ui/src/LoginPage.test.tsx`): username/password only (two
+  inputs, no token field), client-side required-field checks that send nothing, the pending
+  working state, safe API errors, intended-destination navigation, refusal of an off-site
+  `next`, the authenticated identity view, logout, a failed logout, and axe-core checks;
 - the router: path parsing (including `/playground`, `/captures`, `/captures/<id>`,
-  `/rulebooks/new` and `/rulebooks/<id>/edit`), encoded ids, malformed paths, history
-  navigation and modified clicks keeping native anchor behaviour;
+  `/rulebooks/new`, `/rulebooks/<id>/edit` and `/login`), encoded ids, malformed paths,
+  history navigation including a query-bearing login path, and modified clicks keeping
+  native anchor behaviour;
 - an end-to-end component navigation test from the catalog to a detail page and back, from
-  the catalog to the new-rulebook editor, and a direct deep-link render of both editors;
+  the catalog to the new-rulebook editor, from the catalog to the administrator sign-in
+  page, a direct deep-link render of both editors and the login page, and a direct render of
+  `/login?next=…` with the anonymous header sign-in link suppressed;
 - axe-core accessibility checks for the catalog results/error states and the detail page and
   not-found state (colour contrast is disabled in jsdom because it cannot compute painted
   colours; the browser tests run the full rule set).
 
 Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, `ui/e2e/editor.spec.ts`,
-`ui/e2e/lifecycle.spec.ts`, `ui/e2e/playground.spec.ts`, Playwright + Chromium):
+`ui/e2e/lifecycle.spec.ts`, `ui/e2e/playground.spec.ts`, `ui/e2e/auth.spec.ts`, Playwright +
+Chromium):
 
 - seven seeded rulebooks from the real registry/API, including the published validation-smoke
   rulebook used by the playground, with provider, version, status,
@@ -478,8 +557,13 @@ Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, `ui/e2e/editor
   draft's editor and persist a `null` source URL; because this spec creates a rulebook in the
   one shared in-memory registry, the Playwright suite runs with one worker and catalog specs
   run before it;
-- full axe-core scans and 390 px viewport checks for the catalog, detail, playground and
-  editor views.
+- the administrator login against the real server: sign-in from `/login`, the authenticated
+  provider identity and logout control, an empty `localStorage`/`sessionStorage`, session
+  restoration after a reload, logout back to anonymous with the seven-rulebook catalogue still
+  usable, intended-destination navigation, refusal of an off-site `next`, the pending working
+  state and the safe `401` message;
+- full axe-core scans and 390 px viewport checks for the catalog, detail, playground, editor
+  and login views.
 
 The capture explorer is covered by `ui/e2e/captures.spec.ts`: the eight seeded mock captures,
 the mock labelling and explicit gaps, the redacted projection of one JSON fixture (and the
@@ -492,8 +576,21 @@ CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves
 the catalog HTML.
 
-The pull request for the draft-editor slice carries the required before/after captures at
-1280 px and the same light theme. The baseline is `c35e160` (`main` before the slice):
+The pull request for the administrator login slice carries the required before/after captures
+at 1440×1000 (and 390×844 for the narrow views) in the same light theme, against the seeded
+end-to-end server. The baseline is `162b441` (`main` before the slice, after the #88 backend
+merge):
+
+| View | Before (`162b441`) | After (this slice) |
+| --- | --- | --- |
+| `/login` | [`login-before.png`](ui/auth/login-before.png) — the real server answers the JSON `not_found` envelope | [`login-after.png`](ui/auth/login-after.png) — the accessible sign-in form with username and password only |
+| `/login`, 390 px | [`login-before-mobile.png`](ui/auth/login-before-mobile.png) — the same JSON 404 | [`login-after-mobile.png`](ui/auth/login-after-mobile.png) — the same form at 390 px |
+| Anonymous catalog header | [`catalog-before.png`](ui/auth/catalog-before.png) — no session control | [`catalog-after.png`](ui/auth/catalog-after.png) — the `Log in` link next to the navigation |
+| Authenticated catalog header | no authenticated browser state existed | [`catalog-authenticated-after.png`](ui/auth/catalog-authenticated-after.png) — `Signed in: E2E Administrator` and `Log out` |
+| Login error state | none (no login screen) | [`login-error-after.png`](ui/auth/login-error-after.png) — the API's generic `Invalid username or password.` message |
+
+The draft-editor slice's captures at 1280 px and the same light theme follow; the baseline is
+`c35e160` (`main` before the slice):
 
 - [before: `editor-before-catalog.png`](ui/editor-before-catalog.png) — the catalog has no
   authoring action;
@@ -638,16 +735,24 @@ The catalog and detail slices' captures remain in the same directory
   authorities, the draft version label and the schema bodies are not edited or fetched. A
   saved draft is not a conformance result.
 - The editor holds the provider bearer token in React memory only, so a full page reload
-  clears it; it is never written to browser storage. There is no login or session endpoint.
+  clears it; it is never written to browser storage. The administrator sign-in page exists,
+  but this editor still authenticates writes with the provider bearer token; migrating write
+  requests to the administrator session is a dependent issue.
   The save is a last-write-wins full replacement with no optimistic-concurrency token, so two
   open editor tabs can overwrite each other's working copy. The lifecycle panel surfaces the
   server's stale-snapshot, duplicate-label and immutability conflicts, and publish stays
   disabled until readiness passes for that exact draft version, but there is still no
   optimistic-concurrency token for the working copy itself.
+- The administrator sign-in session is read on mount and after a reload; the UI does not
+  poll `auth/me`, so a session that expires while a tab stays open keeps its last rendered
+  identity until the next reload or session action, when the `401` reverts it to anonymous.
+  The slice provides no password reset, account management or route guarding, and the login
+  page is the only new surface; editor and capture writes still use provider bearer tokens.
 - The capture explorer is deliberately mock-backed and in-memory: it shows deterministic local
   fixtures, never a live `capture-issuer`/`capture-verifier` interaction, and a recorded
   correlation is lost on restart. External artifact references are not fetched, a captured
   presentation submission is not unpacked into a credential, and only the latest correlation is
   kept per capture. The explorer page shows the first 100 captures.
 - No dark theme or offline cache; routing covers the catalog, detail, playground, capture
-  explorer, new-draft and edit-draft views, and any other path falls back to the catalog.
+  explorer, administrator sign-in, new-draft and edit-draft views, and any other path falls
+  back to the catalog.
