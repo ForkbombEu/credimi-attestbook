@@ -13,8 +13,11 @@ They provide a persistent SQLite registry for providers, rulebooks, attestation 
 references, write credentials and an audit trail, plus draft/published/historical rulebook
 versions with content-addressed artifacts, SHA-256 digests, provenance, immutable publication
 and a reproducible publication export manifest, and a provider-scoped import identity that
-makes re-import idempotent. They are **not** the HTTP contract, credential validation or a
-conformance claim; see [`docs/import.md`](import.md) for the import pipeline.
+makes re-import idempotent. [Issue #97](https://github.com/ForkbombEu/credimi-attestbook/issues/97)
+adds provider-owned, content-addressed credential schema documents (JSON Schema 2020-12 and
+SD-JWT VC Type Metadata) with exact bytes, media type, digest and creation provenance. These
+are **not** the HTTP contract, credential validation or a conformance claim; see
+[`docs/import.md`](import.md) for the import pipeline.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) (FR-001, FR-002, FR-003,
 FR-008, §13, §15, §17)
@@ -131,6 +134,37 @@ Implemented by #31:
   standards document, and the import pipeline stores the per-entry content fingerprint in
   provenance.
 
+Implemented by #97 (`migrations/0006_credential_schema_documents.sql`):
+
+- provider-owned credential schema documents stored as exact UTF-8 bytes in the existing
+  content-addressed `artifacts` table, with a stable document id, a canonical media type, a
+  lowercase-hex SHA-256 digest and bounded creation provenance;
+- two supported profiles: `json_schema_2020_12` (`application/schema+json`) and
+  `sd_jwt_vc_type_metadata` (`application/json`). Bytes are bounded, must decode as strict
+  UTF-8 JSON, must parse to an object (or a boolean schema for JSON Schema), and are bounded
+  in nesting depth and node count. JSON Schema must declare the 2020-12 dialect when it has
+  `$schema`, must compile under the pinned Ajv 2020-12 compiler and must not use a keyword
+  AttestBook cannot evaluate safely; SD-JWT VC Type Metadata must match the pinned
+  `@sd-jwt/sd-jwt-vc` `TypeMetadataFormatSchema` and carry a non-empty `vct`;
+- `Registry.registerCredentialSchemaDocument` derives the provider from the verified actor and
+  is idempotent for the same provider and content. Identical content is shared across
+  providers (one artifact, one association per provider), and a digest that already resolves
+  to different bytes or a different media type is rejected before an association is written;
+- associations are insert-once and immutable in the service and in SQLite; a provider cannot
+  change another provider's association, and provider deletion is restricted while it still
+  owns one. Registration writes a `schema_document.create` audit row;
+- `getCredentialSchemaDocument`, `getCredentialSchemaDocumentContent`,
+  `listCredentialSchemaDocuments` and `verifyCredentialSchemaDocumentDigest` expose the
+  metadata, exact bytes and digest verification to later HTTP endpoints. They are public
+  reads, like the rest of the catalogue.
+
+Deliberately **not** in #97: the public URL/HTTP surface ([#98](https://github.com/ForkbombEu/credimi-attestbook/issues/98)),
+provider registration/reference API ([#99](https://github.com/ForkbombEu/credimi-attestbook/issues/99)),
+editor controls, fixture generation and validation-time resolution
+([#100](https://github.com/ForkbombEu/credimi-attestbook/issues/100)–[#103](https://github.com/ForkbombEu/credimi-attestbook/issues/103)).
+Existing external `{formatIdentifier, uri, integrity}` references and published/historical
+snapshots are unchanged.
+
 Deliberately **not** in #28/#29/#30/#31:
 
 - automatic application of a changed source to an existing draft (the importer reports
@@ -178,8 +212,9 @@ SHA-256 checksum. The runner:
 - refuses a database that records a migration this build does not know, instead of silently
   running a downgraded schema.
 
-Initial tables (`0001_registry`), version tables (`0002_versions_artifacts`) and the import
-identity column added by `0003_import_identity`:
+Initial tables (`0001_registry`), version tables (`0002_versions_artifacts`), the import
+identity column added by `0003_import_identity` and the provider-owned schema document table
+added by `0006_credential_schema_documents`:
 
 | Table | Purpose | Integrity rules |
 | --- | --- | --- |
@@ -187,23 +222,32 @@ identity column added by `0003_import_identity`:
 | `auth_tokens` | Provisional write credentials | only a SHA-256 token hash is stored; provider-scoped, revocable |
 | `rulebooks` | Stable rulebook identity and product metadata | provider foreign key; status ∈ draft/published/historical; JSON-object provenance/metadata; optional 64-hex `import_key`, unique per provider through a partial index |
 | `rulebook_versions` | Draft/published/historical snapshots of a rulebook | unique `(rulebook_id, version)`; digest required; artifact foreign key; status and `published_at` must agree |
-| `artifacts` | Content-addressed exact snapshot bytes | `digest` primary key; bytes never updated or deleted |
+| `artifacts` | Content-addressed exact snapshot and schema document bytes | `digest` primary key; bytes never updated or deleted |
+| `credential_schema_documents` | Provider-owned immutable credential schema associations | unique `(provider_id, content_digest)`; digest and provider foreign keys; kind fixes the media type; artifact media type must agree; `UPDATE`/`DELETE` rejected |
 | `attestations` | Attestation types owned by a rulebook | unique `(rulebook_id, name)`; formats stored as JSON array |
 | `schema_refs` | Format identifier, URI and SRI value | one format per attestation type (and separately one per rulebook-level scope); an optional attestation must belong to the same rulebook |
 | `audit_log` | Privileged mutation and publication trail | actor, action, entity and timestamp |
 | `schema_migrations` | Applied migration bookkeeping | version, checksum and application timestamp |
 
-The version tables are immutable where it matters: `artifacts` rejects `UPDATE` and `DELETE`
-outright, `rulebook_versions` rejects `UPDATE`/`DELETE` once a row is published or
-historical, and the only accepted transition for a published row is `published → historical`
-when a newer version is published. The initial schema deliberately keeps stable rulebook
-identity and product metadata in `rulebooks`; versioned content is stored beside it in
-`rulebook_versions` and `artifacts`, never merged into the product columns.
+The version and schema document tables are immutable where it matters: `artifacts` rejects
+`UPDATE` and `DELETE` outright, `rulebook_versions` rejects `UPDATE`/`DELETE` once a row is
+published or historical, and the only accepted transition for a published row is
+`published → historical` when a newer version is published. `credential_schema_documents`
+rejects `UPDATE`/`DELETE` and a second insert of the same identity (so `INSERT OR REPLACE`
+cannot delete an association through conflict resolution). The initial schema deliberately
+keeps stable rulebook identity and product metadata in `rulebooks`; versioned content is
+stored beside it in `rulebook_versions` and `artifacts`, never merged into the product
+columns.
 
 Migration `0003_import_identity` only adds the nullable `import_key` column and the partial
 unique index; existing local rulebooks keep `NULL` and are excluded from the index. SQLite
 adds the column with a `length(import_key) = 64` check, so a malformed key cannot be written
 even by a caller that bypasses the service.
+
+Migration `0006_credential_schema_documents` only adds the new association table and its
+triggers; it does not alter `artifacts`, `rulebook_versions`, `schema_refs` or any existing
+row, so it applies to a populated pre-feature database without rewriting snapshots or
+external references.
 
 ## 3. Stable identifiers
 
@@ -216,13 +260,15 @@ resource**:
 | Rulebook | `rulebooks.id` | The stable AttestBook identity; it is not the TS11 `SchemaMeta.id` and does not change when the rulebook name, source URL or metadata changes |
 | Rulebook version | `(rulebook_id, version)` | The version label is unique per rulebook; `rulebook_versions.id` is an internal opaque UUID and content changes create a new digest or a new version, never a new identity |
 | Artifact | `artifacts.digest` | The SHA-256 of the exact bytes; content-addressed, so the identity *is* the content |
+| Credential schema document | `credential_schema_documents.id` | Stable opaque document id for a provider's association; content changes create new bytes and a new document, never a new identity for the old one |
 | Attestation type | `attestations.id` | Stable within its rulebook; name changes do not create a new identity |
 | Schema reference | `schema_refs.id` | Stable within its rulebook; URI/integrity updates do not create a new identity |
 | Import identity | `rulebooks.import_key` | Deterministic, not opaque: SHA-256 of the source and entry identity; unique per provider; never changes after creation and is never a public resource id |
 | Write token | `auth_tokens.id` | Stable public token handle; the raw bearer secret is separate and shown only once |
 
 The default generator is UUID v4 (`crypto.randomUUID()`), created inside the service, and
-callers cannot supply or override provider/rulebook/attestation/schema-reference/version IDs.
+callers cannot supply or override provider/rulebook/attestation/schema-reference/version or
+credential-schema-document IDs.
 Database primary keys are the only identity authority; SQLite row ids are insertion order and
 are not exposed. Version labels are caller-supplied but validated and unique per rulebook; a
 content digest is not a label, it identifies exact bytes. The import key is the one
@@ -252,6 +298,8 @@ stores three classes of data separately:
 | `sourceUrl`, `provenance_json` (rulebook and version) | AttestBook provenance | column / JSON | No |
 | `rulebooks.import_key`, provenance `contentFingerprint` | Import identity and change detection | column / JSON | No: import-internal product metadata |
 | version snapshot bytes (`artifacts.bytes`) | Versioned content artifact (internal, deterministic JSON) | content-addressed BLOB | No: it is not a TS11/OWF document and is never exported as one |
+| credential schema document bytes (`artifacts.bytes` referenced by `credential_schema_documents`) | Untrusted external schema/type-metadata content | content-addressed BLOB | No: only a rulebook's `{formatIdentifier, uri, integrity}` reference is serialized, never the body; later HTTP endpoints serve the exact bytes separately |
+| `credential_schema_documents.provenance_json`, ownership, digest, media type | AttestBook product state | typed columns / JSON | No |
 | `content_digest`, `published_at`, `rulebook_versions.status` | AttestBook product state | typed columns | No |
 | `metadata_json` on providers, rulebooks, attestations and schema references | AttestBook-internal metadata | JSON column | No |
 | `publicationStatus`, timestamps, ownership, `auth_tokens`, `audit_log` | AttestBook product state | typed columns/tables | No |
@@ -291,9 +339,13 @@ provisional product model of D-10. The service enforces it, not the UI or a rout
    its `provider_id` to equal the authenticated actor's provider. The create input has no
    provider field, so a caller cannot create a rulebook for another provider. Cross-provider
    attempts fail with `forbidden`, and token management is scoped to the actor's provider.
+   Credential schema document registration likewise derives the owner from the actor and has
+   no provider input; the association is immutable after creation, so there is no
+   cross-provider mutation path.
 4. **Reads are public.** Provider and rulebook catalogue reads (including attestations,
    schema references, versions, version content and digest verification) require no token,
-   mirroring the public-read requirement of TS11 §5.2.1. The import-identity lookup is the
+   mirroring the public-read requirement of TS11 §5.2.1. Stored schema document metadata,
+   exact bytes and digest verification are public reads too. The import-identity lookup is the
    exception: `findImportedRulebook` requires the authenticated provider's token and only
    returns that provider's rulebook, because the key is import-internal.
 5. **Draft-only rulebook content.** Rulebook, attestation and schema-reference mutations
@@ -464,6 +516,48 @@ Using `signSchemaMeta` for it would invent proprietary signing semantics, so the
 not. Integrity is the content digest, and consumers verify it themselves. The full HTTP
 contract is in [`docs/api.md`](api.md) §3.4.
 
+### 6.6 Provider-owned credential schema documents
+
+Issue #97 adds a narrow store for documents that AttestBook itself holds, so a later provider
+API can return a stable hosted URI/SRI pair and later validation can apply the exact stored
+bytes. It is deliberately not a second general-purpose blob store:
+
+- the exact bytes live once in `artifacts`, keyed by their lowercase hex SHA-256 digest, so
+  identical content registered by several providers is stored once and behaves exactly like
+  every other content-addressed artifact;
+- `credential_schema_documents` adds only the provider-owned association: a stable opaque
+  document id, the owning provider, the digest, the profile kind, the canonical media type,
+  creation provenance and the creation time. Two providers may associate the same digest; each
+  keeps its own id and provenance;
+- `json_schema_2020_12` is stored as `application/schema+json` and
+  `sd_jwt_vc_type_metadata` as `application/json`. The kind fixes the media type, and a trigger
+  requires the referenced artifact to carry the same media type, so a digest cannot be served
+  under a contradictory profile;
+- registration computes the digest from its own copy of the exact bytes. An optional
+  `expectedDigest` must match, and an existing artifact that does not hash to its key (a
+  corrupted or colliding store) aborts registration before any association is written. The
+  same provider/content registration is idempotent and returns the original document
+  unchanged, including its original provenance;
+- bytes are bounded (256 KiB), must decode as strict UTF-8, must parse as JSON and are bounded
+  in nesting depth (64) and parsed node count. JSON Schema must be a 2020-12 document, must
+  compile under the pinned Ajv 2020-12 compiler and must not contain a keyword the validation
+  engine cannot evaluate safely (`$ref`/`$dynamicRef`, `pattern`, `format`, `uniqueItems` and
+  the other unsupported keywords plus unknown keywords). SD-JWT VC Type Metadata must satisfy
+  the pinned `@sd-jwt/sd-jwt-vc` `TypeMetadataFormatSchema` and have a non-empty `vct`. The
+  store never executes a document and never fetches a remote reference;
+- `Registry.registerCredentialSchemaDocument` requires the verified actor and records a
+  `schema_document.create` audit row. `getCredentialSchemaDocument`,
+  `getCredentialSchemaDocumentContent`, `listCredentialSchemaDocuments` and
+  `verifyCredentialSchemaDocumentDigest` are the read seam for later HTTP endpoints; they
+  return the exact bytes, media type, digest, owner and provenance. There is no update or
+  delete operation, and the database rejects both;
+- an existing external schema reference (`uri` + optional SRI) and every rulebook version
+  artifact are untouched. A stored schema document is not linked into a version snapshot yet;
+  the later URI/SRI registration slice (#99) supplies that association.
+
+The public HTTPS URL, provider registration API, editor controls and validation-time
+resolution are the follow-up issues #98–#103 and are not implemented here.
+
 ## 7. Validation and failure model
 
 Inputs are validated and bounded before SQL: non-empty trimmed text, maximum lengths, JSON
@@ -485,8 +579,8 @@ parsing messages:
 | `unauthorized` | missing, unknown or revoked bearer token, or a missing/expired/revoked session |
 | `forbidden` | authenticated provider does not own the resource |
 | `not_found` | resource does not exist (or is not part of the named rulebook) |
-| `conflict` | duplicate attestation name, schema format, version label or import identity; stale draft snapshot at publication; provider still owns rulebooks |
-| `immutable` | mutation of a published or historical rulebook/version, or of a stored artifact |
+| `conflict` | duplicate attestation name, schema format, version label, import identity or schema document content; a digest registered under a different profile/media type; stale draft snapshot at publication; provider still owns rulebooks or schema documents |
+| `immutable` | mutation of a published or historical rulebook/version, or of a stored artifact, schema document or schema document association |
 
 Messages never include token values, hashes or raw payloads.
 
@@ -496,8 +590,16 @@ The implementation is covered by real temporary SQLite files (not in-memory fake
 
 - `src/db/migrations.test.ts` — migration from an empty
   database, idempotent re-run, checksum and unknown-version rejection, WAL/foreign-key
-  enforcement, orphan/duplicate/malformed-row rejection, and schema-level rejection of
-  artifact updates/deletes and published/historical version mutations.
+  enforcement, orphan/duplicate/malformed-row rejection, schema-level rejection of artifact
+  updates/deletes and published/historical version mutations, and applying the schema document
+  migration to a populated pre-feature database.
+- `src/registry/schema-documents.test.ts` — exact UTF-8 bytes, media type, SHA-256 digest and
+  provenance; JSON Schema 2020-12 and SD-JWT VC Type Metadata profiles; idempotent duplicate
+  registration; content deduplication with separate provider ownership; rejection of a
+  conflicting profile/media type, malformed or non-UTF-8 bytes, oversized or deeply nested
+  JSON, unsupported keywords/dialects, a mismatched expected digest and a colliding/corrupt
+  store; digest verification; direct-SQL immutability and `INSERT OR REPLACE` rejection;
+  provider-deletion restriction; and persistence across a database reopen.
 - `src/registry/registry.test.ts` — provisioning and
   hashed-token storage, issue/revoke, rulebook and attestation/schema CRUD, persistence across
   a database reopen, cascades, audit entries, invalid writes, duplicate conflicts, immutable
@@ -528,10 +630,12 @@ The implementation is covered by real temporary SQLite files (not in-memory fake
   export after supersession and public/missing-resource behaviour.
 
 Run the suite with `bun run check` (format, lint, strict typecheck and tests). The tests cover
-the #28/#29/#30/#31/#41/#42 acceptance criteria; HTTP contract coverage is added by #34 in
+the #28/#29/#30/#31/#41/#42/#97 acceptance criteria; HTTP contract coverage is added by #34 in
 `src/api/routes.test.ts` and the generated-OpenAPI tests. The suite does **not** claim
 URL/JSON import security beyond the #30 controls, automatic source updates, scheduled
 synchronization or credential validation (#32), and it does not claim a publication signature.
+The schema document store has no public URL or HTTP registration surface yet; those are
+issues #98 and #99.
 
 ## 9. Related work
 
@@ -552,4 +656,11 @@ synchronization or credential validation (#32), and it does not claim a publicat
   API), [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) (secure write APIs,
   documented in [`docs/security.md`](security.md)) and
   [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (version-history UI)
-  for the next slices.
+  for the next slices. Hosted schema work continues in
+  [#97](https://github.com/ForkbombEu/credimi-attestbook/issues/97) (this storage slice),
+  [#98](https://github.com/ForkbombEu/credimi-attestbook/issues/98) (public URLs),
+  [#99](https://github.com/ForkbombEu/credimi-attestbook/issues/99) (registration API),
+  [#100](https://github.com/ForkbombEu/credimi-attestbook/issues/100) (editor),
+  [#101](https://github.com/ForkbombEu/credimi-attestbook/issues/101) (validation resolution),
+  [#102](https://github.com/ForkbombEu/credimi-attestbook/issues/102) (fixtures) and
+  [#103](https://github.com/ForkbombEu/credimi-attestbook/issues/103) (detail UI).

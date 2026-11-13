@@ -26,6 +26,12 @@ import {
   notFound,
   unauthorized,
 } from './errors'
+import {
+  assertCredentialSchemaDocument,
+  credentialSchemaMediaType,
+  requireCredentialSchemaDocumentBytes,
+  requireCredentialSchemaKind,
+} from './schema-documents'
 import { RegistryStore } from './store'
 import { generateBearerToken, hashBearerToken } from './tokens'
 import { assertRulebookTransition, assertVersionTransition } from './transitions'
@@ -39,9 +45,13 @@ import type {
   CreateRulebookVersionInput,
   CreateSchemaReferenceInput,
   CreateAttestationSchemaReferenceInput,
+  CredentialSchemaDocument,
+  CredentialSchemaDocumentContent,
+  CredentialSchemaDocumentDigestVerification,
   DraftContent,
   IssuedToken,
   Provider,
+  RegisterCredentialSchemaDocumentInput,
   ReplaceDraftContentInput,
   Rulebook,
   RulebookFilter,
@@ -103,6 +113,19 @@ function changedFields(previous: object, next: object): readonly string[] {
   return Object.keys(nextRecord).filter(
     (key) => JSON.stringify(previousRecord[key]) !== JSON.stringify(nextRecord[key]),
   )
+}
+
+/** Byte-exact comparison for content-addressed documents. */
+function bytesEqual(left: Uint8Array, right: Uint8Array): boolean {
+  if (left.byteLength !== right.byteLength) {
+    return false
+  }
+  for (let index = 0; index < left.byteLength; index += 1) {
+    if (left[index] !== right[index]) {
+      return false
+    }
+  }
+  return true
 }
 
 export class Registry {
@@ -192,6 +215,9 @@ export class Registry {
     }
     if (this.store.countRulebooks(actor.providerId) > 0) {
       throw conflict('The provider still owns rulebooks; delete them first.')
+    }
+    if (this.store.countCredentialSchemaDocuments(actor.providerId) > 0) {
+      throw conflict('The provider still owns credential schema documents.')
     }
 
     const at = this.now()
@@ -1198,6 +1224,150 @@ export class Registry {
     return { ...existing, status: 'published', publishedAt }
   }
 
+  // ------------------------------------------------ credential schema documents
+
+  /**
+   * Registers a provider-owned, immutable credential schema document (#97).
+   * The exact bytes are copied, strictly parsed and stored once in the
+   * content-addressed artifact store; the association row records the stable
+   * document identity, media type and creation provenance. Registering the same
+   * content again for the same provider returns the existing document
+   * unchanged. Another provider registering the same content gets its own
+   * association, while the bytes are shared.
+   */
+  registerCredentialSchemaDocument(
+    actor: AuthenticatedActor,
+    input: RegisterCredentialSchemaDocumentInput,
+  ): CredentialSchemaDocument {
+    assertObject(input, 'schemaDocument')
+    if (this.store.getProvider(actor.providerId) === null) {
+      throw notFound('The provider account no longer exists.')
+    }
+
+    const kind = requireCredentialSchemaKind(input.kind)
+    const bytes = requireCredentialSchemaDocumentBytes(input.bytes)
+    const provenance =
+      input.provenance === undefined ? {} : requireJsonObject(input.provenance, 'provenance')
+    const contentDigest = sha256Hex(bytes)
+    if (input.expectedDigest !== undefined) {
+      const expectedDigest = requireSha256Digest(input.expectedDigest, 'expectedDigest')
+      if (expectedDigest !== contentDigest) {
+        throw invalidInput('expectedDigest does not match the exact document bytes.')
+      }
+    }
+    const mediaType = credentialSchemaMediaType(kind)
+
+    const existing = this.store.findCredentialSchemaDocumentByProviderAndDigest(
+      actor.providerId,
+      contentDigest,
+    )
+    if (existing !== null) {
+      if (existing.kind !== kind || existing.mediaType !== mediaType) {
+        throw conflict('The same content is already registered under a different schema profile.')
+      }
+      this.requireStoredSchemaArtifact(contentDigest, mediaType, bytes)
+      return existing
+    }
+
+    const artifact = this.store.getArtifact(contentDigest)
+    if (artifact !== null) {
+      if (artifact.mediaType !== mediaType) {
+        throw conflict('The same content is already stored with a different media type.')
+      }
+      // A digest that resolves to different bytes would be a hash collision or
+      // a corrupted store; never associate a document with those bytes.
+      if (!bytesEqual(artifact.bytes, bytes)) {
+        throw new Error('stored artifact bytes do not match their content digest')
+      }
+    }
+
+    assertCredentialSchemaDocument(bytes, kind)
+
+    const createdAt = this.now()
+    const document: CredentialSchemaDocument = {
+      id: this.generateId(),
+      providerId: actor.providerId,
+      contentDigest,
+      kind,
+      mediaType,
+      provenance,
+      createdAt,
+    }
+
+    this.transaction(() => {
+      this.store.insertArtifactIfAbsent({
+        digest: contentDigest,
+        mediaType,
+        bytes,
+        createdAt,
+      })
+      // Re-read inside the write transaction: if another connection stored
+      // different bytes under this digest, abort instead of associating them.
+      this.requireStoredSchemaArtifact(contentDigest, mediaType, bytes)
+      this.store.insertCredentialSchemaDocument(document)
+      this.store.insertAudit({
+        at: createdAt,
+        actorProviderId: actor.providerId,
+        action: 'schema_document.create',
+        entityType: 'credential_schema_document',
+        entityId: document.id,
+        detail: { kind, contentDigest, mediaType },
+      })
+    })()
+
+    return document
+  }
+
+  /** Public metadata read by stable document id; `null` when it does not exist. */
+  getCredentialSchemaDocument(id: string): CredentialSchemaDocument | null {
+    return this.store.getCredentialSchemaDocument(requireIdentifier(id, 'documentId'))
+  }
+
+  /** Public read of a document's exact stored UTF-8 bytes. */
+  getCredentialSchemaDocumentContent(id: string): CredentialSchemaDocumentContent | null {
+    const document = this.getCredentialSchemaDocument(id)
+    if (document === null) {
+      return null
+    }
+    const artifact = this.store.getArtifact(document.contentDigest)
+    if (artifact === null) {
+      // The foreign key makes this unreachable; treat it as a server fault
+      // rather than a caller-visible not-found.
+      throw new Error('credential schema document references a missing artifact')
+    }
+    if (artifact.mediaType !== document.mediaType) {
+      throw new Error('credential schema document media type disagrees with its artifact')
+    }
+    return { document, bytes: artifact.bytes }
+  }
+
+  /** Public list of document associations, optionally scoped to one provider. */
+  listCredentialSchemaDocuments(providerId?: string): readonly CredentialSchemaDocument[] {
+    return this.store.listCredentialSchemaDocuments(
+      providerId === undefined ? undefined : requireIdentifier(providerId, 'providerId'),
+    )
+  }
+
+  /**
+   * Recomputes the digest over the stored bytes and compares it with the
+   * document's recorded digest; `null` when the document does not exist.
+   */
+  verifyCredentialSchemaDocumentDigest(
+    id: string,
+  ): CredentialSchemaDocumentDigestVerification | null {
+    const content = this.getCredentialSchemaDocumentContent(id)
+    if (content === null) {
+      return null
+    }
+    const actualDigest = sha256Hex(content.bytes)
+    return {
+      document: content.document,
+      expectedDigest: content.document.contentDigest,
+      actualDigest,
+      verified: actualDigest === content.document.contentDigest,
+    }
+  }
+
   // ------------------------------------------------------------------ helpers
 
   /** Validates and builds one rulebook and its children without writing. */
@@ -1413,6 +1583,31 @@ export class Registry {
       )
     }
     return rulebook
+  }
+
+  /**
+   * Proves a schema document's artifact still has the expected media type and
+   * that its bytes really hash to the digest that identifies it. A mismatch is
+   * a corrupted or colliding store, never a caller-visible validation result.
+   */
+  private requireStoredSchemaArtifact(
+    contentDigest: string,
+    mediaType: string,
+    expectedBytes: Uint8Array,
+  ): void {
+    const artifact = this.store.getArtifact(contentDigest)
+    if (artifact === null) {
+      throw new Error('credential schema document references a missing artifact')
+    }
+    if (artifact.mediaType !== mediaType) {
+      throw new Error('stored artifact media type disagrees with its schema document profile')
+    }
+    if (sha256Hex(artifact.bytes) !== contentDigest) {
+      throw new Error('stored artifact bytes do not match their content digest')
+    }
+    if (!bytesEqual(artifact.bytes, expectedBytes)) {
+      throw new Error('stored artifact bytes do not match the supplied document')
+    }
   }
 
   /** Builds the deterministic snapshot bytes for a rulebook at one version. */

@@ -12,6 +12,12 @@ export { AUTH_TOKEN_HASH_LENGTH, generateBearerToken, hashBearerToken } from './
 export { SHA256_HEX_PATTERN, sha256Hex } from './digest'
 
 export {
+  MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES,
+  MAX_CREDENTIAL_SCHEMA_DOCUMENT_DEPTH,
+  MAX_CREDENTIAL_SCHEMA_DOCUMENT_NODES,
+} from './schema-documents'
+
+export {
   RULEBOOK_VERSION_FORMAT,
   RULEBOOK_VERSION_MEDIA_TYPE,
   type RulebookVersionAttestation,
@@ -33,6 +39,8 @@ export {
 
 export {
   AUDIT_ACTIONS,
+  CREDENTIAL_SCHEMA_KINDS,
+  CREDENTIAL_SCHEMA_MEDIA_TYPES,
   PUBLICATION_STATUSES,
   type ActorAuthMethod,
   type AttestationType,
@@ -46,6 +54,11 @@ export {
   type CreateRulebookSchemaReferenceInput,
   type CreateRulebookVersionInput,
   type CreateSchemaReferenceInput,
+  type CredentialSchemaDocument,
+  type CredentialSchemaDocumentContent,
+  type CredentialSchemaDocumentDigestVerification,
+  type CredentialSchemaKind,
+  type CredentialSchemaMediaType,
   type DraftAttestationInput,
   type DraftContent,
   type DraftSchemaReferenceInput,
@@ -55,6 +68,7 @@ export {
   type ProvisionedProvider,
   type ProvisionProviderInput,
   type PublicationStatus,
+  type RegisterCredentialSchemaDocumentInput,
   type ReplaceDraftContentInput,
   type Rulebook,
   type RulebookFilter,

@@ -15,6 +15,9 @@ import type {
   AuditAction,
   AuditEntry,
   AuthTokenRecord,
+  CredentialSchemaDocument,
+  CredentialSchemaKind,
+  CredentialSchemaMediaType,
   JsonObject,
   Provider,
   PublicationStatus,
@@ -103,6 +106,16 @@ interface RulebookVersionRow {
   readonly provenance_json: string
   readonly created_at: string
   readonly published_at: string | null
+}
+
+interface CredentialSchemaDocumentRow {
+  readonly id: string
+  readonly provider_id: string
+  readonly content_digest: string
+  readonly kind: string
+  readonly media_type: string
+  readonly provenance_json: string
+  readonly created_at: string
 }
 
 /** Exact bytes to register in the content-addressed artifact store. */
@@ -228,6 +241,20 @@ function toRulebookVersion(row: RulebookVersionRow): RulebookVersion {
     provenance: parseJsonObject(row.provenance_json),
     createdAt: row.created_at,
     publishedAt: row.published_at,
+  }
+}
+
+function toCredentialSchemaDocument(row: CredentialSchemaDocumentRow): CredentialSchemaDocument {
+  return {
+    id: row.id,
+    providerId: row.provider_id,
+    contentDigest: row.content_digest,
+    // The CHECK constraints restrict these columns; the casts keep the domain
+    // type honest without reselecting the row.
+    kind: row.kind as CredentialSchemaKind,
+    mediaType: row.media_type as CredentialSchemaMediaType,
+    provenance: parseJsonObject(row.provenance_json),
+    createdAt: row.created_at,
   }
 }
 
@@ -681,6 +708,73 @@ export class RegistryStore {
         "SELECT COUNT(*) AS count FROM rulebook_versions WHERE rulebook_id = ? AND status <> 'draft'",
       )
       .get(rulebookId)
+    return row?.count ?? 0
+  }
+
+  // -------------------------------------------------- credential schema documents
+
+  insertCredentialSchemaDocument(document: CredentialSchemaDocument): void {
+    this.database
+      .query(
+        `INSERT INTO credential_schema_documents (
+          id, provider_id, content_digest, kind, media_type, provenance_json, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        document.id,
+        document.providerId,
+        document.contentDigest,
+        document.kind,
+        document.mediaType,
+        JSON.stringify(document.provenance),
+        document.createdAt,
+      )
+  }
+
+  getCredentialSchemaDocument(id: string): CredentialSchemaDocument | null {
+    const row = this.database
+      .query<CredentialSchemaDocumentRow, [string]>(
+        'SELECT * FROM credential_schema_documents WHERE id = ?',
+      )
+      .get(id)
+    return row === null ? null : toCredentialSchemaDocument(row)
+  }
+
+  findCredentialSchemaDocumentByProviderAndDigest(
+    providerId: string,
+    contentDigest: string,
+  ): CredentialSchemaDocument | null {
+    const row = this.database
+      .query<CredentialSchemaDocumentRow, [string, string]>(
+        'SELECT * FROM credential_schema_documents WHERE provider_id = ? AND content_digest = ?',
+      )
+      .get(providerId, contentDigest)
+    return row === null ? null : toCredentialSchemaDocument(row)
+  }
+
+  listCredentialSchemaDocuments(providerId?: string): readonly CredentialSchemaDocument[] {
+    if (providerId === undefined) {
+      return this.database
+        .query<CredentialSchemaDocumentRow, []>(
+          'SELECT * FROM credential_schema_documents ORDER BY rowid',
+        )
+        .all()
+        .map(toCredentialSchemaDocument)
+    }
+    return this.database
+      .query<CredentialSchemaDocumentRow, [string]>(
+        'SELECT * FROM credential_schema_documents WHERE provider_id = ? ORDER BY rowid',
+      )
+      .all(providerId)
+      .map(toCredentialSchemaDocument)
+  }
+
+  countCredentialSchemaDocuments(providerId: string): number {
+    const row = this.database
+      .query<{ count: number }, [string]>(
+        'SELECT COUNT(*) AS count FROM credential_schema_documents WHERE provider_id = ?',
+      )
+      .get(providerId)
     return row?.count ?? 0
   }
 
