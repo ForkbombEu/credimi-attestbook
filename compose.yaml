@@ -9,6 +9,9 @@ services:
       HOST: 0.0.0.0
       PORT: 3000
       DATABASE_PATH: /data/attestbook.sqlite
+      # Public origin used to build permanent hosted-schema URLs. Override it
+      # with the deployment's HTTPS origin outside local development.
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:3000}
     volumes:
       - attestbook-data:/data
     restart: unless-stopped

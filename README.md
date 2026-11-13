@@ -394,7 +394,9 @@ docker compose up --build --wait
 ```
 
 The image is multi-stage, runs as the non-root `bun` user and defines a `HEALTHCHECK` against
-`/health`. It bakes in no secrets. The server opens the SQLite database and applies migrations
+`/health`. It bakes in no secrets. Set `PUBLIC_BASE_URL` to the public HTTPS origin of the
+deployment before relying on hosted schema URLs; `compose.yaml` passes it through and defaults
+to `http://localhost:3000` for local use only. The server opens the SQLite database and applies migrations
 at startup; the image stores it at `/data/attestbook.sqlite` and Compose mounts a named volume
 there. CI builds the image, starts a container and verifies the `/health`, the built catalog
 page at `/`, the empty rulebook-catalogue and unknown-route API round-trips, so the image is
@@ -407,6 +409,7 @@ exercised on every pull request.
 | `PORT`                         | `3000`              | Listener port; an integer between 1 and 65535                       |
 | `HOST`                         | `127.0.0.1`         | Listener hostname or address                                        |
 | `DATABASE_PATH`                | `attestbook.sqlite` | SQLite file opened at startup; `:memory:` is accepted for local use |
+| `PUBLIC_BASE_URL`              | unset               | Trusted public origin for permanent hosted-schema URLs (see below)  |
 | `SCHEMA_SANDBOX_TIMEOUT_MS`    | `2000`              | Hard wall-clock limit for one schema-evaluation child               |
 | `SCHEMA_SANDBOX_MAX_RSS_MB`    | `256`               | RSS limit for one schema-evaluation child                           |
 | `SCHEMA_SANDBOX_CONCURRENCY`   | `2`                 | Maximum concurrent schema-evaluation children                       |
@@ -419,6 +422,51 @@ exercised on every pull request.
 Local development binds loopback only. The Docker image and `compose.yaml` set
 `HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup
 instead of silently binding elsewhere.
+
+## Hosted credential schema documents
+
+AttestBook serves the exact bytes of an immutable credential schema document stored by the
+registry (JSON Schema 2020-12 or SD-JWT VC Type Metadata) at a permanent, unauthenticated
+URL. Such a URL is written into an existing TS11 `schemaURIs[].uri` or rulebook
+`schemaReferences[].uri`, so it must stay stable for the document's lifetime and must never
+depend on a request header.
+
+Set `PUBLIC_BASE_URL` to the deployment's public origin: an absolute `https` origin with no
+path, query, credentials or fragment. Plain `http` is accepted only for `127.0.0.1`,
+`localhost` and `[::1]`, for local development and the user acceptance tests. Any other value
+fails at startup. When the variable is unset, the content route still serves stored bytes, but
+the metadata routes answer `503 public_base_url_unavailable` because they cannot issue a
+canonical URL, and the server logs a warning at startup.
+
+The canonical URL of one document is:
+
+```text
+${PUBLIC_BASE_URL}/api/v1/schema-documents/{documentId}/content
+```
+
+The public routes are:
+
+| Method | Path                                            | Auth | Purpose                                                                                                         |
+| ------ | ----------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/api/v1/schema-documents`                      | no   | Paginated public metadata of stored documents (`limit`, `offset`), including each canonical URL and SRI pin.    |
+| `GET`  | `/api/v1/schema-documents/{documentId}`         | no   | One document's public metadata: kind, media type, SHA-256 digest, W3C SRI pin, creation time and canonical URL. |
+| `GET`  | `/api/v1/schema-documents/{documentId}/content` | no   | The exact immutable bytes under the recorded `application/schema+json` or `application/json` media type.        |
+
+The content response is returned byte-for-byte and never re-serialized. `Content-Digest`
+(RFC 9530), `ETag` and the metadata `integrity` field carry the SHA-256 of those bytes,
+`Cache-Control: public, max-age=31536000, immutable` permits permanent caching, and a matching
+`If-None-Match` answers `304`. Unknown identifiers answer `404`; invalid or oversized
+identifiers are rejected by the bounded identifier rules. The route is read-only: no method
+other than `GET` is registered, and provider ownership, provenance and token material are never
+returned.
+
+The canonical origin is deployment configuration only. `Host`, `Forwarded`,
+`X-Forwarded-Host` and `X-Forwarded-Proto` are never consulted, so a caller cannot make
+AttestBook publish an attacker-controlled schema URL. The provider registration API that
+returns a hosted URI/SRI pair when a document is uploaded is a later slice; until it lands,
+documents are created through the registry service (the local UAT setup seeds one disposable
+document and writes its URL to `dist/uat/fixtures.json`). Existing external schema URLs are
+untouched and stay external references.
 
 ## Administrator browser login
 

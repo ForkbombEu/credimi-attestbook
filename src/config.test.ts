@@ -16,6 +16,7 @@ const DEFAULTS = {
   hostname: DEFAULT_HOSTNAME,
   port: DEFAULT_PORT,
   databasePath: DEFAULT_DATABASE_PATH,
+  publicBaseUrl: null,
   schemaSandboxTimeoutMs: DEFAULT_SCHEMA_SANDBOX_TIMEOUT_MS,
   schemaSandboxMaxRssMb: DEFAULT_SCHEMA_SANDBOX_MAX_RSS_MB,
   schemaSandboxConcurrency: DEFAULT_SCHEMA_SANDBOX_CONCURRENCY,
@@ -34,6 +35,7 @@ describe('loadConfig', () => {
         PORT: '8080',
         HOST: '127.0.0.1',
         DATABASE_PATH: '/tmp/attestbook.sqlite',
+        PUBLIC_BASE_URL: 'https://attestbook.example',
         SCHEMA_SANDBOX_TIMEOUT_MS: '1500',
         SCHEMA_SANDBOX_MAX_RSS_MB: '128',
         SCHEMA_SANDBOX_CONCURRENCY: '1',
@@ -44,6 +46,7 @@ describe('loadConfig', () => {
       hostname: '127.0.0.1',
       port: 8080,
       databasePath: '/tmp/attestbook.sqlite',
+      publicBaseUrl: 'https://attestbook.example',
       schemaSandboxTimeoutMs: 1500,
       schemaSandboxMaxRssMb: 128,
       schemaSandboxConcurrency: 1,
@@ -54,6 +57,36 @@ describe('loadConfig', () => {
 
   test('falls back to the default hostname for a blank HOST', () => {
     expect(loadConfig({ HOST: '   ' }).hostname).toBe(DEFAULT_HOSTNAME)
+  })
+
+  test('reads and validates the trusted public base URL', () => {
+    expect(loadConfig({ PUBLIC_BASE_URL: 'https://AttestBook.Example:443/' }).publicBaseUrl).toBe(
+      'https://attestbook.example',
+    )
+    expect(loadConfig({ PUBLIC_BASE_URL: '  ' }).publicBaseUrl).toBeNull()
+  })
+
+  test.each([
+    'ftp://attestbook.example',
+    'attestbook.example',
+    '/schemas',
+    'https://user:secret@attestbook.example',
+    'https://attestbook.example/prefix',
+    'https://attestbook.example?query=1',
+    'https://attestbook.example#fragment',
+    'http://attestbook.example',
+    'http://0.0.0.0:3000',
+  ])('rejects invalid PUBLIC_BASE_URL=%p', (value) => {
+    expect(() => loadConfig({ PUBLIC_BASE_URL: value })).toThrow('invalid PUBLIC_BASE_URL')
+  })
+
+  test('allows plain http only for a loopback public base URL', () => {
+    expect(loadConfig({ PUBLIC_BASE_URL: 'http://127.0.0.1:3000' }).publicBaseUrl).toBe(
+      'http://127.0.0.1:3000',
+    )
+    expect(loadConfig({ PUBLIC_BASE_URL: 'http://localhost:3000/' }).publicBaseUrl).toBe(
+      'http://localhost:3000',
+    )
   })
 
   test('falls back to the default database path for a blank DATABASE_PATH', () => {

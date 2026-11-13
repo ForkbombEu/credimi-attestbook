@@ -11,6 +11,7 @@ import { z } from 'zod'
 
 import { MAX_ADMIN_PASSWORD_LENGTH, MAX_ADMIN_USERNAME_LENGTH } from '../auth'
 import { ISSUER_FIXTURE_KIND, ISSUER_FIXTURE_NEGATIVE_CATEGORIES } from '../fixtures/types'
+import { CREDENTIAL_SCHEMA_KINDS } from '../registry/types'
 import {
   CONFORMANCE_CANONICALIZATION,
   CONFORMANCE_DIGEST_ALGORITHM,
@@ -208,6 +209,35 @@ export const schemaReferenceListResponseSchema = z.object({
 export const rulebookVersionResponseSchema = z.object({ data: rulebookVersionSchema })
 export const rulebookVersionListResponseSchema = z.object({
   data: z.array(rulebookVersionSchema),
+})
+
+// ------------------------------------------- hosted credential schema documents
+
+/**
+ * Public projection of one stored credential schema document (#98). The exact
+ * bytes live behind `url`; the canonical origin is deployment configuration,
+ * never a request header. Provider ownership, provenance and every secret stay
+ * registry-internal and are absent here.
+ */
+export const credentialSchemaDocumentSchema = z.object({
+  id: z.string(),
+  kind: z.enum(CREDENTIAL_SCHEMA_KINDS),
+  mediaType: z.enum(['application/schema+json', 'application/json']),
+  contentDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  /** W3C SRI pin (`sha256-<base64>`) of the exact bytes. */
+  integrity: z.string().regex(/^sha256-[A-Za-z0-9+/]+={0,2}$/),
+  /** Canonical permanent HTTPS URL of the exact bytes. */
+  url: z.string().min(1),
+  createdAt: timestamp,
+})
+
+export const credentialSchemaDocumentResponseSchema = z.object({
+  data: credentialSchemaDocumentSchema,
+})
+
+export const credentialSchemaDocumentPageSchema = z.object({
+  data: z.array(credentialSchemaDocumentSchema),
+  pagination: paginationSchema,
 })
 
 // --------------------------------------------- version comparison & readiness
@@ -1471,6 +1501,9 @@ export const OPENAPI_COMPONENTS = {
   RulebookVersionResponse: rulebookVersionResponseSchema,
   RulebookVersionListResponse: rulebookVersionListResponseSchema,
   RulebookVersionDocument: rulebookVersionDocumentSchema,
+  CredentialSchemaDocument: credentialSchemaDocumentSchema,
+  CredentialSchemaDocumentResponse: credentialSchemaDocumentResponseSchema,
+  CredentialSchemaDocumentPageResponse: credentialSchemaDocumentPageSchema,
   VersionDiff: versionDiffSchema,
   VersionDiffResponse: versionDiffResponseSchema,
   PublicationReadiness: publicationReadinessSchema,
@@ -1560,6 +1593,7 @@ export type AttestationDetailResource = z.infer<typeof attestationDetailSchema>
 export type SchemaReferenceResource = z.infer<typeof schemaReferenceSchema>
 export type RulebookVersionResource = z.infer<typeof rulebookVersionSchema>
 export type RulebookVersionDocumentResource = z.infer<typeof rulebookVersionDocumentSchema>
+export type CredentialSchemaDocumentResource = z.infer<typeof credentialSchemaDocumentSchema>
 export type VersionDiffResource = z.infer<typeof versionDiffSchema>
 export type VersionDiffChangeResource = z.infer<typeof versionDiffChangeSchema>
 export type PublicationReadinessResource = z.infer<typeof publicationReadinessSchema>

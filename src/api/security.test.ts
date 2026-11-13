@@ -34,10 +34,11 @@ afterEach(() => {
 interface Setup {
   readonly app: Hono
   readonly registry: Registry
+  readonly validation: CredentialValidator
   readonly seeded: SeededRulebook
 }
 
-function setup(): Setup {
+function setup(publicBaseUrl?: string): Setup {
   fixture = createRegistryFixture()
   const seeded = seedPublishedRulebook(fixture.database, fixture.registry)
   const validation = new CredentialValidator({
@@ -46,8 +47,13 @@ function setup(): Setup {
     generateId: () => 'http-security-validation-id',
   })
   return {
-    app: createApp({ registry: fixture.registry, validation }),
+    app: createApp({
+      registry: fixture.registry,
+      validation,
+      ...(publicBaseUrl === undefined ? {} : { publicBaseUrl }),
+    }),
     registry: fixture.registry,
+    validation,
     seeded,
   }
 }
@@ -63,10 +69,15 @@ async function errorJson(response: Response): Promise<ErrorEnvelope> {
   return (await response.json()) as ErrorEnvelope
 }
 
-function concretePath(route: ApiRouteSpec, rulebookId: string): string {
+function concretePath(
+  route: ApiRouteSpec,
+  rulebookId: string,
+  schemaDocumentId = 'missing-schema-document',
+): string {
   const path = route.path
     .replace(':rulebookId', rulebookId)
     .replace(':version', '1.0')
+    .replace(':documentId', schemaDocumentId)
     // The capture explorer is seeded from the deterministic mock source, so a
     // known capture id is the public read path.
     .replace(':captureId', 'mock-capture-capture-issuer-1')
@@ -269,12 +280,29 @@ describe('provider ownership on write endpoints', () => {
 
 describe('public read behavior is preserved', () => {
   test('public GET routes stay readable without a token', async () => {
-    const { app, seeded } = setup()
+    const { registry, validation, seeded } = setup()
+    // A hosted schema document needs a configured public origin and a stored
+    // document, so the public metadata and content reads can answer 200 here.
+    const schemaOwner = provisionProvider(requireFixture().database, {
+      name: 'Hosted Schema Owner',
+      publicationAuthority: 'authority-hosted-schema-owner',
+    })
+    const hosted = await registry.registerCredentialSchemaDocument(schemaOwner.actor, {
+      kind: 'json_schema_2020_12',
+      bytes: new TextEncoder().encode(
+        '{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}',
+      ),
+    })
+    const app = createApp({
+      registry,
+      validation,
+      publicBaseUrl: 'https://schemas.example',
+    })
 
     for (const route of API_ROUTES.filter(
       (candidate) => candidate.method === 'get' && !candidate.security && !candidate.sessionAuth,
     )) {
-      const response = await app.request(concretePath(route, seeded.rulebookId))
+      const response = await app.request(concretePath(route, seeded.rulebookId, hosted.id))
       expect(response.status, `${route.operationId} must be publicly readable`).toBe(200)
     }
 

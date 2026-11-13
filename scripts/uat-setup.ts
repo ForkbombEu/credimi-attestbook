@@ -25,6 +25,7 @@ import { join, resolve } from 'node:path'
 
 import { openDatabase } from '../src/db/database'
 import { applyMigrations } from '../src/db/migrations'
+import { Registry } from '../src/registry/registry'
 import { provisionProvider } from '../src/registry/bootstrap'
 import { RegistryStore } from '../src/registry/store'
 import { hashBearerToken } from '../src/registry/tokens'
@@ -45,6 +46,29 @@ const UAT_WRITER_PUBLICATION_AUTHORITY = 'uat-writer-provider'
  */
 const UAT_WRITER_BEARER_TOKEN = 'att_uat_writer_disposable_test_token_only'
 const UAT_WRITER_TOKEN_LABEL = 'uat-writer-fixed-test-token'
+
+/**
+ * Disposable local origin used to build the permanent hosted-schema URL of the
+ * seeded document (#98). It is a loopback origin, so the configuration allows
+ * plain http for this sandbox only; production deployments configure their
+ * public HTTPS origin. No request header can override it.
+ */
+const UAT_PUBLIC_BASE_URL = 'http://127.0.0.1:3000'
+
+/**
+ * Test-only JSON Schema document seeded so the UAT can retrieve a registered
+ * schema document through its public URL. It is disposable test data, not a
+ * committed secret, and it lives only in the throwaway sandbox database.
+ */
+const UAT_HOSTED_SCHEMA_TEXT = JSON.stringify({
+  $schema: 'https://json-schema.org/draft/2020-12/schema',
+  type: 'object',
+  required: ['family_name'],
+  properties: {
+    family_name: { type: 'string' },
+  },
+  additionalProperties: false,
+})
 
 const outputDirectory = resolve(process.cwd(), 'dist', 'uat')
 const databasePath = join(outputDirectory, 'attestbook.sqlite')
@@ -87,11 +111,22 @@ try {
     new Date().toISOString(),
   )
 
+  // Seed one immutable hosted schema document through the real registry
+  // service, so the public UAT URL serves the same exact bytes, digest and
+  // media type that a provider registration (#99) will produce.
+  const registry = new Registry({ database })
+  const hostedSchema = await registry.registerCredentialSchemaDocument(writer.actor, {
+    kind: 'json_schema_2020_12',
+    bytes: new TextEncoder().encode(UAT_HOSTED_SCHEMA_TEXT),
+    provenance: { source: 'uat-setup' },
+  })
+
   const passwordHash = await Bun.password.hash(UAT_ADMIN_PASSWORD, { algorithm: 'argon2id' })
   const environment: readonly (readonly [string, string])[] = [
     ['DATABASE_PATH', databasePath],
     ['HOST', '127.0.0.1'],
     ['PORT', '3000'],
+    ['PUBLIC_BASE_URL', UAT_PUBLIC_BASE_URL],
     ['ADMIN_USERNAME', UAT_ADMIN_USERNAME],
     ['ADMIN_PASSWORD_HASH', passwordHash],
     ['ADMIN_PROVIDER_ID', administrator.provider.id],
@@ -115,6 +150,14 @@ try {
           providerId: writer.provider.id,
           bearerToken: UAT_WRITER_BEARER_TOKEN,
         },
+        hostedSchema: {
+          id: hostedSchema.id,
+          kind: hostedSchema.kind,
+          mediaType: hostedSchema.mediaType,
+          contentDigest: hostedSchema.contentDigest,
+          url: `${UAT_PUBLIC_BASE_URL}/api/v1/schema-documents/${hostedSchema.id}/content`,
+          metadataUrl: `${UAT_PUBLIC_BASE_URL}/api/v1/schema-documents/${hostedSchema.id}`,
+        },
       },
       null,
       2,
@@ -123,7 +166,7 @@ try {
   )
 
   console.log(
-    `UAT fixtures provisioned: administrator provider ${administrator.provider.id}, writer provider ${writer.provider.id} (test credentials only; writer token is the fixed UAT fixture value)`,
+    `UAT fixtures provisioned: administrator provider ${administrator.provider.id}, writer provider ${writer.provider.id}, hosted schema document ${hostedSchema.id} (test credentials only; writer token is the fixed UAT fixture value)`,
   )
 } finally {
   database.close()

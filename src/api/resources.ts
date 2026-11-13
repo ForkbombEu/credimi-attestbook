@@ -30,18 +30,21 @@ import type { PublicationReadiness, VersionContentDiff } from '../lifecycle'
 import type { PublicationExportManifest } from '../publication'
 import type {
   AttestationType,
+  CredentialSchemaDocument,
   DraftContent,
   Provider,
   Rulebook,
   RulebookVersion,
   SchemaReference,
 } from '../registry/types'
+import { credentialSchemaDocumentUrl, sha256Sri } from '../public-urls'
 import type { CredentialValidationResult } from '../validation'
 import type { VerifierConstraintsResult } from '../verifier'
 
 import {
   attestationDetailSchema,
   captureCorrelationResultSchema,
+  credentialSchemaDocumentSchema,
   captureExplorerDetailSchema,
   captureExplorerPageSchema,
   captureExplorerSummarySchema,
@@ -65,6 +68,26 @@ import {
   type IssuerFixtureResource,
   type VerifierConstraintsResource,
 } from './schemas'
+
+/**
+ * Public projection of one stored credential schema document (#98). The
+ * canonical URL is composed from the trusted deployment origin, so request
+ * headers cannot influence a permanent hosted-schema URI.
+ */
+export function toCredentialSchemaDocumentResource(
+  document: CredentialSchemaDocument,
+  publicBaseUrl: string,
+) {
+  return credentialSchemaDocumentSchema.parse({
+    id: document.id,
+    kind: document.kind,
+    mediaType: document.mediaType,
+    contentDigest: document.contentDigest,
+    integrity: sha256Sri(document.contentDigest),
+    url: credentialSchemaDocumentUrl(publicBaseUrl, document.id),
+    createdAt: document.createdAt,
+  })
+}
 
 /** Public catalogue projection of a provider; authority and metadata stay internal. */
 export function toProviderResource(provider: Provider) {
