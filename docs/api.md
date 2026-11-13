@@ -47,7 +47,11 @@ Implemented and exposed by this slice:
   reference (added by [issue #51](https://github.com/ForkbombEu/credimi-attestbook/issues/51));
 - public, unauthenticated retrieval of immutable stored credential schema documents at
   permanent URLs built from the configured public origin (added by
-  [issue #98](https://github.com/ForkbombEu/credimi-attestbook/issues/98)).
+  [issue #98](https://github.com/ForkbombEu/credimi-attestbook/issues/98));
+- authenticated, idempotent registration of a local JSON schema document that returns its
+  canonical hosted URL, W3C SRI pin, digest and media type, usable as an ordinary
+  `schemaReferences[].uri`/`integrity` pair (added by
+  [issue #99](https://github.com/ForkbombEu/credimi-attestbook/issues/99)).
 
 The public API is the integration boundary for Credimi. The standalone adapter documented in
 [`docs/credimi-integration.md`](credimi-integration.md) (issue #49) consumes these routes only:
@@ -63,8 +67,8 @@ Deliberately **not** in this slice:
 - provider-management HTTP routes, generic API rate limiting and token expiry/rotation —
   future hardening; the administrator login has its own failure limit and the implemented
   write-auth model is documented in [`docs/security.md`](security.md);
-- provider-authorized schema registration (`POST`/upload, issue #99): the public read and
-  permanent-URL surface exists, but no route uploads, replaces or deletes a document;
+- document replacement or deletion: registration is append-only and content-addressed, so no
+  route updates, replaces or deletes a stored schema document;
 - a publication signature: no export claims one. OWF 0.5.4 signs only a bare OWF-profile
   `SchemaMeta` compact JWS and does not implement the TS11 v1.0.1 catalogue-response JWS,
   while a version snapshot is not a `SchemaMeta` document; the manifest reports this boundary
@@ -87,14 +91,15 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.12.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.13.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
   export operations added by #42, issuer discovery added by #43, issuer fixture generation
   added by #44, the mock-backed capture explorer added by #48, the optional pinned
   correlation digest added by #49, the read-only headless-wallet comparison added by
-  #50, the reproducible conformance run added by #51 and the public hosted
-  credential-schema document reads added by #98); it is separate from the package version
-  reported by `/health`.
+  #50, the reproducible conformance run added by #51, the public hosted
+  credential-schema document reads added by #98 and the authenticated schema document
+  registration added by #99); it is separate from the package version reported by
+  `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -131,6 +136,7 @@ All operations are synchronous in Phase 1.
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publication-readiness` | no | `200` | Pre-publication checks and explicit limitations; never a publication or a conformance claim. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export` | no | `200` | Download the exact immutable bytes of a published or historical artifact; `Content-Digest`, `ETag` and an attachment filename are returned. Drafts answer `409 conflict`. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/export/manifest` | no | `200` | Publication export manifest: frozen identity, digest, bounded provenance, integrity result and the explicit signature boundary. Drafts answer `409 conflict`. |
+| `POST` | `/api/v1/schema-documents?kind={kind}` | yes | `201` + `Location`, `200` on replay | Register the exact JSON request body as a supported, bounded credential schema document (256 KiB maximum; `kind` is `json_schema_2020_12` or `sd_jwt_vc_type_metadata`). Returns the document id, canonical media type, SHA-256 digest, W3C SRI pin and canonical hosted URL. Re-registering identical content for the same provider returns the existing document with `200`. There is no replace or delete route. |
 | `GET` | `/api/v1/schema-documents` | no | `200` | Paginated public metadata of stored immutable credential schema documents (`limit`, `offset`), each with its digest, W3C SRI pin and canonical hosted URL. Provider ownership and provenance are never returned. |
 | `GET` | `/api/v1/schema-documents/{documentId}` | no | `200` | One stored schema document's public metadata and permanent hosted URL, composed from the configured `PUBLIC_BASE_URL` and never from request headers. `503 public_base_url_unavailable` when no public origin is configured. |
 | `GET` | `/api/v1/schema-documents/{documentId}/content` | no | `200` | The exact immutable registered bytes under the recorded `application/schema+json` or `application/json` media type, with `Content-Digest`, `ETag`, immutable `Cache-Control` and `X-Content-Type-Options: nosniff`; a matching `If-None-Match` answers `304`. Unknown ids answer `404`; no mutation method exists. |
@@ -743,6 +749,74 @@ attribution and audit rows do not depend on the credential used.
 - With neither credential the route answers `401`; a cookie without CSRF evidence answers
   `403 csrf_failed`. Anonymous catalogue, validation and download reads are unchanged.
 
+### 3.13 Provider-authorized schema registration
+
+`POST /api/v1/schema-documents?kind={kind}` registers one local schema document under the
+authenticated provider (issue #99). It accepts the provider bearer token or the administrator
+browser session with its session-bound `X-CSRF-Token`; anonymous registration is refused with
+`401`, and an explicit invalid bearer never falls back to a cookie.
+
+The request body is the exact JSON document, not an envelope:
+
+- `kind=json_schema_2020_12` stores the bytes as `application/schema+json`; the document must
+  be a JSON Schema 2020-12 object or boolean that the validation engine can compile safely.
+  The same unsafe constructs refused by validation are refused here (`$ref`/`$dynamicRef`,
+  `pattern`, `format`, `uniqueItems`, unknown keywords and non-2020-12 dialects).
+- `kind=sd_jwt_vc_type_metadata` stores the bytes as `application/json`; the document must
+  satisfy the pinned `@sd-jwt/sd-jwt-vc` type metadata format with a non-empty `vct`.
+- The bytes must be strict UTF-8, must not repeat a member name, are bounded to 256 KiB, a
+  nesting depth of 64 and 32 768 parsed values, and are bounded again by the shared 4 MiB
+  request limit. A body over 256 KiB answers `413 payload_too_large`; malformed JSON,
+  unsupported profiles or unsafe constructs answer `400 invalid_request`.
+- The `kind` query parameter, not the `Content-Type` header, selects the profile. A JSON
+  Schema request may therefore use `application/schema+json` or `application/json`.
+
+The response is the same public projection as the read routes, so `url`, `integrity`,
+`contentDigest` and `mediaType` describe the exact stored bytes:
+
+```json
+{
+  "data": {
+    "id": "6f0e2c1a-...",
+    "kind": "json_schema_2020_12",
+    "mediaType": "application/schema+json",
+    "contentDigest": "<lowercase hex sha-256>",
+    "integrity": "sha256-<base64>",
+    "url": "https://schemas.example/api/v1/schema-documents/6f0e2c1a-.../content",
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+}
+```
+
+- A new association answers `201` and a `Location` header carrying the hosted URL; replaying
+  the same content for the same provider answers `200` with the original document unchanged.
+  Identical content registered by a different provider gets its own id and URL while the bytes
+  are stored once.
+- Registering the same bytes under a contradictory profile answers `409 conflict`. The
+  per-provider association limit is 100; a provider at the limit gets `409 conflict` for a new
+  document but can still replay the documents it already owns.
+- `503 public_base_url_unavailable` is answered before any write when the deployment has no
+  valid `PUBLIC_BASE_URL`, because the canonical URL is part of the result. There is no route
+  that replaces, updates or deletes a stored document; the bytes and their digest are
+  immutable.
+
+The returned `url` and `integrity` are ordinary schema-reference values. An authorized caller
+writes them into an existing per-attestation `schemaReferences` entry through
+`POST /api/v1/rulebooks` or `PUT /api/v1/rulebooks/{rulebookId}/draft`:
+
+```json
+{
+  "formatIdentifier": "dc+sd-jwt",
+  "uri": "https://schemas.example/api/v1/schema-documents/<id>/content",
+  "integrity": "sha256-<base64>"
+}
+```
+
+Neither the draft API nor the version snapshot learns that the URI is AttestBook-hosted: the
+snapshot serializes the same `formatIdentifier`, `uri` and `integrity` members, with no
+proprietary field. An external absolute `https` schema URI and optional SRI keep working
+exactly as before, without an upload or conversion, and an omitted SRI stays `null`.
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -774,10 +848,11 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Administrator login/logout | foreign `Origin` or cross-site `Sec-Fetch-Site` | `403` | `forbidden` |
 | Registry / publish handler | authenticated provider does not own the resource | `403` | `forbidden` |
 | API / registry | resource does not exist | `404` | `not_found` |
-| Registry | duplicate version label, stale draft snapshot | `409` | `conflict` |
+| Registry | duplicate version label, stale draft snapshot, schema document content already registered under a contradictory profile, per-provider schema document limit | `409` | `conflict` |
 | Registry / draft editor | published or historical rulebook cannot be edited | `409` | `immutable` |
 | Registry / version handlers | published/historical immutability, historical republication, refresh of a frozen version | `409` | `immutable` |
 | Body limit middleware | body larger than 4 MiB | `413` | `payload_too_large` |
+| Schema registration | schema document body larger than 256 KiB | `413` | `payload_too_large` |
 | Import or issuer discovery | unsafe/malformed/unsupported source or issuer metadata, limits, refused input | `422` | `import_rejected` |
 | Import or issuer discovery | remote fetch failure, DNS failure, timeout, redirect limit, oversized remote response, unsupported remote status | `502` | `import_fetch_failed` |
 | Import or issuer discovery | `invalid_source`/`invalid_url` client input | `400` | `invalid_request` |
@@ -794,6 +869,7 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Administrator login | repeated failures above the account or client bound | `429` | `rate_limited` |
 | API wiring | registry, validation, issuer discovery, issuer fixtures, verifier policy resolver or capture explorer not configured | `503` | `registry_unavailable` / `validation_unavailable` / `capture_unavailable` |
 | Administrator login | configuration absent, partial, invalid or its provider missing | `503` | `auth_unavailable` |
+| Schema registration | deployment has no valid `PUBLIC_BASE_URL`, so no canonical hosted URL can be issued | `503` | `public_base_url_unavailable` |
 | API | unexpected failure | `500` | `internal_error` |
 
 Unknown routes under any path answer `404` with `not_found` and the same envelope. The

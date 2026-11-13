@@ -7,7 +7,10 @@ import { provisionProvider } from './bootstrap'
 import { sha256Hex } from './digest'
 import { isRegistryError, RegistryError, type RegistryErrorCode } from './errors'
 import { Registry } from './registry'
-import { MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES } from './schema-documents'
+import {
+  MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES,
+  MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER,
+} from './schema-documents'
 import { createRegistryFixture, openMigratedDatabase, type RegistryFixture } from './test-support'
 import type { CredentialSchemaKind } from './types'
 
@@ -623,5 +626,47 @@ describe('credential schema documents', () => {
     } finally {
       rmSync(directory, { recursive: true, force: true })
     }
+  })
+
+  test('bounds how many documents one provider may create', async () => {
+    const { registry, database } = setup()
+    const provider = provision('quota')
+    const typeMetadata = (index: number) =>
+      encodeJson({ vct: `https://example.org/vct/quota-${index}` })
+
+    for (let index = 0; index < MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER; index += 1) {
+      await registry.registerCredentialSchemaDocument(provider.actor, {
+        kind: 'sd_jwt_vc_type_metadata',
+        bytes: typeMetadata(index),
+      })
+    }
+    expect(documentCount(database)).toBe(MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER)
+
+    // A new document is refused once the provider owns the maximum.
+    await expectRegistryError(
+      () =>
+        registry.registerCredentialSchemaDocument(provider.actor, {
+          kind: 'sd_jwt_vc_type_metadata',
+          bytes: typeMetadata(MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER),
+        }),
+      'conflict',
+    )
+    expect(documentCount(database)).toBe(MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER)
+
+    // Replaying an existing provider/content registration stays idempotent.
+    const existing = await registry.registerCredentialSchemaDocument(provider.actor, {
+      kind: 'sd_jwt_vc_type_metadata',
+      bytes: typeMetadata(0),
+    })
+    expect(existing.contentDigest).toBe(sha256Hex(typeMetadata(0)))
+    expect(documentCount(database)).toBe(MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER)
+
+    // The bound is per provider: another provider starts with its own slots.
+    const other = provision('quota-other')
+    await registry.registerCredentialSchemaDocument(other.actor, {
+      kind: 'sd_jwt_vc_type_metadata',
+      bytes: typeMetadata(0),
+    })
+    expect(documentCount(database)).toBe(MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER + 1)
   })
 })

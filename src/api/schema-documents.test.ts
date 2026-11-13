@@ -177,21 +177,24 @@ describe('hosted schema content route', () => {
     expect(body.error.code).toBe('invalid_request')
   })
 
-  test('has no mutation method and exposes no write route', async () => {
+  test('the content route has no mutation method and no write replaces or deletes a document', async () => {
     if (fixture === undefined) {
       throw new Error('fixture is not initialized')
     }
     const before = documentCount(fixture.database)
+    // The exact-bytes route is read-only: no method mutates one document.
     for (const method of ['POST', 'PUT', 'DELETE']) {
       const response = await app.request(contentPath(schemaDocument), { method })
       expect([404, 405]).toContain(response.status)
     }
     expect(documentCount(fixture.database)).toBe(before)
-    expect(
-      API_ROUTES.some(
-        (route) => route.path.startsWith('/api/v1/schema-documents') && route.method !== 'get',
-      ),
-    ).toBe(false)
+    // Issue #99 adds exactly one write route, the collection-level registration;
+    // there is no per-document replacement or deletion route.
+    const writes = API_ROUTES.filter(
+      (route) => route.path.startsWith('/api/v1/schema-documents') && route.method !== 'get',
+    )
+    expect(writes.map((route) => route.operationId)).toEqual(['registerSchemaDocument'])
+    expect(writes.map((route) => route.path)).toEqual(['/api/v1/schema-documents'])
   })
 
   test('rejects an oversized request body before it reaches the route', async () => {

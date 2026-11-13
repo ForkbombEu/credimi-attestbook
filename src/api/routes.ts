@@ -46,9 +46,13 @@ import type { ImportPreview, ImportResult, ImportSource } from '../import'
 import { assessPublicationReadiness, compareVersionDocuments } from '../lifecycle'
 import { buildPublicationExportManifest, publicationExportFilename } from '../publication'
 import type { PublicationExportManifest } from '../publication'
-import { parsePublicBaseUrl } from '../public-urls'
+import { credentialSchemaDocumentUrl, parsePublicBaseUrl } from '../public-urls'
 import type { Registry } from '../registry/registry'
 import { invalidInput, unauthorized } from '../registry/errors'
+import {
+  MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES,
+  requireCredentialSchemaKind,
+} from '../registry/schema-documents'
 import type {
   AuthenticatedActor,
   CreateRulebookInput,
@@ -56,6 +60,7 @@ import type {
   ReplaceDraftContentInput,
   RulebookVersionContent,
 } from '../registry/types'
+import { CREDENTIAL_SCHEMA_KINDS } from '../registry/types'
 import { parseRulebookVersionDocument, type RulebookVersionDocument } from '../registry/versioning'
 import {
   CREDENTIAL_VALIDATION_PATH,
@@ -127,6 +132,7 @@ export type ApiOperationId =
   | 'listSchemaDocuments'
   | 'getSchemaDocument'
   | 'getSchemaDocumentContent'
+  | 'registerSchemaDocument'
   | 'createRulebook'
   | 'createRulebookVersion'
   | 'refreshRulebookVersion'
@@ -715,6 +721,61 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         headers: [{ name: 'ETag', description: 'Quoted lowercase hex SHA-256 of the bytes.' }],
       },
       ...errors(400, 404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'registerSchemaDocument',
+    method: 'post',
+    path: '/api/v1/schema-documents',
+    summary: 'Register an immutable credential schema document',
+    description:
+      'Authenticated, idempotent registration of a supported, bounded JSON document under the authenticated provider. The raw request body is the exact JSON document; the required `kind` query parameter selects the supported profile and therefore fixes the canonical media type. Registration computes the SHA-256 over the exact bytes, stores the bytes once in the content-addressed store and returns the public document metadata: the canonical AttestBook-hosted HTTPS URL, the W3C SRI pin (`sha256-<base64>`), the hex digest and the media type. Registering identical content again for the same provider returns the existing document unchanged with `200`; a new association answers `201`. The bytes are never updated, replaced or deleted. The returned `url` and `integrity` are ordinary `schemaReferences[].uri`/`integrity` values; no proprietary TS11 field is added. Requires a provider bearer token or the administrator browser session plus its CSRF token; public clients cannot register.',
+    tag: 'schemas',
+    security: true,
+    parameters: [
+      {
+        name: 'kind',
+        in: 'query',
+        required: true,
+        description:
+          'Supported credential schema profile: `json_schema_2020_12` (`application/schema+json`) or `sd_jwt_vc_type_metadata` (`application/json`).',
+        schema: { type: 'string', enum: [...CREDENTIAL_SCHEMA_KINDS] },
+      },
+    ],
+    request: {
+      schema: 'RegisterSchemaDocumentRequest',
+      mediaType: 'application/json',
+      required: true,
+      description:
+        'The exact JSON document bytes. A JSON Schema 2020-12 document is an object or a boolean; an SD-JWT VC Type Metadata document is an object. `kind`, not the `Content-Type` header, selects the profile, so `application/schema+json` is also accepted for JSON Schema. The body must be at most 256 KiB and must not repeat a member name.',
+    },
+    responses: [
+      {
+        status: 201,
+        description:
+          'The document was registered; the body is its public metadata and `Location` is the permanent hosted URL.',
+        schema: 'CredentialSchemaDocumentResponse',
+        headers: [
+          {
+            name: 'Location',
+            description:
+              'Canonical AttestBook-hosted URL of the exact immutable bytes, built from the configured public origin.',
+          },
+        ],
+      },
+      {
+        status: 200,
+        description:
+          'Identical content is already registered for this provider; the existing document is returned unchanged and `Location` is its permanent hosted URL.',
+        schema: 'CredentialSchemaDocumentResponse',
+        headers: [
+          {
+            name: 'Location',
+            description: 'Canonical AttestBook-hosted URL of the exact immutable bytes.',
+          },
+        ],
+      },
+      ...errors(400, 401, 403, 404, 409, 413, 500, 503),
     ],
   },
   {
@@ -2068,6 +2129,45 @@ function getSchemaDocumentContentHandler(dependencies: ApiDependencies): ApiHand
   }
 }
 
+/**
+ * Reads the raw registration body exactly once and enforces the profile's byte
+ * bound before the registry sees it. The platform-wide body limit already
+ * bounds the read at `MAX_API_BODY_BYTES`; this answers the narrower document
+ * limit with the API's typed `413 payload_too_large` instead of a generic 400.
+ */
+async function readSchemaDocumentBody(context: Context): Promise<Uint8Array> {
+  const bytes = new Uint8Array(await context.req.arrayBuffer())
+  if (bytes.byteLength > MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES) {
+    throw apiError(
+      413,
+      'payload_too_large',
+      `The schema document must be at most ${MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES} bytes.`,
+    )
+  }
+  return bytes
+}
+
+function registerSchemaDocumentHandler(dependencies: ApiDependencies): ApiHandler {
+  return async (context) => {
+    const registry = requireRegistry(dependencies)
+    const actor = requireActor(context)
+    // A canonical permanent URL is part of the result, so refuse before any
+    // write when the deployment cannot issue one.
+    const publicBaseUrl = requirePublicBaseUrl(dependencies)
+    const kind = requireCredentialSchemaKind(context.req.query('kind'))
+    const bytes = await readSchemaDocumentBody(context)
+    // Only the HTTP status distinguishes an idempotent replay; the write path
+    // still validates, authorizes and re-checks everything itself.
+    const existing = registry.findCredentialSchemaDocumentByContent(actor, bytes)
+    const document = await registry.registerCredentialSchemaDocument(actor, { kind, bytes })
+    return context.json(
+      { data: toCredentialSchemaDocumentResource(document, publicBaseUrl) },
+      existing === null ? 201 : 200,
+      { Location: credentialSchemaDocumentUrl(publicBaseUrl, document.id) },
+    )
+  }
+}
+
 function createRulebookHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const registry = requireRegistry(dependencies)
@@ -2486,6 +2586,7 @@ export function createApiHandlers(
     listSchemaDocuments: listSchemaDocumentsHandler(dependencies),
     getSchemaDocument: getSchemaDocumentHandler(dependencies),
     getSchemaDocumentContent: getSchemaDocumentContentHandler(dependencies),
+    registerSchemaDocument: registerSchemaDocumentHandler(dependencies),
     createRulebook: createRulebookHandler(dependencies),
     createRulebookVersion: createRulebookVersionHandler(dependencies),
     refreshRulebookVersion: refreshRulebookVersionHandler(dependencies),

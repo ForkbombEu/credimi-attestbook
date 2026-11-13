@@ -30,6 +30,7 @@ import {
   assertCredentialSchemaDocumentCompiles,
   assertCredentialSchemaDocumentStructure,
   credentialSchemaMediaType,
+  MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER,
   requireCredentialSchemaDocumentBytes,
   requireCredentialSchemaKind,
 } from './schema-documents'
@@ -1275,6 +1276,11 @@ export class Registry {
       return existing
     }
 
+    // Bound how many associations one provider may create (#99). A replayed
+    // registration of existing content returned above, so the limit never locks
+    // a provider out of documents it already owns.
+    this.requireSchemaDocumentQuota(actor.providerId)
+
     const artifact = this.store.getArtifact(contentDigest)
     if (artifact !== null) {
       if (artifact.mediaType !== mediaType) {
@@ -1323,6 +1329,9 @@ export class Registry {
           winner = raced
           return
         }
+        // Authoritative quota check: a concurrent registration may have used
+        // the last slot after the pre-check above.
+        this.requireSchemaDocumentQuota(actor.providerId)
         this.store.insertArtifactIfAbsent({
           digest: contentDigest,
           mediaType,
@@ -1367,6 +1376,20 @@ export class Registry {
   /** Public metadata read by stable document id; `null` when it does not exist. */
   getCredentialSchemaDocument(id: string): CredentialSchemaDocument | null {
     return this.store.getCredentialSchemaDocument(requireIdentifier(id, 'documentId'))
+  }
+
+  /**
+   * Returns the provider's existing association for exact content without
+   * writing anything (#99). The registration HTTP route uses it only to answer
+   * an idempotent replay with `200` instead of `201`; the write path re-checks
+   * everything itself.
+   */
+  findCredentialSchemaDocumentByContent(
+    actor: AuthenticatedActor,
+    bytes: Uint8Array,
+  ): CredentialSchemaDocument | null {
+    const digest = sha256Hex(requireCredentialSchemaDocumentBytes(bytes))
+    return this.store.findCredentialSchemaDocumentByProviderAndDigest(actor.providerId, digest)
   }
 
   /** Public read of a document's exact stored UTF-8 bytes. */
@@ -1629,6 +1652,21 @@ export class Registry {
       )
     }
     return rulebook
+  }
+
+  /**
+   * Enforces the per-provider document quota (#99). The check is repeated
+   * inside the write transaction so concurrent registrations cannot exceed it.
+   */
+  private requireSchemaDocumentQuota(providerId: string): void {
+    if (
+      this.store.countCredentialSchemaDocuments(providerId) >=
+      MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER
+    ) {
+      throw conflict(
+        `The provider has reached the limit of ${MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER} stored schema documents.`,
+      )
+    }
   }
 
   /**

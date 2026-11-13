@@ -189,6 +189,7 @@ The following rules implement that model:
 | `GET /api/v1/rulebooks`, `GET /api/v1/rulebooks/{id}` | no | n/a | `404` for an unknown id |
 | `GET /api/v1/schema-documents`, `GET /api/v1/schema-documents/{documentId}` | no | Public stored-schema metadata only; canonical URL built from configured `PUBLIC_BASE_URL`; provider ownership, provenance and tokens never returned | `404` for an unknown id; `503 public_base_url_unavailable` without a configured origin; `400` for invalid pagination |
 | `GET /api/v1/schema-documents/{documentId}/content` | no | Public exact immutable bytes; `Content-Digest`/`ETag` integrity evidence; no write method registered | `404` for an unknown id; `400` for an invalid identifier |
+| `POST /api/v1/schema-documents` | bearer or session+CSRF | The owning provider is derived from the verified actor, never from the body; the body is bounded, strictly parsed and content-addressed; the canonical URL is issued only when a public origin is configured | `401` without a credential; `403 csrf_failed` for a cookie without its CSRF token; `400` for malformed, unsupported or unsafe input; `409` for a contradictory profile or the per-provider limit; `413` over 256 KiB; `503 public_base_url_unavailable` before any write |
 | `GET …/attestations`, `…/schema-references`, `…/versions`, `…/versions/{version}`, `…/content` | no | n/a | `404` for an unknown resource |
 | `POST /api/v1/rulebooks` | bearer or session+CSRF | New rulebook is owned by the actor; the body cannot set its provider | `401`; `400` for invalid input |
 | `GET /api/v1/rulebooks/{id}/draft` | no | Public working-copy projection; no internal metadata | `404` for an unknown id |
@@ -286,7 +287,9 @@ the response cannot be used to learn which credential path failed; the session-o
   SHA-256 digest, SRI pin, creation time and canonical URL. Provider ownership, provenance and
   every token stay registry-internal. The exact document bytes are public by design, because
   the permanent URL is referenced from published rulebooks; they are served without
-  re-serialization and never logged.
+  re-serialization and never logged. Registration is write-only through the authenticated
+  provider boundary and does not log the uploaded body, its member names or its digest beyond
+  the audit row's content digest.
 - The publication export manifest is public, so it carries only a bounded projection of the
   version provenance (`adapter`, `sourceUrl`, `contentDigest`, `retrievedAt`, `profile`,
   `conformance`, `importedAt`). Import-internal redirect chains, optional source labels and
@@ -400,6 +403,16 @@ trail is not exposed over HTTP; it is read by operators from the database.
   provider/provenance leakage, and byte-identical content after a database reopen.
   `src/public-urls.test.ts` and `src/config.test.ts` cover canonical URL composition, SRI
   computation and origin validation (HTTPS, loopback-only HTTP, no credentials/path/query).
+- `src/api/schema-registration.test.ts` covers the write boundary: anonymous and invalid-bearer
+  registration answers `401` before any write, a cookie without its CSRF token answers `403`,
+  the owning provider is derived from the actor for both transports, identical content is
+  idempotent (`200`) with one stored artifact, another provider gets a separate association,
+  malformed/unsafe/oversized/conflicting input maps to typed `400`/`409`/`413`, a missing public
+  origin answers `503` before any write, no replace/delete route exists, and the returned
+  URI/SRI pair round-trips through an ordinary `schemaReferences` entry and version snapshot
+  while an external HTTPS reference is preserved without an upload.
+  `src/registry/schema-documents.test.ts` covers the 100-association per-provider bound and
+  proves an idempotent replay still succeeds at the limit.
 - `src/api/session-writes.test.ts` covers the dual transport end to end: a session creates,
   edits, versions, publishes, imports and correlates; a cookie write without its CSRF token, a
   wrong or foreign token and a cross-origin write all answer `403 csrf_failed` and write

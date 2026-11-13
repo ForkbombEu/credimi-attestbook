@@ -13,7 +13,7 @@ import { OPENAPI_COMPONENTS, componentJsonSchema } from './schemas'
 export const OPENAPI_VERSION = '3.1.0'
 
 /** Version of the API contract document itself. */
-export const API_CONTRACT_VERSION = '1.12.0'
+export const API_CONTRACT_VERSION = '1.13.0'
 
 /** URL prefix that carries the product API's major version. */
 export const API_VERSION_PREFIX = '/api/v1'
@@ -48,7 +48,7 @@ const TAG_DESCRIPTIONS: readonly { readonly name: string; readonly description: 
   {
     name: 'schemas',
     description:
-      'Public, unauthenticated retrieval of immutable credential schema documents stored by AttestBook at permanent URLs built from the configured public origin.',
+      'Provider-authorized registration of immutable credential schema documents and public, unauthenticated retrieval of their exact bytes at permanent URLs built from the configured public origin.',
   },
   {
     name: 'imports',
