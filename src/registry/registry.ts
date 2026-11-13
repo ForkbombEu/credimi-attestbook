@@ -27,7 +27,8 @@ import {
   unauthorized,
 } from './errors'
 import {
-  assertCredentialSchemaDocument,
+  assertCredentialSchemaDocumentCompiles,
+  assertCredentialSchemaDocumentStructure,
   credentialSchemaMediaType,
   requireCredentialSchemaDocumentBytes,
   requireCredentialSchemaKind,
@@ -88,6 +89,7 @@ import {
   RULEBOOK_VERSION_MEDIA_TYPE,
   serializeRulebookVersion,
 } from './versioning'
+import type { SchemaSandboxLimits } from '../validation/schema-sandbox'
 
 export interface RegistryOptions {
   readonly database: Database
@@ -95,6 +97,8 @@ export interface RegistryOptions {
   readonly now?: () => string
   /** Identifier generator; injectable for deterministic tests. */
   readonly generateId?: () => string
+  /** Resource bounds for compiling untrusted JSON Schema documents (#97). */
+  readonly schemaSandboxLimits?: SchemaSandboxLimits
 }
 
 const MAX_BEARER_TOKEN_LENGTH = 256
@@ -133,12 +137,14 @@ export class Registry {
   private readonly store: RegistryStore
   private readonly now: () => string
   private readonly generateId: () => string
+  private readonly schemaSandboxLimits: SchemaSandboxLimits | undefined
 
   constructor(options: RegistryOptions) {
     this.database = options.database
     this.store = new RegistryStore(options.database)
     this.now = options.now ?? (() => new Date().toISOString())
     this.generateId = options.generateId ?? (() => randomUUID())
+    this.schemaSandboxLimits = options.schemaSandboxLimits
   }
 
   // ---------------------------------------------------------------- providers
@@ -1235,10 +1241,10 @@ export class Registry {
    * unchanged. Another provider registering the same content gets its own
    * association, while the bytes are shared.
    */
-  registerCredentialSchemaDocument(
+  async registerCredentialSchemaDocument(
     actor: AuthenticatedActor,
     input: RegisterCredentialSchemaDocumentInput,
-  ): CredentialSchemaDocument {
+  ): Promise<CredentialSchemaDocument> {
     assertObject(input, 'schemaDocument')
     if (this.store.getProvider(actor.providerId) === null) {
       throw notFound('The provider account no longer exists.')
@@ -1281,10 +1287,14 @@ export class Registry {
       }
     }
 
-    assertCredentialSchemaDocument(bytes, kind)
+    const document = assertCredentialSchemaDocumentStructure(bytes, kind)
+
+    if (kind === 'json_schema_2020_12') {
+      await assertCredentialSchemaDocumentCompiles(document, this.schemaSandboxLimits)
+    }
 
     const createdAt = this.now()
-    const document: CredentialSchemaDocument = {
+    const record: CredentialSchemaDocument = {
       id: this.generateId(),
       providerId: actor.providerId,
       contentDigest,
@@ -1294,28 +1304,64 @@ export class Registry {
       createdAt,
     }
 
-    this.transaction(() => {
-      this.store.insertArtifactIfAbsent({
-        digest: contentDigest,
-        mediaType,
-        bytes,
-        createdAt,
-      })
-      // Re-read inside the write transaction: if another connection stored
-      // different bytes under this digest, abort instead of associating them.
-      this.requireStoredSchemaArtifact(contentDigest, mediaType, bytes)
-      this.store.insertCredentialSchemaDocument(document)
-      this.store.insertAudit({
-        at: createdAt,
-        actorProviderId: actor.providerId,
-        action: 'schema_document.create',
-        entityType: 'credential_schema_document',
-        entityId: document.id,
-        detail: { kind, contentDigest, mediaType },
-      })
-    })()
+    // A concurrent registration of the same provider/content may have won the
+    // race after the pre-check above. Re-read inside the transaction and return
+    // that document without writing anything.
+    let winner: CredentialSchemaDocument | null = null
+    try {
+      this.transaction(() => {
+        const raced = this.store.findCredentialSchemaDocumentByProviderAndDigest(
+          actor.providerId,
+          contentDigest,
+        )
+        if (raced !== null) {
+          if (raced.kind !== kind || raced.mediaType !== mediaType) {
+            throw conflict(
+              'The same content is already registered under a different schema profile.',
+            )
+          }
+          winner = raced
+          return
+        }
+        this.store.insertArtifactIfAbsent({
+          digest: contentDigest,
+          mediaType,
+          bytes,
+          createdAt,
+        })
+        // Re-read inside the write transaction: if another connection stored
+        // different bytes under this digest, abort instead of associating them.
+        this.requireStoredSchemaArtifact(contentDigest, mediaType, bytes)
+        this.store.insertCredentialSchemaDocument(record)
+        this.store.insertAudit({
+          at: createdAt,
+          actorProviderId: actor.providerId,
+          action: 'schema_document.create',
+          entityType: 'credential_schema_document',
+          entityId: record.id,
+          detail: { kind, contentDigest, mediaType },
+        })
+      })()
+    } catch (error) {
+      // A trigger/unique conflict can still surface if another connection won
+      // between this transaction's snapshot and its write. Return the stored
+      // document when it is the same association, otherwise rethrow.
+      const raced = this.store.findCredentialSchemaDocumentByProviderAndDigest(
+        actor.providerId,
+        contentDigest,
+      )
+      if (raced !== null && raced.kind === kind && raced.mediaType === mediaType) {
+        this.requireStoredSchemaArtifact(contentDigest, mediaType, bytes)
+        return raced
+      }
+      throw error
+    }
 
-    return document
+    if (winner !== null) {
+      this.requireStoredSchemaArtifact(contentDigest, mediaType, bytes)
+      return winner
+    }
+    return record
   }
 
   /** Public metadata read by stable document id; `null` when it does not exist. */

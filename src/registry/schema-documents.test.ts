@@ -55,15 +55,34 @@ function provision(suffix: string) {
   })
 }
 
-function expectRegistryError(action: () => unknown, code: RegistryErrorCode): void {
+async function expectRegistryError(action: () => unknown, code: RegistryErrorCode): Promise<void> {
   let caught: unknown
   try {
-    action()
+    await action()
   } catch (error) {
     caught = error
   }
   expect(caught).toBeInstanceOf(RegistryError)
   expect(isRegistryError(caught) ? caught.code : undefined).toBe(code)
+}
+
+async function captureError(action: () => Promise<unknown>): Promise<unknown> {
+  let caught: unknown
+  try {
+    await action()
+  } catch (error) {
+    caught = error
+  }
+  return caught
+}
+
+/** A schema that is small enough to store but expensive for Ajv to compile. */
+function expensiveJsonSchema(): Uint8Array {
+  let schema: unknown = { type: 'object' }
+  for (let level = 0; level < 8; level += 1) {
+    schema = { if: schema, then: schema, else: schema }
+  }
+  return encodeJson(schema)
 }
 
 function artifactCount(database: RegistryFixture['database']): number {
@@ -92,12 +111,12 @@ function auditCount(database: RegistryFixture['database']): number {
 }
 
 describe('credential schema documents', () => {
-  test('persists an immutable JSON Schema document with its exact bytes, digest and provenance', () => {
+  test('persists an immutable JSON Schema document with its exact bytes, digest and provenance', async () => {
     const { registry, database } = setup()
     const provider = provision('one')
     const bytes = encodeJson(JSON_SCHEMA)
 
-    const document = registry.registerCredentialSchemaDocument(provider.actor, {
+    const document = await registry.registerCredentialSchemaDocument(provider.actor, {
       kind: 'json_schema_2020_12',
       bytes,
       provenance: { source: 'operator', note: 'pid schema' },
@@ -125,12 +144,12 @@ describe('credential schema documents', () => {
     expect(auditCount(database)).toBe(1)
   })
 
-  test('supports SD-JWT VC Type Metadata with its canonical media type', () => {
+  test('supports SD-JWT VC Type Metadata with its canonical media type', async () => {
     const { registry } = setup()
     const provider = provision('one')
     const bytes = encodeJson(TYPE_METADATA)
 
-    const document = registry.registerCredentialSchemaDocument(provider.actor, {
+    const document = await registry.registerCredentialSchemaDocument(provider.actor, {
       kind: 'sd_jwt_vc_type_metadata',
       bytes,
     })
@@ -141,12 +160,12 @@ describe('credential schema documents', () => {
     expect(registry.getCredentialSchemaDocumentContent(document.id)?.bytes).toEqual(bytes)
   })
 
-  test('accepts a boolean JSON Schema document as exact bytes', () => {
+  test('accepts a boolean JSON Schema document as exact bytes', async () => {
     const { registry } = setup()
     const provider = provision('one')
     const bytes = new TextEncoder().encode('true')
 
-    const document = registry.registerCredentialSchemaDocument(provider.actor, {
+    const document = await registry.registerCredentialSchemaDocument(provider.actor, {
       kind: 'json_schema_2020_12',
       bytes,
     })
@@ -155,17 +174,17 @@ describe('credential schema documents', () => {
     expect(registry.getCredentialSchemaDocumentContent(document.id)?.bytes).toEqual(bytes)
   })
 
-  test('is idempotent for the same provider and content and stores the bytes once', () => {
+  test('is idempotent for the same provider and content and stores the bytes once', async () => {
     const { registry, database } = setup()
     const provider = provision('one')
     const bytes = encodeJson(JSON_SCHEMA)
 
-    const first = registry.registerCredentialSchemaDocument(provider.actor, {
+    const first = await registry.registerCredentialSchemaDocument(provider.actor, {
       kind: 'json_schema_2020_12',
       bytes,
       provenance: { source: 'first' },
     })
-    const second = registry.registerCredentialSchemaDocument(provider.actor, {
+    const second = await registry.registerCredentialSchemaDocument(provider.actor, {
       kind: 'json_schema_2020_12',
       bytes,
       provenance: { source: 'second' },
@@ -178,18 +197,18 @@ describe('credential schema documents', () => {
     expect(auditCount(database)).toBe(1)
   })
 
-  test('deduplicates content across providers while keeping ownership separate', () => {
+  test('deduplicates content across providers while keeping ownership separate', async () => {
     const { registry, database } = setup()
     const first = provision('one')
     const second = provision('two')
     const bytes = encodeJson(JSON_SCHEMA)
 
-    const firstDocument = registry.registerCredentialSchemaDocument(first.actor, {
+    const firstDocument = await registry.registerCredentialSchemaDocument(first.actor, {
       kind: 'json_schema_2020_12',
       bytes,
       provenance: { owner: 'one' },
     })
-    const secondDocument = registry.registerCredentialSchemaDocument(second.actor, {
+    const secondDocument = await registry.registerCredentialSchemaDocument(second.actor, {
       kind: 'json_schema_2020_12',
       bytes,
       provenance: { owner: 'two' },
@@ -206,16 +225,16 @@ describe('credential schema documents', () => {
     expect(registry.getCredentialSchemaDocument(secondDocument.id)).toEqual(secondDocument)
   })
 
-  test('rejects the same content under another schema profile for a provider', () => {
+  test('rejects the same content under another schema profile for a provider', async () => {
     const { registry, database } = setup()
     const provider = provision('one')
     const bytes = encodeJson(JSON_SCHEMA)
 
-    registry.registerCredentialSchemaDocument(provider.actor, {
+    await registry.registerCredentialSchemaDocument(provider.actor, {
       kind: 'json_schema_2020_12',
       bytes,
     })
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'sd_jwt_vc_type_metadata',
@@ -226,17 +245,17 @@ describe('credential schema documents', () => {
     expect(documentCount(database)).toBe(1)
   })
 
-  test('rejects the same content registered with another media type by another provider', () => {
+  test('rejects the same content registered with another media type by another provider', async () => {
     const { registry, database } = setup()
     const first = provision('one')
     const second = provision('two')
     const bytes = encodeJson(JSON_SCHEMA)
 
-    registry.registerCredentialSchemaDocument(first.actor, {
+    await registry.registerCredentialSchemaDocument(first.actor, {
       kind: 'json_schema_2020_12',
       bytes,
     })
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(second.actor, {
           kind: 'sd_jwt_vc_type_metadata',
@@ -248,10 +267,10 @@ describe('credential schema documents', () => {
     expect(artifactCount(database)).toBe(1)
   })
 
-  test('keeps document associations immutable even through direct SQL', () => {
+  test('keeps document associations immutable even through direct SQL', async () => {
     const { registry, database } = setup()
     const provider = provision('one')
-    const document = registry.registerCredentialSchemaDocument(provider.actor, {
+    const document = await registry.registerCredentialSchemaDocument(provider.actor, {
       kind: 'json_schema_2020_12',
       bytes: encodeJson(JSON_SCHEMA),
     })
@@ -277,11 +296,11 @@ describe('credential schema documents', () => {
     expect(registry.getCredentialSchemaDocument(document.id)).toEqual(document)
   })
 
-  test('rejects an expected digest that does not match the exact bytes', () => {
+  test('rejects an expected digest that does not match the exact bytes', async () => {
     const { registry, database } = setup()
     const provider = provision('one')
 
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'json_schema_2020_12',
@@ -294,7 +313,7 @@ describe('credential schema documents', () => {
     expect(artifactCount(database)).toBe(0)
   })
 
-  test('detects a hash collision or corrupted artifact before associating bytes', () => {
+  test('detects a hash collision or corrupted artifact before associating bytes', async () => {
     const { registry, database } = setup()
     const provider = provision('one')
     const bytes = encodeJson(JSON_SCHEMA)
@@ -309,16 +328,18 @@ describe('credential schema documents', () => {
       )
       .run(digest, encodeJson({ type: 'object' }), FIXED_NOW)
 
-    expect(() =>
+    const caught = await captureError(() =>
       registry.registerCredentialSchemaDocument(provider.actor, {
         kind: 'json_schema_2020_12',
         bytes,
       }),
-    ).toThrow(/do not match their content digest/)
+    )
+    expect(caught).toBeInstanceOf(Error)
+    expect((caught as Error).message).toMatch(/do not match their content digest/)
     expect(documentCount(database)).toBe(0)
   })
 
-  test('reports a digest mismatch when stored bytes are verified', () => {
+  test('reports a digest mismatch when stored bytes are verified', async () => {
     const { registry, database } = setup()
     const provider = provision('one')
     const corruptBytes = encodeJson({ type: 'object' })
@@ -345,20 +366,25 @@ describe('credential schema documents', () => {
     expect(verification?.verified).toBe(false)
     expect(registry.verifyCredentialSchemaDocumentDigest('missing')).toBeNull()
 
-    const valid = registry.registerCredentialSchemaDocument(provider.actor, {
+    const valid = await registry.registerCredentialSchemaDocument(provider.actor, {
       kind: 'json_schema_2020_12',
       bytes: encodeJson(JSON_SCHEMA),
     })
     expect(registry.verifyCredentialSchemaDocumentDigest(valid.id)?.verified).toBe(true)
   })
 
-  test('rejects malformed, non-UTF-8, oversized and deeply nested bytes', () => {
+  test('rejects malformed, non-UTF-8, oversized and deeply nested bytes', async () => {
     const { registry, database } = setup()
     const provider = provision('one')
 
     const invalidDocuments: Uint8Array[] = [
       new TextEncoder().encode('{'),
       new TextEncoder().encode(''),
+      new TextEncoder().encode('{"type":"object","type":"string"}'),
+      new TextEncoder().encode('{"\\u0074ype":"object","type":"string"}'),
+      // The duplicate scanner must bound the text it walks even when the
+      // collapsed parsed value is shallow.
+      new TextEncoder().encode(`{"hidden": ${'['.repeat(70)}${']'.repeat(70)}, "hidden": 1}`),
       new Uint8Array([0xff, 0xfe, 0xfd]),
       new Uint8Array(MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES + 1),
     ]
@@ -369,7 +395,7 @@ describe('credential schema documents', () => {
     invalidDocuments.push(encodeJson(nested))
 
     for (const bytes of invalidDocuments) {
-      expectRegistryError(
+      await expectRegistryError(
         () =>
           registry.registerCredentialSchemaDocument(provider.actor, {
             kind: 'json_schema_2020_12',
@@ -382,11 +408,11 @@ describe('credential schema documents', () => {
     expect(artifactCount(database)).toBe(0)
   })
 
-  test('rejects malformed and unsupported document profiles', () => {
+  test('rejects malformed and unsupported document profiles', async () => {
     const { registry } = setup()
     const provider = provision('one')
 
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'not-a-kind' as CredentialSchemaKind,
@@ -394,7 +420,7 @@ describe('credential schema documents', () => {
         }),
       'invalid_input',
     )
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'json_schema_2020_12',
@@ -402,7 +428,7 @@ describe('credential schema documents', () => {
         }),
       'invalid_input',
     )
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'json_schema_2020_12',
@@ -410,7 +436,7 @@ describe('credential schema documents', () => {
         }),
       'invalid_input',
     )
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'json_schema_2020_12',
@@ -418,8 +444,16 @@ describe('credential schema documents', () => {
         }),
       'invalid_input',
     )
+    await expectRegistryError(
+      () =>
+        registry.registerCredentialSchemaDocument(provider.actor, {
+          kind: 'json_schema_2020_12',
+          bytes: encodeJson({ 'x-custom': 1 }),
+        }),
+      'invalid_input',
+    )
     for (const document of [[], null, 'schema', 42]) {
-      expectRegistryError(
+      await expectRegistryError(
         () =>
           registry.registerCredentialSchemaDocument(provider.actor, {
             kind: 'json_schema_2020_12',
@@ -427,7 +461,7 @@ describe('credential schema documents', () => {
           }),
         'invalid_input',
       )
-      expectRegistryError(
+      await expectRegistryError(
         () =>
           registry.registerCredentialSchemaDocument(provider.actor, {
             kind: 'sd_jwt_vc_type_metadata',
@@ -436,7 +470,7 @@ describe('credential schema documents', () => {
         'invalid_input',
       )
     }
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'sd_jwt_vc_type_metadata',
@@ -444,7 +478,7 @@ describe('credential schema documents', () => {
         }),
       'invalid_input',
     )
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'sd_jwt_vc_type_metadata',
@@ -452,7 +486,7 @@ describe('credential schema documents', () => {
         }),
       'invalid_input',
     )
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'json_schema_2020_12',
@@ -460,7 +494,7 @@ describe('credential schema documents', () => {
         }),
       'invalid_input',
     )
-    expectRegistryError(
+    await expectRegistryError(
       () =>
         registry.registerCredentialSchemaDocument(provider.actor, {
           kind: 'json_schema_2020_12',
@@ -471,18 +505,97 @@ describe('credential schema documents', () => {
     )
   })
 
-  test('blocks provider deletion while it still owns a schema document', () => {
+  test('rejects a schema that exceeds the compilation sandbox resource limits', async () => {
+    const { database } = setup()
+    const provider = provision('one')
+    const restricted = new Registry({
+      database,
+      now: () => FIXED_NOW,
+      schemaSandboxLimits: { timeoutMs: 200 },
+    })
+
+    await expectRegistryError(
+      () =>
+        restricted.registerCredentialSchemaDocument(provider.actor, {
+          kind: 'json_schema_2020_12',
+          bytes: expensiveJsonSchema(),
+        }),
+      'invalid_input',
+    )
+    expect(documentCount(database)).toBe(0)
+    expect(artifactCount(database)).toBe(0)
+  })
+
+  test('keeps the server responsive while a schema compiles in the sandbox', async () => {
     const { registry } = setup()
     const provider = provision('one')
-    registry.registerCredentialSchemaDocument(provider.actor, {
+
+    const registration = registry.registerCredentialSchemaDocument(provider.actor, {
+      kind: 'json_schema_2020_12',
+      bytes: expensiveJsonSchema(),
+    })
+    const started = performance.now()
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(performance.now() - started).toBeLessThan(300)
+    await registration.catch(() => undefined)
+  })
+
+  test('fails closed when the schema compilation sandbox is unavailable', async () => {
+    const { registry, database } = setup()
+    const provider = provision('one')
+    const unavailable = new Registry({
+      database,
+      now: () => FIXED_NOW,
+      schemaSandboxLimits: { platform: 'darwin' },
+    })
+
+    const caught = await captureError(() =>
+      unavailable.registerCredentialSchemaDocument(provider.actor, {
+        kind: 'json_schema_2020_12',
+        bytes: encodeJson(JSON_SCHEMA),
+      }),
+    )
+    expect(caught).toBeInstanceOf(Error)
+    expect(isRegistryError(caught)).toBe(false)
+    expect(documentCount(database)).toBe(0)
+    expect(artifactCount(database)).toBe(0)
+    expect(registry.listCredentialSchemaDocuments()).toHaveLength(0)
+  })
+
+  test('returns the existing document when concurrent registrations race', async () => {
+    const { registry, database } = setup()
+    const provider = provision('one')
+    const bytes = encodeJson(JSON_SCHEMA)
+
+    const [first, second] = await Promise.all([
+      registry.registerCredentialSchemaDocument(provider.actor, {
+        kind: 'json_schema_2020_12',
+        bytes,
+      }),
+      registry.registerCredentialSchemaDocument(provider.actor, {
+        kind: 'json_schema_2020_12',
+        bytes,
+      }),
+    ])
+
+    expect(second.id).toBe(first.id)
+    expect(documentCount(database)).toBe(1)
+    expect(artifactCount(database)).toBe(1)
+    expect(auditCount(database)).toBe(1)
+  })
+
+  test('blocks provider deletion while it still owns a schema document', async () => {
+    const { registry } = setup()
+    const provider = provision('one')
+    await registry.registerCredentialSchemaDocument(provider.actor, {
       kind: 'json_schema_2020_12',
       bytes: encodeJson(JSON_SCHEMA),
     })
 
-    expectRegistryError(() => registry.deleteProvider(provider.actor), 'conflict')
+    await expectRegistryError(() => registry.deleteProvider(provider.actor), 'conflict')
   })
 
-  test('persists documents across a database reopen', () => {
+  test('persists documents across a database reopen', async () => {
     const directory = mkdtempSync(join(tmpdir(), 'attestbook-schema-documents-'))
     const databasePath = join(directory, 'attestbook.sqlite')
     try {
@@ -493,7 +606,7 @@ describe('credential schema documents', () => {
         name: 'Provider',
         publicationAuthority: 'account-persist',
       })
-      const document = registry.registerCredentialSchemaDocument(provider.actor, {
+      const document = await registry.registerCredentialSchemaDocument(provider.actor, {
         kind: 'json_schema_2020_12',
         bytes,
         provenance: { source: 'persist' },

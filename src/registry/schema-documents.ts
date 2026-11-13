@@ -8,14 +8,16 @@
 // Schema keywords AttestBook cannot evaluate safely are refused at registration
 // instead of being stored and reported only when a credential is validated later.
 //
-// This module deliberately does not execute anything from a document: Ajv
-// compilation builds a validator from the schema structure, and no remote
-// reference is resolved.
+// This module never executes a document in the server process: JSON Schema
+// compilation and evaluation run in the existing #32 schema sandbox under its
+// time, memory, output and concurrency limits, and no remote reference is
+// resolved.
 
 import { TypeMetadataFormatSchema } from '@sd-jwt/sd-jwt-vc'
-import Ajv2020 from 'ajv/dist/2020.js'
 
-import { findUnsupportedSchemaKeyword } from '../validation/schema'
+import { findUnsupportedSchemaKeyword, type PendingSchemaDocument } from '../validation/schema'
+import { runSchemaSandbox, type SchemaSandboxLimits } from '../validation/schema-sandbox'
+import type { RulebookVersionSchemaReference } from './versioning'
 import { invalidInput } from './errors'
 import {
   CREDENTIAL_SCHEMA_KINDS,
@@ -93,6 +95,153 @@ function decodeUtf8(bytes: Uint8Array): string {
   return text
 }
 
+/**
+ * Rejects a document whose JSON text repeats a member name in any object
+ * (I-JSON, RFC 7493). `JSON.parse` silently keeps the last value, so two
+ * parsers could see different schemas in the same exact bytes. The input has
+ * already been parsed successfully, so this scan only has to find object keys.
+ */
+function assertNoDuplicateMemberNames(text: string): void {
+  let index = 0
+  let depth = 0
+
+  function fail(): never {
+    throw invalidInput('document must not repeat a member name')
+  }
+
+  function enter(): void {
+    depth += 1
+    if (depth > MAX_CREDENTIAL_SCHEMA_DOCUMENT_DEPTH) {
+      throw invalidInput(
+        `document must be nested at most ${MAX_CREDENTIAL_SCHEMA_DOCUMENT_DEPTH} levels deep`,
+      )
+    }
+  }
+
+  function leave(): void {
+    depth -= 1
+  }
+
+  function skipWhitespace(): void {
+    while (index < text.length && /\s/.test(text[index] ?? '')) {
+      index += 1
+    }
+  }
+
+  function readString(): string {
+    const start = index
+    index += 1
+    while (index < text.length) {
+      const character = text[index]
+      if (character === '\\') {
+        index += 2
+        continue
+      }
+      if (character === '"') {
+        index += 1
+        return JSON.parse(text.slice(start, index)) as string
+      }
+      index += 1
+    }
+    return fail()
+  }
+
+  function skipValue(): void {
+    skipWhitespace()
+    const character = text[index]
+    if (character === '{') {
+      skipObject()
+      return
+    }
+    if (character === '[') {
+      skipArray()
+      return
+    }
+    if (character === '"') {
+      readString()
+      return
+    }
+    while (index < text.length && !/[\s,\]}]/.test(text[index] ?? '')) {
+      index += 1
+    }
+  }
+
+  function skipObject(): void {
+    index += 1
+    enter()
+    try {
+      const keys = new Set<string>()
+      skipWhitespace()
+      if (text[index] === '}') {
+        index += 1
+        return
+      }
+      while (true) {
+        skipWhitespace()
+        if (text[index] !== '"') {
+          fail()
+        }
+        const key = readString()
+        if (keys.has(key)) {
+          fail()
+        }
+        keys.add(key)
+        skipWhitespace()
+        if (text[index] !== ':') {
+          fail()
+        }
+        index += 1
+        skipValue()
+        skipWhitespace()
+        if (text[index] === ',') {
+          index += 1
+          continue
+        }
+        if (text[index] === '}') {
+          index += 1
+          return
+        }
+        fail()
+      }
+    } finally {
+      leave()
+    }
+  }
+
+  function skipArray(): void {
+    index += 1
+    enter()
+    try {
+      skipWhitespace()
+      if (text[index] === ']') {
+        index += 1
+        return
+      }
+      while (true) {
+        skipValue()
+        skipWhitespace()
+        if (text[index] === ',') {
+          index += 1
+          continue
+        }
+        if (text[index] === ']') {
+          index += 1
+          return
+        }
+        fail()
+      }
+    } finally {
+      leave()
+    }
+  }
+
+  skipValue()
+  skipWhitespace()
+  if (index !== text.length) {
+    fail()
+  }
+}
+
 /** Bounds the parsed value's node count and nesting depth without recursion. */
 function assertBoundedJsonValue(document: unknown): void {
   const stack: { readonly value: unknown; readonly depth: number }[] = [
@@ -128,18 +277,7 @@ function assertBoundedJsonValue(document: unknown): void {
   }
 }
 
-function createAjv(): Ajv2020 {
-  return new Ajv2020({
-    allErrors: false,
-    strict: false,
-    // Reject unknown keywords instead of silently ignoring a constraint.
-    strictSchema: true,
-    validateFormats: false,
-    allowUnionTypes: true,
-  })
-}
-
-function assertJsonSchemaDocument(document: unknown): void {
+function assertJsonSchemaStructure(document: unknown): void {
   if (typeof document !== 'boolean' && !isRecord(document)) {
     throw invalidInput('a JSON Schema 2020-12 document must be a JSON object or boolean schema')
   }
@@ -154,12 +292,6 @@ function assertJsonSchemaDocument(document: unknown): void {
   const unsupported = findUnsupportedSchemaKeyword(document)
   if (unsupported !== null) {
     throw invalidInput(`document uses the unsupported JSON Schema keyword "${unsupported.keyword}"`)
-  }
-
-  try {
-    createAjv().compile(document)
-  } catch {
-    throw invalidInput('document is not a compilable JSON Schema 2020-12 document')
   }
 }
 
@@ -179,14 +311,15 @@ function assertTypeMetadataDocument(document: unknown): void {
 }
 
 /**
- * Strictly parses and profile-checks a document before persistence. Throws a
- * typed `invalid_input` registry error on any violation; nothing is written by
- * this function.
+ * Strictly parses and structurally checks a document before persistence and
+ * returns the parsed value. The JSON Schema compile step is async and runs in
+ * the #32 sandbox (`assertCredentialSchemaDocumentCompiles`); nothing is written
+ * by this function.
  */
-export function assertCredentialSchemaDocument(
+export function assertCredentialSchemaDocumentStructure(
   bytes: Uint8Array,
   kind: CredentialSchemaKind,
-): void {
+): unknown {
   const text = decodeUtf8(bytes)
   let document: unknown
   try {
@@ -195,9 +328,69 @@ export function assertCredentialSchemaDocument(
     throw invalidInput('document bytes must be valid JSON')
   }
   assertBoundedJsonValue(document)
+  assertNoDuplicateMemberNames(text)
   if (kind === 'json_schema_2020_12') {
-    assertJsonSchemaDocument(document)
+    assertJsonSchemaStructure(document)
   } else {
     assertTypeMetadataDocument(document)
+  }
+  return document
+}
+
+/** Placeholder reference for a compile-only sandbox evaluation. */
+const REGISTRATION_REFERENCE: RulebookVersionSchemaReference = {
+  formatIdentifier: 'registration',
+  uri: 'urn:attestbook:registration',
+  integrity: null,
+}
+
+/**
+ * Compiles a JSON Schema document in the #32 schema sandbox, so untrusted
+ * schemas cannot block the server process. A compile failure or a sandbox
+ * resource limit is an `invalid_input`; an unavailable, busy or failed sandbox
+ * is a server fault and fails closed.
+ */
+export async function assertCredentialSchemaDocumentCompiles(
+  document: unknown,
+  limits?: SchemaSandboxLimits,
+): Promise<void> {
+  const item: PendingSchemaDocument = {
+    index: 0,
+    reference: REGISTRATION_REFERENCE,
+    kind: 'json_schema',
+    document,
+    integrityFindings: [],
+  }
+  const outcome = await runSchemaSandbox(
+    {
+      items: [item],
+      input: { claims: {}, packedPayload: {}, disclosureMap: {}, vct: '' },
+    },
+    limits,
+  )
+  if (
+    outcome.kind === 'timeout' ||
+    outcome.kind === 'memory_exceeded' ||
+    outcome.kind === 'output_exceeded'
+  ) {
+    throw invalidInput('document exceeds the schema compilation resource limits')
+  }
+  if (outcome.kind !== 'ok') {
+    throw new Error(`schema compilation sandbox ${outcome.kind}`)
+  }
+  const application = outcome.results[0]?.application
+  if (application === undefined) {
+    throw invalidInput('document is not a compilable JSON Schema 2020-12 document')
+  }
+  const codes = application.findings.map((finding) => finding.code)
+  if (
+    codes.some(
+      (code) =>
+        code === 'invalid_json_schema' ||
+        code === 'unsupported_schema_keyword' ||
+        code === 'unsupported_schema_dialect',
+    )
+  ) {
+    throw invalidInput('document is not a compilable JSON Schema 2020-12 document')
   }
 }

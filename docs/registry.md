@@ -141,11 +141,12 @@ Implemented by #97 (`migrations/0006_credential_schema_documents.sql`):
   lowercase-hex SHA-256 digest and bounded creation provenance;
 - two supported profiles: `json_schema_2020_12` (`application/schema+json`) and
   `sd_jwt_vc_type_metadata` (`application/json`). Bytes are bounded, must decode as strict
-  UTF-8 JSON, must parse to an object (or a boolean schema for JSON Schema), and are bounded
-  in nesting depth and node count. JSON Schema must declare the 2020-12 dialect when it has
-  `$schema`, must compile under the pinned Ajv 2020-12 compiler and must not use a keyword
-  AttestBook cannot evaluate safely; SD-JWT VC Type Metadata must match the pinned
-  `@sd-jwt/sd-jwt-vc` `TypeMetadataFormatSchema` and carry a non-empty `vct`;
+  UTF-8 JSON, must parse to an object (or a boolean schema for JSON Schema), must not repeat a
+  member name in any object, and are bounded in nesting depth and node count. JSON Schema must
+  declare the 2020-12 dialect when it has `$schema`, must not use a keyword AttestBook cannot evaluate safely, and must compile in the
+  #32 schema sandbox under its time, RSS, output and concurrency limits; SD-JWT VC Type
+  Metadata must match the pinned `@sd-jwt/sd-jwt-vc` `TypeMetadataFormatSchema` and carry a
+  non-empty `vct`;
 - `Registry.registerCredentialSchemaDocument` derives the provider from the verified actor and
   is idempotent for the same provider and content. Identical content is shared across
   providers (one artifact, one association per provider), and a digest that already resolves
@@ -538,13 +539,18 @@ bytes. It is deliberately not a second general-purpose blob store:
   corrupted or colliding store) aborts registration before any association is written. The
   same provider/content registration is idempotent and returns the original document
   unchanged, including its original provenance;
-- bytes are bounded (256 KiB), must decode as strict UTF-8, must parse as JSON and are bounded
-  in nesting depth (64) and parsed node count. JSON Schema must be a 2020-12 document, must
-  compile under the pinned Ajv 2020-12 compiler and must not contain a keyword the validation
-  engine cannot evaluate safely (`$ref`/`$dynamicRef`, `pattern`, `format`, `uniqueItems` and
-  the other unsupported keywords plus unknown keywords). SD-JWT VC Type Metadata must satisfy
-  the pinned `@sd-jwt/sd-jwt-vc` `TypeMetadataFormatSchema` and have a non-empty `vct`. The
-  store never executes a document and never fetches a remote reference;
+- bytes are bounded (256 KiB), must decode as strict UTF-8, must parse as JSON, must not
+  repeat a member name in any object (so two parsers cannot read different schemas from the
+  same bytes) and are bounded in nesting depth (64) and parsed node count. JSON Schema must be
+  a 2020-12 document and must not contain a keyword the validation engine cannot evaluate
+  safely
+  (`$ref`/`$dynamicRef`, `pattern`, `format`, `uniqueItems` and the other unsupported keywords
+  plus unknown keywords). Its compile and evaluation step runs in the #32 schema sandbox under
+  that sandbox's time, RSS, output and concurrency limits, so a hostile schema cannot block the
+  server process. SD-JWT VC Type Metadata must satisfy the pinned `@sd-jwt/sd-jwt-vc`
+  `TypeMetadataFormatSchema` and have a non-empty `vct`; that check is a bounded in-process
+  parse. The store never executes a document in the server process and never fetches a remote
+  reference;
 - `Registry.registerCredentialSchemaDocument` requires the verified actor and records a
   `schema_document.create` audit row. `getCredentialSchemaDocument`,
   `getCredentialSchemaDocumentContent`, `listCredentialSchemaDocuments` and
@@ -554,6 +560,11 @@ bytes. It is deliberately not a second general-purpose blob store:
 - an existing external schema reference (`uri` + optional SRI) and every rulebook version
   artifact are untouched. A stored schema document is not linked into a version snapshot yet;
   the later URI/SRI registration slice (#99) supplies that association.
+
+The compile shares the existing sandbox's concurrency budget; when the sandbox is busy or
+unavailable, registration fails closed as a server fault instead of compiling in-process.
+There is no per-provider document quota yet: the registration endpoint (#99) must bound how
+many documents one provider may create.
 
 The public HTTPS URL, provider registration API, editor controls and validation-time
 resolution are the follow-up issues #98–#103 and are not implemented here.
@@ -595,11 +606,13 @@ The implementation is covered by real temporary SQLite files (not in-memory fake
   migration to a populated pre-feature database.
 - `src/registry/schema-documents.test.ts` — exact UTF-8 bytes, media type, SHA-256 digest and
   provenance; JSON Schema 2020-12 and SD-JWT VC Type Metadata profiles; idempotent duplicate
-  registration; content deduplication with separate provider ownership; rejection of a
-  conflicting profile/media type, malformed or non-UTF-8 bytes, oversized or deeply nested
-  JSON, unsupported keywords/dialects, a mismatched expected digest and a colliding/corrupt
-  store; digest verification; direct-SQL immutability and `INSERT OR REPLACE` rejection;
-  provider-deletion restriction; and persistence across a database reopen.
+  registration and a concurrent-registration race; content deduplication with separate provider
+  ownership; rejection of a conflicting profile/media type, malformed, non-UTF-8, duplicate-member,
+  oversized or deeply nested JSON, unsupported keywords/dialects, a mismatched expected digest and
+  a colliding/corrupt store; digest verification; sandbox compilation time limits, server
+  responsiveness and a fail-closed unavailable sandbox; direct-SQL immutability and
+  `INSERT OR REPLACE` rejection; provider-deletion restriction; and persistence across a
+  database reopen.
 - `src/registry/registry.test.ts` — provisioning and
   hashed-token storage, issue/revoke, rulebook and attestation/schema CRUD, persistence across
   a database reopen, cascades, audit entries, invalid writes, duplicate conflicts, immutable
