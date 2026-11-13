@@ -123,6 +123,7 @@ export function comparisonValidationResult(
         integrity: 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=',
         kind: 'type_metadata',
         applied: true,
+        source: 'caller',
       },
     ],
     dimensions,

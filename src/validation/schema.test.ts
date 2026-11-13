@@ -57,6 +57,7 @@ describe('validateSchemaDocuments with SD-JWT VC Type Metadata', () => {
         integrity: sha256Sri(PID_TYPE_METADATA_TEXT),
         kind: 'type_metadata',
         applied: true,
+        source: 'caller',
       },
     ])
   })

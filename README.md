@@ -207,7 +207,11 @@ exact schema document text for the pinned schema references:
 The structural dimensions (`credential_parsing`, `format_recognition`,
 `schema_validation`, `attestation_constraints`) can pass; `cryptographic_verification` and
 `issuer_trust` are returned `NOT_TESTED` and protocol/interoperability `NOT_APPLICABLE`, so a
-structurally valid credential is never reported as fully valid or interoperable. Unsupported
+structurally valid credential is never reported as fully valid or interoperable. A schema
+reference that is a canonical AttestBook-hosted URL is resolved from the immutable local
+store and its stored SHA-256 and pinned `sha256-...` SRI are verified before the document is
+applied; no HTTP fetch is made, and `schemaDocuments` cannot override it. External references
+still require the caller-supplied exact bytes. Unsupported
 formats are recognised and reported `NOT_TESTED` rather than mocked; JSON Schema keywords that
 need unbounded regex/format evaluation (`format`, `pattern`, `patternProperties`,
 `uniqueItems`, the legacy `dependencies` applicator, `$ref` and its variants) are reported
@@ -467,6 +471,14 @@ Registration requires a provider bearer token or the administrator session with 
 `sha256-<base64>` SRI pin, the hex SHA-256 and the media type; re-registering identical bytes
 for the same provider returns the existing document unchanged, and there is no route that
 replaces or deletes one. A provider may own at most 100 document associations.
+
+A published rulebook version can reference that URL/I pair as an ordinary
+`schemaReferences[]` entry. During credential validation the engine recognises only the exact
+canonical URL of the configured `PUBLIC_BASE_URL`, resolves the document from the local store
+(never by calling the URL), re-verifies the stored digest and the pinned SRI, and applies the
+stored bytes in the schema sandbox. A missing document, changed bytes, a mismatched pin or a
+look-alike URI is reported as an explicit failure, `INCONCLUSIVE` or `NOT_TESTED`, never as a
+pass, and caller-supplied `schemaDocuments` cannot override a hosted reference.
 
 ```bash
 curl --fail --request POST \

@@ -136,6 +136,12 @@ export interface SchemaReferenceEvidence {
   readonly integrity: string | null
   readonly kind: 'type_metadata' | 'json_schema' | null
   readonly applied: boolean
+  /**
+   * Where the document came from: `hosted` for a canonical AttestBook URL
+   * resolved from the immutable local store, `caller` for a document supplied
+   * in the request. `null` when no document was available or evaluated.
+   */
+  readonly source: 'hosted' | 'caller' | null
 }
 
 /** The complete typed validation result. */

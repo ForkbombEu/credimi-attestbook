@@ -160,10 +160,14 @@ Implemented by #97 (`migrations/0006_credential_schema_documents.sql`):
   reads, like the rest of the catalogue.
 
 Deliberately **not** in #97 (added by later slices): the public URL/HTTP surface
-([#98](https://github.com/ForkbombEu/credimi-attestbook/issues/98)) and the provider
-registration/reference API ([#99](https://github.com/ForkbombEu/credimi-attestbook/issues/99)),
-plus the still-follow-up editor controls, fixture generation and validation-time resolution
-([#100](https://github.com/ForkbombEu/credimi-attestbook/issues/100)–[#103](https://github.com/ForkbombEu/credimi-attestbook/issues/103)).
+([#98](https://github.com/ForkbombEu/credimi-attestbook/issues/98)), the provider
+registration/reference API ([#99](https://github.com/ForkbombEu/credimi-attestbook/issues/99))
+and validation-time resolution ([#101](https://github.com/ForkbombEu/credimi-attestbook/issues/101),
+documented in [`docs/validation.md`](validation.md) §3). The editor controls, fixture generation
+and detail UI remain follow-up issues
+([#100](https://github.com/ForkbombEu/credimi-attestbook/issues/100),
+[#102](https://github.com/ForkbombEu/credimi-attestbook/issues/102),
+[#103](https://github.com/ForkbombEu/credimi-attestbook/issues/103)).
 Existing external `{formatIdentifier, uri, integrity}` references and published/historical
 snapshots are unchanged.
 
@@ -571,9 +575,12 @@ and again inside the write transaction. Replaying an existing provider/content r
 remains idempotent at the limit, so the bound never locks a provider out of its own documents;
 a new document over the bound answers `409 conflict`.
 
-Issue #98 adds the public HTTPS URL surface on top of this store and #99 adds authenticated
-registration. The editor controls and validation-time resolution remain the follow-up issues
-#100–#103 and are not implemented here. See §6.7.
+Issue #98 adds the public HTTPS URL surface on top of this store, #99 adds authenticated
+registration, and #101 adds validation-time resolution: credential validation recognises the
+exact canonical URL, reads the stored bytes from this store (never over HTTP), re-verifies the
+recorded digest and the pinned SRI, and applies the document in the schema sandbox. The editor
+controls, fixture generation and detail UI remain the follow-up issues #100, #102 and #103.
+See §6.7 and [`docs/validation.md`](validation.md) §3.
 
 ### 6.7 Public hosted-schema URLs
 
@@ -712,11 +719,12 @@ issue #99.
   API), [#35](https://github.com/ForkbombEu/credimi-attestbook/issues/35) (secure write APIs,
   documented in [`docs/security.md`](security.md)) and
   [#37](https://github.com/ForkbombEu/credimi-attestbook/issues/37) (version-history UI)
-  for the next slices. Hosted schema work continues in
-  [#97](https://github.com/ForkbombEu/credimi-attestbook/issues/97) (this storage slice),
+  for the next slices. Hosted schema work is implemented in
+  [#97](https://github.com/ForkbombEu/credimi-attestbook/issues/97) (storage),
   [#98](https://github.com/ForkbombEu/credimi-attestbook/issues/98) (public URLs),
-  [#99](https://github.com/ForkbombEu/credimi-attestbook/issues/99) (registration API),
-  [#100](https://github.com/ForkbombEu/credimi-attestbook/issues/100) (editor),
+  [#99](https://github.com/ForkbombEu/credimi-attestbook/issues/99) (registration API) and
   [#101](https://github.com/ForkbombEu/credimi-attestbook/issues/101) (validation resolution),
-  [#102](https://github.com/ForkbombEu/credimi-attestbook/issues/102) (fixtures) and
-  [#103](https://github.com/ForkbombEu/credimi-attestbook/issues/103) (detail UI).
+  with the editor
+  [#100](https://github.com/ForkbombEu/credimi-attestbook/issues/100), fixtures
+  [#102](https://github.com/ForkbombEu/credimi-attestbook/issues/102) and detail UI
+  [#103](https://github.com/ForkbombEu/credimi-attestbook/issues/103) still follow-ups.

@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 
+import type { HostedSchemaResolution } from './hosted-schema'
 import {
   aggregateSchemaStatus,
   prepareSchemaDocuments,
@@ -74,6 +75,8 @@ export type SandboxOutcome =
 export interface ValidateSchemaDocumentsOptions {
   readonly references: readonly SnapshotSchemaReference[]
   readonly documents: readonly SchemaDocumentInput[]
+  /** Resolved hosted documents by reference index; see `prepareSchemaDocuments`. */
+  readonly hosted?: ReadonlyMap<number, HostedSchemaResolution>
   readonly parsed: ParsedSdJwtVc
 }
 
@@ -350,6 +353,7 @@ function pendingFailure(
       integrity: pending.reference.integrity,
       kind: pending.kind,
       applied: false,
+      source: pending.source ?? null,
     },
   }
 }
@@ -397,6 +401,7 @@ export async function validateSchemaDocuments(
   const prepared = prepareSchemaDocuments({
     references: options.references,
     documents: options.documents,
+    ...(options.hosted === undefined ? {} : { hosted: options.hosted }),
     claims: options.parsed.claims,
   })
 
@@ -448,6 +453,7 @@ export async function validateSchemaDocuments(
         integrity: pending.reference.integrity,
         kind: application.kind,
         applied: application.applied,
+        source: pending.source ?? null,
       },
     })
   }

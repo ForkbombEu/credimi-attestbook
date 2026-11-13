@@ -1,10 +1,13 @@
 // Schema and attribute validation against the pinned rulebook (issue #32).
 //
 // The rulebook version snapshot stores schema references (URI + W3C SRI), not
-// schema bodies. AttestBook cannot fetch them yet: the SSRF-safe import path is
-// issue #30. This module therefore accepts the exact document bytes from the
-// caller, matches them to the selected rulebook references, verifies the
-// reference `#integrity` when present, and applies the document:
+// schema bodies. A reference that is a canonical AttestBook-hosted URL is
+// resolved from the immutable local store before the request is considered
+// (#101); it is never fetched over HTTP and caller-supplied bytes cannot
+// override it. External references still require the exact bytes from the
+// caller: the SSRF-safe fetch path is issue #30. This module matches documents
+// to the selected rulebook references, verifies the reference `#integrity`, and
+// applies the document:
 //   * SD-JWT VC Type Metadata is checked with the pinned
 //     `@sd-jwt/sd-jwt-vc` `verifyClaimsAgainstTypeMetadata` implementation;
 //   * any other object is treated as JSON Schema 2020-12 and validated with
@@ -23,6 +26,8 @@ import {
 import Ajv2020 from 'ajv/dist/2020.js'
 import type { Disclosure } from '@sd-jwt/core'
 
+import { sha256Sri } from '../public-urls'
+import type { HostedSchemaResolution } from './hosted-schema'
 import type {
   SchemaDocumentInput,
   SchemaReferenceEvidence,
@@ -401,6 +406,78 @@ function verifyIntegrity(
   return { status: 'verified', findings: [] }
 }
 
+/**
+ * Verifies the pinned SRI of a hosted reference against the digest recorded for
+ * the stored document. The bytes were already verified against that digest by
+ * the resolver, so a matching pin proves the URI, the store and the rulebook
+ * all name the same exact document.
+ */
+function verifyHostedIntegrity(
+  reference: SnapshotSchemaReference,
+  contentDigest: string,
+  index: number,
+): {
+  readonly status: 'verified' | 'unpinned' | 'unverified' | 'mismatch'
+  readonly findings: readonly ValidationFinding[]
+} {
+  if (reference.integrity === null) {
+    return {
+      status: 'unpinned',
+      findings: [
+        finding(
+          'hosted_schema_reference_unpinned',
+          'The pinned AttestBook-hosted schema reference has no sha256 integrity value, so the stored document was not applied.',
+          'warning',
+          `/schemaReferences/${index}/integrity`,
+        ),
+      ],
+    }
+  }
+  const match = SRI_PATTERN.exec(reference.integrity)
+  if (match === null) {
+    return {
+      status: 'unverified',
+      findings: [
+        finding(
+          'invalid_integrity_value',
+          'The pinned AttestBook-hosted schema reference has a malformed integrity value; the stored document was not applied.',
+          'warning',
+          `/schemaReferences/${index}/integrity`,
+        ),
+      ],
+    }
+  }
+  const algorithm = match[1]
+  if (algorithm !== 'sha256') {
+    return {
+      status: 'unverified',
+      findings: [
+        finding(
+          'unsupported_integrity_algorithm',
+          `AttestBook verifies sha256 SRI only; the "${algorithm}" pin on the hosted schema reference was not checked.`,
+          'warning',
+          `/schemaReferences/${index}/integrity`,
+        ),
+      ],
+    }
+  }
+  const expected = normalizeBase64(sha256Sri(contentDigest).slice('sha256-'.length))
+  if (normalizeBase64(match[2] ?? '') !== expected) {
+    return {
+      status: 'mismatch',
+      findings: [
+        finding(
+          'hosted_schema_integrity_mismatch',
+          'The stored AttestBook-hosted schema document does not match the pinned rulebook integrity value; it was not applied.',
+          'error',
+          `/schemaReferences/${index}/integrity`,
+        ),
+      ],
+    }
+  }
+  return { status: 'verified', findings: [] }
+}
+
 function zodIssuePath(issue: { readonly path: readonly PropertyKey[] }): string {
   return toJsonPointer(issue.path.map((segment) => String(segment)))
 }
@@ -685,6 +762,11 @@ export interface PendingSchemaDocument {
   readonly kind: 'type_metadata' | 'json_schema'
   readonly document: unknown
   readonly integrityFindings: readonly ValidationFinding[]
+  /**
+   * Document provenance for the API evidence. Absent for the compile-only
+   * registration check, which never produces validation evidence.
+   */
+  readonly source?: 'hosted' | 'caller'
 }
 
 export interface PreparedSchemaDocuments {
@@ -695,6 +777,12 @@ export interface PreparedSchemaDocuments {
 export interface PrepareSchemaDocumentsOptions {
   readonly references: readonly SnapshotSchemaReference[]
   readonly documents: readonly SchemaDocumentInput[]
+  /**
+   * Resolved hosted documents keyed by reference index (#101). A reference in
+   * this map is never resolved from the caller's documents, so caller content
+   * cannot override a trusted pinned hosted schema.
+   */
+  readonly hosted?: ReadonlyMap<number, HostedSchemaResolution>
   readonly claims: Record<string, unknown>
 }
 
@@ -702,6 +790,7 @@ function settle(
   index: number,
   reference: SnapshotSchemaReference,
   application: SchemaApplication,
+  source: 'hosted' | 'caller' | null,
 ): SettledSchemaDocument {
   return {
     index,
@@ -712,15 +801,16 @@ function settle(
       integrity: reference.integrity,
       kind: application.kind,
       applied: application.applied,
+      source,
     },
   }
 }
 
 /**
- * Applies every supplied document to the selected rulebook references.
- * `references` must already be filtered to the credential format. This
- * performs only the cheap checks in the HTTP process: input bounds, reference
- * matching, integrity, JSON parsing, depth, ambiguity and the
+ * Applies every supplied or hosted document to the selected rulebook
+ * references. `references` must already be filtered to the credential format.
+ * This performs only the cheap checks in the HTTP process: input bounds,
+ * reference matching, integrity, JSON parsing, depth, ambiguity and the
  * unsupported-keyword scan. Only verified documents reach `pending`.
  */
 export function prepareSchemaDocuments(
@@ -733,31 +823,180 @@ export function prepareSchemaDocuments(
   if (claimNodes > MAX_CREDENTIAL_CLAIM_NODES) {
     for (const [index, reference] of options.references.entries()) {
       settled.push(
-        settle(index, reference, {
+        settle(
+          index,
           reference,
-          kind: null,
-          applied: false,
-          status: 'NOT_TESTED',
-          findings: [
-            finding(
-              'credential_claims_too_many',
-              `The credential carries more than ${MAX_CREDENTIAL_CLAIM_NODES} claim nodes; schema validation was not executed.`,
-              'warning',
-              `/schemaReferences/${index}`,
-            ),
-          ],
-        }),
+          {
+            reference,
+            kind: null,
+            applied: false,
+            status: 'NOT_TESTED',
+            findings: [
+              finding(
+                'credential_claims_too_many',
+                `The credential carries more than ${MAX_CREDENTIAL_CLAIM_NODES} claim nodes; schema validation was not executed.`,
+                'warning',
+                `/schemaReferences/${index}`,
+              ),
+            ],
+          },
+          null,
+        ),
       )
     }
     return { settled, pending }
   }
 
   options.references.forEach((reference, index) => {
-    const documentIndex = options.documents.findIndex((entry) => entry.uri === reference.uri)
-    const supplied = documentIndex === -1 ? undefined : options.documents[documentIndex]
-    if (supplied === undefined) {
-      settled.push(
-        settle(index, reference, {
+    const hosted = options.hosted?.get(index)
+    if (hosted !== undefined) {
+      prepareHostedReference(reference, index, hosted, settled, pending)
+      return
+    }
+    prepareCallerReference(reference, index, options, settled, pending)
+  })
+
+  return { settled, pending }
+}
+
+/** Settles or queues one canonical AttestBook-hosted reference. */
+function prepareHostedReference(
+  reference: SnapshotSchemaReference,
+  index: number,
+  resolution: HostedSchemaResolution,
+  settled: SettledSchemaDocument[],
+  pending: PendingSchemaDocument[],
+): void {
+  if (resolution.kind === 'missing') {
+    settled.push(
+      settle(
+        index,
+        reference,
+        {
+          reference,
+          kind: null,
+          applied: false,
+          status: 'NOT_TESTED',
+          findings: [
+            finding(
+              'hosted_schema_document_missing',
+              'The pinned AttestBook-hosted schema document is not present in the local schema store; schema validation was not executed.',
+              'warning',
+              `/schemaReferences/${index}`,
+            ),
+          ],
+        },
+        'hosted',
+      ),
+    )
+    return
+  }
+
+  if (resolution.kind === 'corrupt') {
+    settled.push(
+      settle(
+        index,
+        reference,
+        {
+          reference,
+          kind: null,
+          applied: false,
+          status: 'FAIL',
+          findings: [
+            finding(
+              'hosted_schema_document_corrupt',
+              'The stored bytes of the pinned AttestBook-hosted schema document do not match their recorded SHA-256 digest; the document was not applied.',
+              'error',
+              `/schemaReferences/${index}`,
+            ),
+          ],
+        },
+        'hosted',
+      ),
+    )
+    return
+  }
+
+  const integrity = verifyHostedIntegrity(reference, resolution.contentDigest, index)
+  if (integrity.status !== 'verified') {
+    settled.push(
+      settle(
+        index,
+        reference,
+        {
+          reference,
+          kind: null,
+          applied: false,
+          status:
+            integrity.status === 'mismatch'
+              ? 'FAIL'
+              : integrity.status === 'unverified'
+                ? 'INCONCLUSIVE'
+                : 'NOT_TESTED',
+          findings: integrity.findings,
+        },
+        'hosted',
+      ),
+    )
+    return
+  }
+
+  let document: unknown
+  try {
+    document = JSON.parse(resolution.content)
+  } catch {
+    settled.push(
+      settle(
+        index,
+        reference,
+        {
+          reference,
+          kind: null,
+          applied: false,
+          status: 'FAIL',
+          findings: [
+            finding(
+              'invalid_schema_document',
+              'The stored AttestBook-hosted schema document is not valid JSON.',
+              'error',
+              `/schemaReferences/${index}`,
+            ),
+          ],
+        },
+        'hosted',
+      ),
+    )
+    return
+  }
+
+  queueVerifiedDocument(
+    index,
+    reference,
+    document,
+    integrity.findings,
+    'hosted',
+    `/schemaReferences/${index}`,
+    settled,
+    pending,
+  )
+}
+
+/** Settles or queues one reference resolved from the caller's documents. */
+function prepareCallerReference(
+  reference: SnapshotSchemaReference,
+  index: number,
+  options: PrepareSchemaDocumentsOptions,
+  settled: SettledSchemaDocument[],
+  pending: PendingSchemaDocument[],
+): void {
+  const documentIndex = options.documents.findIndex((entry) => entry.uri === reference.uri)
+  const supplied = documentIndex === -1 ? undefined : options.documents[documentIndex]
+  if (supplied === undefined) {
+    settled.push(
+      settle(
+        index,
+        reference,
+        {
           reference,
           kind: null,
           applied: false,
@@ -770,15 +1009,20 @@ export function prepareSchemaDocuments(
               `/schemaReferences/${index}`,
             ),
           ],
-        }),
-      )
-      return
-    }
+        },
+        null,
+      ),
+    )
+    return
+  }
 
-    const integrity = verifyIntegrity(reference, supplied.content, index)
-    if (integrity.status !== 'verified') {
-      settled.push(
-        settle(index, reference, {
+  const integrity = verifyIntegrity(reference, supplied.content, index)
+  if (integrity.status !== 'verified') {
+    settled.push(
+      settle(
+        index,
+        reference,
+        {
           reference,
           kind: null,
           applied: false,
@@ -789,17 +1033,22 @@ export function prepareSchemaDocuments(
                 ? 'INCONCLUSIVE'
                 : 'NOT_TESTED',
           findings: integrity.findings,
-        }),
-      )
-      return
-    }
+        },
+        'caller',
+      ),
+    )
+    return
+  }
 
-    let document: unknown
-    try {
-      document = JSON.parse(supplied.content)
-    } catch {
-      settled.push(
-        settle(index, reference, {
+  let document: unknown
+  try {
+    document = JSON.parse(supplied.content)
+  } catch {
+    settled.push(
+      settle(
+        index,
+        reference,
+        {
           reference,
           kind: null,
           applied: false,
@@ -812,17 +1061,46 @@ export function prepareSchemaDocuments(
               `/schemaDocuments/${documentIndex}`,
             ),
           ],
-        }),
-      )
-      return
-    }
+        },
+        'caller',
+      ),
+    )
+    return
+  }
 
-    const typeMetadataLike = isRecord(document) && typeof document.vct === 'string'
-    const kind: 'type_metadata' | 'json_schema' = typeMetadataLike ? 'type_metadata' : 'json_schema'
+  queueVerifiedDocument(
+    index,
+    reference,
+    document,
+    integrity.findings,
+    'caller',
+    `/schemaDocuments/${documentIndex}`,
+    settled,
+    pending,
+  )
+}
 
-    if (exceedsDepth(document, MAX_SCHEMA_DEPTH)) {
-      settled.push(
-        settle(index, reference, {
+/** Shared bounds after a document's exact bytes and pin were verified. */
+function queueVerifiedDocument(
+  index: number,
+  reference: SnapshotSchemaReference,
+  document: unknown,
+  integrityFindings: readonly ValidationFinding[],
+  source: 'hosted' | 'caller',
+  documentPath: string,
+  settled: SettledSchemaDocument[],
+  pending: PendingSchemaDocument[],
+): void {
+  const provenance = source === 'hosted' ? 'stored' : 'supplied'
+  const typeMetadataLike = isRecord(document) && typeof document.vct === 'string'
+  const kind: 'type_metadata' | 'json_schema' = typeMetadataLike ? 'type_metadata' : 'json_schema'
+
+  if (exceedsDepth(document, MAX_SCHEMA_DEPTH)) {
+    settled.push(
+      settle(
+        index,
+        reference,
+        {
           reference,
           kind,
           applied: false,
@@ -830,19 +1108,24 @@ export function prepareSchemaDocuments(
           findings: [
             finding(
               'schema_document_too_deep',
-              `The supplied schema document exceeds the ${MAX_SCHEMA_DEPTH}-level nesting bound.`,
+              `The ${provenance} schema document exceeds the ${MAX_SCHEMA_DEPTH}-level nesting bound.`,
               'error',
-              `/schemaDocuments/${documentIndex}`,
+              documentPath,
             ),
           ],
-        }),
-      )
-      return
-    }
+        },
+        source,
+      ),
+    )
+    return
+  }
 
-    if (typeMetadataLike && looksLikeJsonSchema(document as Record<string, unknown>)) {
-      settled.push(
-        settle(index, reference, {
+  if (typeMetadataLike && looksLikeJsonSchema(document)) {
+    settled.push(
+      settle(
+        index,
+        reference,
+        {
           reference,
           kind: null,
           applied: false,
@@ -850,21 +1133,26 @@ export function prepareSchemaDocuments(
           findings: [
             finding(
               'ambiguous_schema_document',
-              'The supplied document has a `vct` member and JSON Schema keywords; its kind is ambiguous, so it was not evaluated.',
+              `The ${provenance} document has a \`vct\` member and JSON Schema keywords; its kind is ambiguous, so it was not evaluated.`,
               'warning',
               `/schemaReferences/${index}`,
             ),
           ],
-        }),
-      )
-      return
-    }
+        },
+        source,
+      ),
+    )
+    return
+  }
 
-    if (kind === 'json_schema') {
-      const unsupported = findUnsupportedSchemaKeyword(document)
-      if (unsupported !== null) {
-        settled.push(
-          settle(index, reference, {
+  if (kind === 'json_schema') {
+    const unsupported = findUnsupportedSchemaKeyword(document)
+    if (unsupported !== null) {
+      settled.push(
+        settle(
+          index,
+          reference,
+          {
             reference,
             kind,
             applied: false,
@@ -872,27 +1160,27 @@ export function prepareSchemaDocuments(
             findings: [
               finding(
                 'unsupported_schema_keyword',
-                `The supplied JSON Schema uses "${unsupported.keyword}", which AttestBook cannot evaluate safely over untrusted input; schema validation was not executed.`,
+                `The ${provenance} JSON Schema uses "${unsupported.keyword}", which AttestBook cannot evaluate safely over untrusted input; schema validation was not executed.`,
                 'warning',
                 `/schemaReferences/${index}`,
               ),
             ],
-          }),
-        )
-        return
-      }
+          },
+          source,
+        ),
+      )
+      return
     }
+  }
 
-    pending.push({
-      index,
-      reference,
-      kind,
-      document,
-      integrityFindings: integrity.findings,
-    })
+  pending.push({
+    index,
+    reference,
+    kind,
+    document,
+    integrityFindings,
+    source,
   })
-
-  return { settled, pending }
 }
 
 /**

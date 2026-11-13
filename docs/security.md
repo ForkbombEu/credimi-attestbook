@@ -245,6 +245,16 @@ token because it records server state that every reader sees.
   HTTP only for loopback hosts) without credentials, path, query or fragment, and an invalid
   value fails startup. A missing origin leaves the content route working but makes the
   metadata routes answer an explicit `503 public_base_url_unavailable`.
+- Credential validation recognises an AttestBook-hosted reference only by the exact canonical
+  content URL of that configured origin, and resolves it from the immutable local store
+  (`src/validation/hosted-schema.ts`). It never performs an HTTP request to the URL, never
+  classifies a reference from a string prefix or look-alike origin, and rejects an identifier
+  longer than the registry's 128-character bound so an untrusted rulebook reference cannot
+  make the store throw. It recomputes the SHA-256 of
+  the stored bytes and requires it to equal the recorded digest and the pinned `sha256-...`
+  SRI before applying the document. Missing or changed stored bytes are explicit `NOT_TESTED`
+  or `FAIL` evidence, and caller-supplied `schemaDocuments` cannot override a hosted
+  reference.
 
 ## 5. Error consistency
 
@@ -295,7 +305,8 @@ the response cannot be used to learn which credential path failed; the session-o
   `conformance`, `importedAt`). Import-internal redirect chains, optional source labels and
   untrusted envelope metadata are excluded (§15 personal-data minimisation).
 - Credential validation is synchronous and nothing is persisted; supplied credentials and
-  schema documents are not logged or retained.
+  schema documents are not logged or retained. A hosted schema document is read from the
+  local immutable store and is never fetched or logged during validation.
 - Capture artifacts are untrusted evidence. Normalization segregates an inline artifact out of
   the metadata envelope, the capture explorer never returns those raw bytes (only the redacted
   default-policy projection), and the correlation route refuses an external reference it has not
@@ -413,6 +424,13 @@ trail is not exposed over HTTP; it is read by operators from the database.
   while an external HTTPS reference is preserved without an upload.
   `src/registry/schema-documents.test.ts` covers the 100-association per-provider bound and
   proves an idempotent replay still succeeds at the limit.
+- `src/validation/hosted-schema.test.ts` covers strict hosted-URL recognition (look-alike
+  origins, extra paths, query/fragment and userinfo are rejected) and local-store resolution
+  (missing document, changed bytes, invalid UTF-8). `src/validation/hosted-schema-validation.test.ts`
+  and `src/api/hosted-schema-validation.test.ts` cover engine and HTTP validation: a hosted
+  schema applies without `schemaDocuments`, produces real positive/negative findings, cannot be
+  overridden by caller bytes, and reports an unpinned/mismatched/missing/corrupt document as
+  `NOT_TESTED`/`FAIL`; external-only and mixed versions keep the caller-supplied flow.
 - `src/api/session-writes.test.ts` covers the dual transport end to end: a session creates,
   edits, versions, publishes, imports and correlates; a cookie write without its CSRF token, a
   wrong or foreign token and a cross-origin write all answer `403 csrf_failed` and write

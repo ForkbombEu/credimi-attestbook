@@ -30,9 +30,11 @@ published or draft rulebook version**. The engine:
 3. recognises the credential format from the artifact (or an explicit caller hint);
 4. parses a real SD-JWT VC with the pinned `@sd-jwt/core` 0.24.1 parser, including disclosure
    digest verification, unreferenced/duplicate disclosure detection and protected-claim rules;
-5. applies the schema documents the caller supplies for the pinned rulebook references:
-   SD-JWT VC Type Metadata through `@sd-jwt/sd-jwt-vc` 0.24.1
-   `verifyClaimsAgainstTypeMetadata`, or JSON Schema 2020-12 through Ajv 8.20.0;
+5. resolves each pinned schema reference to its deterministic source: a canonical
+   AttestBook-hosted URL is read from the immutable local store (never over HTTP), while an
+   external reference uses the caller-supplied `schemaDocuments`; applies the verified
+   document as SD-JWT VC Type Metadata through `@sd-jwt/sd-jwt-vc` 0.24.1
+   `verifyClaimsAgainstTypeMetadata`, or as JSON Schema 2020-12 through Ajv 8.20.0;
 6. checks attestation constraints that are observable in a credential (format support,
    `attestationLoS`/`bindingType` vocabulary, key binding via an issuer-signed `cnf`);
 7. returns per-dimension statuses, an explicit applicability/execution flag and machine-readable
@@ -60,7 +62,7 @@ unexecuted dimension; `INCONCLUSIVE` requires an executed check with a warning a
 | 1 | `credential_parsing` | AttestBook | yes | conditional on a recognised format with a structural parser | parser outcome, disclosure count and bounds |
 | 2 | `format_recognition` | AttestBook | yes | required | recognised format, detection source, parser availability |
 | 3 | `cryptographic_verification` | external | no | required | explicitly records issuer JWS signature, KB-JWT proof and status-list checks as not executed |
-| 4 | `schema_validation` | AttestBook | yes | conditional on a matching pinned reference and supplied document | reference count, documents supplied/applied, findings |
+| 4 | `schema_validation` | AttestBook | yes | conditional on a matching pinned reference and a resolvable document (hosted store or caller-supplied) | reference count, documents supplied/applied, hosted references applied, findings |
 | 5 | `attestation_constraints` | AttestBook | yes | required | format support, TS11 vocabulary, key-binding presence |
 | 6 | `issuer_trust` | external | no | required | explicitly records that no trust anchors were applied |
 | 7 | `protocol_conformance` | external | no | not applicable to a standalone artifact | explicitly records that no protocol exchange exists |
@@ -81,35 +83,59 @@ signature, key-binding proof, status-list check, issuer trust, protocol conforma
 end-to-end interoperability. A caller never has to infer an absent crypto, trust, protocol or
 interoperability check from `overallStatus` alone.
 
-## 3. Why schema documents are supplied by the caller
+## 3. Schema documents: hosted references and caller-supplied external ones
 
 A rulebook version snapshot records schema references (`formatIdentifier`, `uri`, W3C SRI
 `integrity`); it does not embed the fetched schema bodies. AttestBook does not fetch remote
-schemas in this slice: the SSRF-safe, size-limited fetch path is issue #30. The request
-therefore carries `schemaDocuments` with the **exact UTF-8 document text**. The engine:
+schemas in this slice: the SSRF-safe, size-limited fetch path is issue #30. There are two
+deterministic sources, chosen per reference:
 
-- requires every supplied URI to match a schema reference of the selected attestation type in
-  that exact rulebook version (otherwise `400 invalid_request`);
-- verifies `sha256-...` SRI over the UTF-8 encoding of the exact supplied text when the
-  reference carries one; a mismatch is `FAIL` and the document is **not compiled or applied**;
-  an invalid or `sha384`/`sha512` pin is `INCONCLUSIVE` and is also not applied; a reference
-  with no `#integrity` is `NOT_TESTED` and is not applied;
-- treats a document with a string `vct` as SD-JWT VC Type Metadata and any other object as
-  JSON Schema 2020-12; type metadata with an `extends` parent is applied for its own claims
-  but reported `INCONCLUSIVE` with `type_metadata_extends_unsupported` because the parent
-  chain is not resolved yet;
-- executes JSON Schema only when it declares JSON Schema 2020-12 (or no `$schema`) and uses
-  no keyword AttestBook cannot bound safely. `format`, `pattern`, `patternProperties`,
-  `uniqueItems`, the legacy `dependencies` applicator and the
-  `$ref`/`$dynamicRef`/`$recursiveRef` family are reported `NOT_TESTED` with
-  `unsupported_schema_keyword`; unknown keywords and other dialects are also `NOT_TESTED`
-  instead of being ignored and reported as validated. A document that mixes a root `vct`
-  with JSON Schema keywords is `NOT_TESTED` as `ambiguous_schema_document` because either
-  classification would skip constraints. JSON Schema and Type Metadata evaluation runs in a
-  separate Bun worker process with a 2-second hard timeout and a 256 MiB RSS watchdog; hitting
-  either limit is reported as `NOT_TESTED`, not as a credential failure.
+1. **AttestBook-hosted reference (#101).** A reference is hosted only when its URI is exactly
+   the canonical content URL of this deployment's configured `PUBLIC_BASE_URL`:
+   `${PUBLIC_BASE_URL}/api/v1/schema-documents/{documentId}/content`, with no credentials,
+   query, fragment or extra path and one identifier segment of at most 128 characters. The
+   engine reads the document from the immutable local
+   store — never over HTTP — recomputes SHA-256 over the stored bytes, requires it to equal
+   the document's recorded `contentDigest`, and requires the reference `sha256-...` SRI to
+   equal that digest. A look-alike origin, a prefixed string, an overlong identifier or a
+   near-miss path is **not**
+   hosted and stays an external reference. A canonical hosted reference whose document is
+   missing, whose stored bytes changed, whose SRI is absent or mismatched, or that has an
+   unsupported pin is settled explicitly (see below); the caller's `schemaDocuments` entry
+   for the same URI is ignored, so caller content cannot override a trusted pinned hosted
+   schema.
+2. **External reference.** The request carries `schemaDocuments` with the **exact UTF-8
+   document text** for that URI. Mixed versions keep this deterministic selection: each
+   reference is hosted or external on its own, and no other source is consulted.
 
-A reference with no supplied document makes schema validation `NOT_TESTED`. A reference whose
+Every supplied URI must match a schema reference of the selected attestation type in that
+exact rulebook version (otherwise `400 invalid_request`). For external documents the engine
+verifies `sha256-...` SRI over the UTF-8 encoding of the exact supplied text when the
+reference carries one; a mismatch is `FAIL` and the document is **not compiled or applied**;
+an invalid or `sha384`/`sha512` pin is `INCONCLUSIVE` and is also not applied; a reference
+with no `#integrity` is `NOT_TESTED` and is not applied. A hosted reference follows the same
+status mapping: a pin matching the stored digest applies the bytes; an absent pin is
+`NOT_TESTED` (`hosted_schema_reference_unpinned`); a malformed or unsupported pin is
+`INCONCLUSIVE`; a mismatched pin is `FAIL` (`hosted_schema_integrity_mismatch`). A canonical
+hosted URI whose document is missing is `NOT_TESTED` (`hosted_schema_document_missing`);
+stored bytes that no longer hash to the recorded digest are `FAIL`
+(`hosted_schema_document_corrupt`). None of these is a false `PASS`.
+
+A document with a string `vct` is treated as SD-JWT VC Type Metadata and any other object as
+JSON Schema 2020-12; type metadata with an `extends` parent is applied for its own claims
+but reported `INCONCLUSIVE` with `type_metadata_extends_unsupported` because the parent
+chain is not resolved yet. JSON Schema is executed only when it declares JSON Schema 2020-12
+(or no `$schema`) and uses no keyword AttestBook cannot bound safely. `format`, `pattern`,
+`patternProperties`, `uniqueItems`, the legacy `dependencies` applicator and the
+`$ref`/`$dynamicRef`/`$recursiveRef` family are reported `NOT_TESTED` with
+`unsupported_schema_keyword`; unknown keywords and other dialects are also `NOT_TESTED`
+instead of being ignored and reported as validated. A document that mixes a root `vct`
+with JSON Schema keywords is `NOT_TESTED` as `ambiguous_schema_document` because either
+classification would skip constraints. JSON Schema and Type Metadata evaluation runs in a
+separate Bun worker process with a 2-second hard timeout and a 256 MiB RSS watchdog; hitting
+either limit is reported as `NOT_TESTED`, not as a credential failure.
+
+A reference with no resolved document makes schema validation `NOT_TESTED`. A reference whose
 integrity pin cannot be verified (unsupported algorithm or malformed value) is not applied; if
 no pinned reference was applied, the schema dimension is `NOT_TESTED` with `executed: false`
 rather than an executed `INCONCLUSIVE`. A `FAIL` remains an executed conclusion even when the
@@ -151,7 +177,7 @@ The response is wrapped in the product-API success envelope (`{ "data": ... }`; 
 | `rulebook` | `id`, `name`, `version`, recomputed `digest`, `digestVerified`, `specVersion`, `status` |
 | `attestation` | Selected `name`, `attestationLoS`, `bindingType`, `supportedFormats` |
 | `credential` | Non-sensitive facts only: `format`, `vct`, `disclosureCount`, `keyBindingPresent` |
-| `schemaReferences` | Pinned reference URI/integrity, detected `kind`, whether it was `applied` |
+| `schemaReferences` | Pinned reference URI/integrity, detected `kind`, whether it was `applied`, and `source` (`hosted`, `caller` or `null`) |
 | `dimensions` | The eight FR-010 dimensions, each with `status`, `applicable`, `executed`, `findings` and machine-readable `evidence` |
 | `violations` | Flattened `error`/`warning` findings for clients |
 | `limitations` | Explicit unexecuted or inconclusive checks, one entry per finding of a dimension that is not `PASS`/`FAIL` |
@@ -197,8 +223,11 @@ No generic JSON validator is presented as mdoc or W3C VC support (FR-011).
 
 The engine never logs or persists the credential, disclosures or claim values. The HTTP
 error handler logs only the method, path and error class. Results expose claim paths and
-constraints, not values. Hard bounds are: 512 KiB credential, four schema documents of 128 KiB,
-4 MiB body, 64-level schema/claim nesting, 1,000 disclosures, 4,096 credential claim nodes.
+constraints, not values. Hard bounds are: 512 KiB credential, four caller-supplied schema
+documents of 128 KiB, 4 MiB body, 256 KiB per stored hosted document (enforced at
+registration), 64-level schema/claim nesting, 1,000 disclosures, 4,096 credential claim nodes.
+Hosted documents are read directly from the local store and are never fetched over HTTP, so
+validation performs no outbound request for them.
 Schema documents are evaluated in a separate Bun worker process with a configurable hard
 timeout (default 2 s), RSS limit (default 256 MiB), output cap (1 MiB) and concurrency cap
 (two children). The RSS watchdog needs Linux `/proc`; on any other platform the sandbox fails
