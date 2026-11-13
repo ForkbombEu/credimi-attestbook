@@ -6,11 +6,13 @@ import { SeverityBadge } from './components/Badges'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import { DraftLifecyclePanel } from './components/DraftLifecyclePanel'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { SchemaReferenceControls } from './components/SchemaReferenceControls'
 import { SessionRenewalForm, SignInRequiredNotice } from './components/SessionPrompt'
 import {
   describeDiagnosticPath,
   documentFromDraft,
   draftRequest,
+  EMPTY_DRAFT_DOCUMENT,
   EMPTY_METADATA,
   parseDraftDocument,
   serializeDraftDocument,
@@ -20,7 +22,7 @@ import {
 } from './draft'
 import { AppLink, CATALOG_PATH, rulebookEditorPath, rulebookPath } from './router'
 import type { SessionController } from './session'
-import type { DraftRulebook, DraftValidationReport } from './types'
+import type { DraftContentDocument, DraftRulebook, DraftValidationReport } from './types'
 
 interface RulebookDraftEditorPageProps {
   readonly api: EditorApi
@@ -185,6 +187,16 @@ export function RulebookDraftEditorPage({
   const parsed = useMemo(() => parseDraftDocument(jsonText), [jsonText])
   const metadataErrors = useMemo(() => validateMetadata(metadata), [metadata])
   const parseError = parsed.ok ? null : parsed.message
+  // Keep the last readable attestation list while the raw JSON is temporarily
+  // invalid, so the schema controls stay visible (disabled) rather than
+  // disappearing as the user fixes a syntax error.
+  const [lastParsedDocument, setLastParsedDocument] =
+    useState<DraftContentDocument>(EMPTY_DRAFT_DOCUMENT)
+  useEffect(() => {
+    if (parsed.ok) {
+      setLastParsedDocument(parsed.document)
+    }
+  }, [parsed])
 
   useEffect(() => {
     if (state.status !== 'ready' || readOnly) {
@@ -238,6 +250,18 @@ export function RulebookDraftEditorPage({
     setSavedAt(null)
     setSaveError(null)
   }
+
+  /**
+   * The schema controls build over the raw Draft JSON, so an insertion is an
+   * ordinary unsaved edit: it marks the form dirty and clears the saved marker.
+   */
+  const handleSchemaDocumentChange = useCallback((text: string) => {
+    setJsonText(text)
+    setDirty(true)
+    setSavedAt(null)
+    setSaveError(null)
+    setFormError(null)
+  }, [])
 
   const reload = useCallback(() => setReloadToken((value) => value + 1), [])
 
@@ -598,6 +622,26 @@ export function RulebookDraftEditorPage({
                 )}
               </div>
             </section>
+
+            <SchemaReferenceControls
+              api={api}
+              document={parsed.ok ? parsed.document : lastParsedDocument}
+              documentText={jsonText}
+              disabled={readOnly || !parsed.ok}
+              disabledReason={
+                readOnly
+                  ? null
+                  : parsed.ok
+                    ? null
+                    : 'Fix the Draft JSON before editing schema references.'
+              }
+              csrfToken={csrfToken}
+              onDocumentChange={handleSchemaDocumentChange}
+              onSessionExpired={() => {
+                setSessionExpired(true)
+                setRenewedNotice(null)
+              }}
+            />
 
             <section className="detail-card" aria-labelledby={`${fieldPrefix}-validation-heading`}>
               <h2 id={`${fieldPrefix}-validation-heading`}>Live validation</h2>

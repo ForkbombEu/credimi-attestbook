@@ -265,6 +265,41 @@ describe('createHttpEditorApi', () => {
     expect(JSON.parse(init?.body as string)).toEqual(request)
   })
 
+  test('registers a hosted schema with the exact bytes and CSRF token', async () => {
+    const registered = {
+      id: 'document-1',
+      kind: 'json_schema_2020_12',
+      mediaType: 'application/schema+json',
+      contentDigest: 'a'.repeat(64),
+      integrity: 'sha256-AAAA',
+      url: 'https://schemas.example/api/v1/schema-documents/document-1/content',
+      createdAt: '2026-01-01T00:00:00.000Z',
+    }
+    const fetchImpl = vi.fn<FetchLike>(() =>
+      Promise.resolve(jsonResponse({ data: registered }, 201)),
+    )
+    const api = createHttpEditorApi(fetchImpl)
+    const documentText = '{"$schema":"https://json-schema.org/draft/2020-12/schema"}'
+
+    expect(
+      await api.registerSchemaDocument('json_schema_2020_12', documentText, 'csrf-token-value'),
+    ).toEqual(registered)
+
+    const [path, init] = fetchImpl.mock.calls[0] ?? []
+    expect(path).toBe('/api/v1/schema-documents?kind=json_schema_2020_12')
+    expect(init).toMatchObject({
+      method: 'POST',
+      credentials: 'same-origin',
+      body: documentText,
+      headers: {
+        accept: 'application/json',
+        'content-type': 'application/schema+json',
+        'x-csrf-token': 'csrf-token-value',
+      },
+    })
+    expect((init?.headers as Record<string, string>).authorization).toBeUndefined()
+  })
+
   test('creates a draft with the CSRF token and validates one anonymously', async () => {
     const fetchImpl = vi.fn<FetchLike>((path) => {
       if (path === '/api/v1/rulebooks') {

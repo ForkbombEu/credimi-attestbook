@@ -34,7 +34,7 @@ split from the closed duplicates #15–#19.
 | FR-004 | External rulebook import: URL/JSON, preview, structural validation, compatibility, provenance, safe re-import | Phase 1: #30, #31, #36 | Adapter-based; no assumed full TS11 conformance (R4.4) |
 | FR-005 | Catalog synchronization: conditional fetch, idempotency, change detection, conflict reporting, availability | Phase 1 partial: #31; full sync later | Scheduled sync and source diagnostics are not an MVP dependency |
 | FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #43 (discovery, association, ambiguity reporting) | Implemented in #43; manual mapping and persistence remain later slices; never authoritative for rulebooks |
-| FR-007 | Rulebook editor and authoring workflow | Phase 2: #40 (working-copy editor and live validation), #41 (lifecycle/diff), #91 (session-authenticated browser writes) | UI-003; not Phase 1; publication remains #42 |
+| FR-007 | Rulebook editor and authoring workflow | Phase 2: #40 (working-copy editor and live validation), #41 (lifecycle/diff), #91 (session-authenticated browser writes), #100 (hosted/external schema controls) | UI-003; not Phase 1; publication remains #42 |
 | FR-008 | Publication of validated, versioned, reproducible artifacts with provenance/integrity | Phase 1 subset: #29; full workflow Phase 2: #42 | Where signing applies, use OWF behind the JOSE policy |
 | FR-009 | Reusable validation API with structured results and evidence | Phase 1: #32, #33 | SD-JWT VC structural scope; per-dimension evidence and limitations added in #33 |
 | FR-010 | Eight independent validation dimensions | Phase 1: #33 | No dimension PASS without execution; applicability table in `docs/validation.md` §2 |
@@ -57,7 +57,7 @@ split from the closed duplicates #15–#19.
 | --- | --- | --- |
 | UI-001 | Rulebook catalog with search/filter, provider, version, status, source, compatibility | Phase 1: #36 |
 | UI-002 | Rulebook details, attestation types, schema references, compatibility, version history, provenance | Phase 1: #37 |
-| UI-003 | Rulebook editor, live validation, diff, draft management, publication | Phase 2: #40 (editor and live validation), #41 (diff/lifecycle), #42 (publication), #91 (session-gated writes and expiry handling) |
+| UI-003 | Rulebook editor, live validation, diff, draft management, publication | Phase 2: #40 (editor and live validation), #41 (diff/lifecycle), #42 (publication), #91 (session-gated writes and expiry handling), #100 (hosted/external schema controls) |
 | UI-004 | Import interface: URL/file, preview, diagnostics, conflict resolution, sync settings | Phase 2+ follow-up (not in #40–#42); API import lands in #30/#31 |
 | UI-005 | Credential playground: input/upload, rulebook/type selection, validation, violations, export | Phase 1: #38 |
 | UI-006 | Capture explorer (mock-backed until real contracts exist) | Phase 4: #48 (implemented as a clearly labelled mock-backed `/captures` explorer) |
@@ -74,7 +74,7 @@ split from the closed duplicates #15–#19.
 | AC-06 | Published versions immutable | Phase 1: #29, #37 |
 | AC-07 | Credential validated against a selected rulebook version | Phase 1: #32, #38 |
 | AC-08 | Errors identify constraints and failing attributes | Phase 1: #32, #33, #38 |
-| AC-09 | Create, edit and publish a supported rulebook | Phase 2: #40, #41, #42 |
+| AC-09 | Create, edit and publish a supported rulebook | Phase 2: #40, #41, #42, #100 (hosted/external schema controls) |
 | AC-10 | Issuer consumes definitions through a documented API | Phase 3: #43, #44 |
 | AC-11 | Verifier consumes constraints through a documented API | Phase 3: #45 |
 | AC-12 | Architecture supports capture without redesigning the validation engine | Phase 0 contracts; Phase 4: #46, #47, #48 |
