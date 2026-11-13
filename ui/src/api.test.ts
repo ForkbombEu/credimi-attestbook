@@ -245,25 +245,26 @@ describe('createHttpEditorApi', () => {
     )
   })
 
-  test('replaces a draft with a bearer token and the PUT method', async () => {
+  test('replaces a draft with the session cookie and CSRF token', async () => {
     const fetchImpl = vi.fn<FetchLike>(() => Promise.resolve(jsonResponse({ data: draft })))
     const api = createHttpEditorApi(fetchImpl)
 
-    expect(await api.replaceDraft('rulebook-1', request, 'att_secret')).toEqual(draft)
+    expect(await api.replaceDraft('rulebook-1', request, 'csrf-token-value')).toEqual(draft)
     const [path, init] = fetchImpl.mock.calls[0] ?? []
     expect(path).toBe('/api/v1/rulebooks/rulebook-1/draft')
     expect(init).toMatchObject({
       method: 'PUT',
+      credentials: 'same-origin',
       headers: {
         accept: 'application/json',
         'content-type': 'application/json',
-        authorization: 'Bearer att_secret',
+        'x-csrf-token': 'csrf-token-value',
       },
     })
     expect(JSON.parse(init?.body as string)).toEqual(request)
   })
 
-  test('creates a draft and validates one without a token', async () => {
+  test('creates a draft with the CSRF token and validates one anonymously', async () => {
     const fetchImpl = vi.fn<FetchLike>((path) => {
       if (path === '/api/v1/rulebooks') {
         return Promise.resolve(jsonResponse({ data: draft }, 201))
@@ -282,11 +283,13 @@ describe('createHttpEditorApi', () => {
     })
     const api = createHttpEditorApi(fetchImpl)
 
-    expect(await api.createDraft(request, 'att_secret')).toEqual(draft)
+    expect(await api.createDraft(request, 'csrf-token-value')).toEqual(draft)
     const [createPath, createInit] = fetchImpl.mock.calls[0] ?? []
     expect(createPath).toBe('/api/v1/rulebooks')
     expect(createInit?.method).toBe('POST')
-    expect((createInit?.headers as Record<string, string>).authorization).toBe('Bearer att_secret')
+    expect(createInit?.credentials).toBe('same-origin')
+    expect((createInit?.headers as Record<string, string>)['x-csrf-token']).toBe('csrf-token-value')
+    expect((createInit?.headers as Record<string, string>).authorization).toBeUndefined()
 
     expect(await api.validateDraft(request)).toEqual({
       valid: true,
@@ -299,6 +302,7 @@ describe('createHttpEditorApi', () => {
     expect(validatePath).toBe('/api/v1/rulebooks/validate-draft')
     expect(validateInit?.method).toBe('POST')
     expect((validateInit?.headers as Record<string, string>).authorization).toBeUndefined()
+    expect((validateInit?.headers as Record<string, string>)['x-csrf-token']).toBeUndefined()
   })
 
   test('uses the safe error envelope for a rejected write', async () => {
@@ -312,12 +316,14 @@ describe('createHttpEditorApi', () => {
     )
     const api = createHttpEditorApi(fetchImpl)
 
-    await expect(api.replaceDraft('rulebook-1', request, 'att_secret')).rejects.toThrow(
+    await expect(api.replaceDraft('rulebook-1', request, 'csrf-token-value')).rejects.toThrow(
       'Only draft rulebooks can be changed.',
     )
-    await expect(api.replaceDraft('rulebook-1', request, 'att_secret')).rejects.toMatchObject({
-      status: 409,
-    })
+    await expect(api.replaceDraft('rulebook-1', request, 'csrf-token-value')).rejects.toMatchObject(
+      {
+        status: 409,
+      },
+    )
   })
 })
 
@@ -364,17 +370,18 @@ describe('createHttpCaptureApi', () => {
         rulebookVersion: '1.0',
         attestationType: 'Person Identification Data',
       },
-      'att_capture_token',
+      'csrf-token-value',
     )
     expect(result).toEqual(correlation)
     expect(fetchImpl).toHaveBeenCalledWith(
       '/api/v1/captures/capture-1/validate',
       expect.objectContaining({
         method: 'POST',
+        credentials: 'same-origin',
         headers: {
           accept: 'application/json',
           'content-type': 'application/json',
-          authorization: 'Bearer att_capture_token',
+          'x-csrf-token': 'csrf-token-value',
         },
         body: JSON.stringify({
           rulebookId: 'rulebook-pid',
@@ -384,8 +391,8 @@ describe('createHttpCaptureApi', () => {
       }),
     )
     const [url, init] = fetchImpl.mock.calls[0] ?? []
-    expect(String(url)).not.toContain('att_capture_token')
-    expect(init?.body).not.toContain('att_capture_token')
+    expect(String(url)).not.toContain('csrf-token-value')
+    expect(init?.body).not.toContain('csrf-token-value')
   })
 
   test('surfaces the safe API error message and status', async () => {
@@ -407,7 +414,7 @@ describe('createHttpCaptureApi', () => {
           rulebookVersion: '1.0',
           attestationType: 'PID',
         },
-        'att_capture_token',
+        'csrf-token-value',
       ),
     ).rejects.toMatchObject({
       name: 'CatalogApiError',

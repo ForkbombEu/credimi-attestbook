@@ -3,14 +3,11 @@ import { readFileSync } from 'node:fs'
 import { AxeBuilder } from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
-import { EDITOR_TOKEN_FIXTURE, PID_CREDENTIAL_FIXTURE } from './fixtures'
+import { PID_CREDENTIAL_FIXTURE } from './fixtures'
+import { signInAsAdmin } from './session'
 
 function pidCredential(): string {
   return readFileSync(PID_CREDENTIAL_FIXTURE, 'utf8').trim()
-}
-
-function providerToken(): string {
-  return readFileSync(EDITOR_TOKEN_FIXTURE, 'utf8').trim()
 }
 
 async function openExplorer(page: Page): Promise<void> {
@@ -33,9 +30,8 @@ async function choosePinnedVersion(page: Page): Promise<void> {
   await page.getByLabel('Attestation type').selectOption({ label: 'Sandbox Credential' })
 }
 
-async function correlateRealCredential(page: Page, token: string = providerToken()): Promise<void> {
+async function correlateRealCredential(page: Page): Promise<void> {
   await choosePinnedVersion(page)
-  await page.getByLabel('Provider token').fill(token)
   await page.getByRole('button', { name: 'Run validation' }).click()
   await expect(page.getByRole('heading', { name: 'Overall result' })).toBeVisible()
 }
@@ -94,6 +90,7 @@ test.describe('capture explorer', () => {
     page,
   }) => {
     const credential = pidCredential()
+    await signInAsAdmin(page)
     await openCapture(page, 'e2e-issued-credential-capture')
 
     const body = await page.locator('body').innerText()
@@ -114,15 +111,17 @@ test.describe('capture explorer', () => {
     await expect(page.getByText('credimi-e2e-execution-48')).toBeVisible()
   })
 
-  test('requires a provider token before recording a correlation', async ({ page }) => {
+  test('asks an anonymous visitor to sign in before recording a correlation', async ({ page }) => {
     // Use a capture no other test correlates, so a persisted result from an
     // earlier test in the shared in-memory explorer cannot mask the refusal.
     await openCapture(page, 'mock-capture-capture-issuer-3')
     await choosePinnedVersion(page)
-    await page.getByRole('button', { name: 'Run validation' }).click()
-    await expect(
-      page.getByText('A provider token is required to record a correlation.'),
-    ).toBeVisible()
+    await expect(page.getByText('Sign in to record a validation')).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+      'href',
+      '/login?next=%2Fcaptures%2Fmock-capture-capture-issuer-3',
+    )
+    await expect(page.getByRole('button', { name: 'Run validation' })).toBeDisabled()
     await expect(page.getByRole('heading', { name: 'Overall result' })).toHaveCount(0)
   })
 
@@ -139,6 +138,7 @@ test.describe('capture explorer', () => {
       ),
     ).toEqual([])
 
+    await signInAsAdmin(page)
     await openCapture(page, 'e2e-issued-credential-capture')
     await correlateRealCredential(page)
     const detailResults = await new AxeBuilder({ page }).analyze()

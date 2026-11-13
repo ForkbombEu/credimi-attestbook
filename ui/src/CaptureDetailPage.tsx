@@ -15,10 +15,12 @@ import {
 } from './capture'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { SessionRenewalForm, SignInRequiredNotice } from './components/SessionPrompt'
 import { ValidationReport } from './components/ValidationReport'
 import { describeReference, formatDigest } from './detail'
 import { formatValidatedAt, validationResultDocument, validationResultFilename } from './playground'
 import { AppLink, CAPTURES_PATH, rulebookPath } from './router'
+import type { SessionController } from './session'
 import type {
   Attestation,
   CaptureExplorerDetail,
@@ -32,9 +34,8 @@ interface CaptureDetailPageProps {
   readonly api: CaptureExplorerApi
   readonly catalogApi: CatalogApi
   readonly captureId: string
-  /** Provider bearer token held in App memory; never persisted. */
-  readonly token: string
-  readonly onTokenChange: (token: string) => void
+  /** Administrator session state; correlation writes use its CSRF token. */
+  readonly session: SessionController
   readonly onNavigate: (path: string) => void
 }
 
@@ -346,8 +347,9 @@ interface CorrelationPanelProps {
   readonly catalog: CatalogState
   readonly related: RelatedState
   readonly values: CorrelationForm
-  readonly token: string
-  readonly onTokenChange: (token: string) => void
+  readonly session: SessionController
+  readonly sessionExpired: boolean
+  readonly onSessionRenewed: () => void
   readonly formError: string | null
   readonly run: RunState
   readonly onChange: (patch: Partial<CorrelationForm>) => void
@@ -362,8 +364,9 @@ function CorrelationPanel({
   catalog,
   related,
   values,
-  token,
-  onTokenChange,
+  session,
+  sessionExpired,
+  onSessionRenewed,
   formError,
   run,
   onChange,
@@ -374,6 +377,7 @@ function CorrelationPanel({
 }: CorrelationPanelProps) {
   const eligibility = captureValidationEligibility(detail)
   const running = run.status === 'running'
+  const authenticated = session.status === 'authenticated'
   const selectedRulebook =
     catalog.status === 'ready'
       ? (catalog.rulebooks.find((rulebook) => rulebook.id === values.rulebookId) ?? null)
@@ -517,22 +521,14 @@ function CorrelationPanel({
               </select>
             </div>
 
-            <div className="field capture-validation-token">
-              <label htmlFor="capture-token">Provider token</label>
-              <input
-                id="capture-token"
-                type="password"
-                autoComplete="off"
-                spellCheck={false}
-                value={token}
-                onChange={(event) => onTokenChange(event.target.value)}
-                aria-describedby="capture-token-hint"
+            {authenticated ? null : (
+              <SignInRequiredNotice
+                variant="inline"
+                title="Sign in to record a validation"
+                message="Recording a correlation against a pinned rulebook version needs the configured administrator session. The capture explorer stays public."
+                onNavigate={onNavigate}
               />
-              <p className="field-hint" id="capture-token-hint">
-                Required to record a correlation. Sent only in the Authorization header; held in app
-                memory for this page session and never written to storage or the URL.
-              </p>
-            </div>
+            )}
 
             <div className="field capture-validation-submit">
               <button
@@ -540,6 +536,7 @@ function CorrelationPanel({
                 className="button button--primary"
                 onClick={onSubmit}
                 disabled={
+                  !authenticated ||
                   running ||
                   related.status !== 'ready' ||
                   values.rulebookId === '' ||
@@ -563,6 +560,14 @@ function CorrelationPanel({
                 </div>
               ) : null}
             </div>
+
+            {sessionExpired ? (
+              <SessionRenewalForm
+                session={session}
+                onRenewed={onSessionRenewed}
+                title="Sign in again to record the validation"
+              />
+            ) : null}
           </div>
         </>
       )}
@@ -587,8 +592,7 @@ export function CaptureDetailPage({
   api,
   catalogApi,
   captureId,
-  token,
-  onTokenChange,
+  session,
   onNavigate,
 }: CaptureDetailPageProps) {
   const [state, setState] = useState<DetailState>({ status: 'loading' })
@@ -599,6 +603,7 @@ export function CaptureDetailPage({
   const [relatedReloadToken, setRelatedReloadToken] = useState(0)
   const [values, setValues] = useState<CorrelationForm>(EMPTY_FORM)
   const [formError, setFormError] = useState<string | null>(null)
+  const [sessionExpired, setSessionExpired] = useState(false)
   const [run, setRun] = useState<RunState>({ status: 'idle' })
   const runController = useRef<AbortController | null>(null)
 
@@ -739,8 +744,11 @@ export function CaptureDetailPage({
       )
       return
     }
-    if (token.trim() === '') {
-      setFormError('A provider token is required to record a correlation.')
+    const csrfToken =
+      session.status === 'authenticated' ? (session.session?.csrfToken ?? null) : null
+    if (csrfToken === null) {
+      setSessionExpired(true)
+      setFormError('Sign in again to record a correlation.')
       return
     }
     runController.current?.abort()
@@ -749,7 +757,7 @@ export function CaptureDetailPage({
     setFormError(null)
     setRun({ status: 'running' })
     api
-      .correlateCapture(captureId, values, token.trim(), controller.signal)
+      .correlateCapture(captureId, values, csrfToken, controller.signal)
       .then(() => api.getCapture(captureId, controller.signal))
       .then((detail) => {
         if (!controller.signal.aborted) {
@@ -761,9 +769,12 @@ export function CaptureDetailPage({
         if (controller.signal.aborted || isAbortError(error)) {
           return
         }
+        if (error instanceof CatalogApiError && (error.status === 401 || error.status === 403)) {
+          setSessionExpired(true)
+        }
         setRun({ status: 'error', message: errorMessage(error, 'The validation request failed.') })
       })
-  }, [api, captureId, values, token, applyDetail])
+  }, [api, captureId, values, session, applyDetail])
 
   const notFoundAction = useCallback(() => onNavigate(CAPTURES_PATH), [onNavigate])
 
@@ -856,8 +867,12 @@ export function CaptureDetailPage({
                 catalog={catalog}
                 related={related}
                 values={values}
-                token={token}
-                onTokenChange={onTokenChange}
+                session={session}
+                sessionExpired={sessionExpired}
+                onSessionRenewed={() => {
+                  setSessionExpired(false)
+                  setRun({ status: 'idle' })
+                }}
                 formError={formError}
                 run={run}
                 onChange={handleChange}

@@ -4,6 +4,7 @@ import { AxeBuilder } from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
 import { AUTHORITY_TOKEN_FIXTURE, EDITOR_TOKEN_FIXTURE } from './fixtures'
+import { signInAsAdmin } from './session'
 
 /**
  * Browser tests for the rulebook draft editor against the real application.
@@ -40,12 +41,9 @@ async function openDraftEditor(page: Page, name: string): Promise<string> {
   return rulebook.id
 }
 
-async function fillToken(page: Page): Promise<void> {
-  await page.getByLabel('Provider bearer token').fill(providerToken())
-}
-
 test.describe('rulebook draft editor against the real API', () => {
   test('shows live validation findings while the draft JSON changes', async ({ page }) => {
+    await signInAsAdmin(page)
     await openDraftEditor(page, 'Payment Account Rulebook')
 
     // The seeded draft has a format but no schema reference yet: the real
@@ -81,13 +79,13 @@ test.describe('rulebook draft editor against the real API', () => {
     await expect(page.getByRole('button', { name: 'Save draft' })).toBeDisabled()
   })
 
-  test('persists an authorized draft edit and does not change a published snapshot', async ({
+  test('persists an authorized session draft edit and does not change a published snapshot', async ({
     page,
   }) => {
+    await signInAsAdmin(page)
     const draftId = await openDraftEditor(page, 'Payment Account Rulebook')
     const description = `Edited by the browser suite ${Date.now()}`
 
-    await fillToken(page)
     await page.getByLabel('Description').fill(description)
     await expect(page.getByText(/[12] warnings? found\./)).toBeVisible()
     await page.getByRole('button', { name: 'Save draft' }).click()
@@ -141,6 +139,7 @@ test.describe('rulebook draft editor against the real API', () => {
   })
 
   test('refuses to edit a published rulebook through the API and the UI', async ({ page }) => {
+    await signInAsAdmin(page)
     const published = await rulebookByName(page, 'Mobile Driving Licence Rulebook')
     expect(published.status).toBe('published')
 
@@ -161,11 +160,11 @@ test.describe('rulebook draft editor against the real API', () => {
   })
 
   test('creates a new rulebook with an empty source URL and opens its editor', async ({ page }) => {
+    await signInAsAdmin(page)
     const name = `Created by the browser suite ${Date.now()}`
 
     await page.goto('/rulebooks/new')
     await page.getByLabel('Name').fill(name)
-    await fillToken(page)
     await page.getByRole('button', { name: 'Create draft' }).click()
 
     await expect(page).toHaveURL(/\/rulebooks\/[0-9a-f-]+\/edit$/)
@@ -182,6 +181,7 @@ test.describe('rulebook draft editor against the real API', () => {
   })
 
   test('renders the new-rulebook editor without creating anything', async ({ page }) => {
+    await signInAsAdmin(page)
     const before = await page.request.get('/api/v1/rulebooks?limit=100')
     const beforeTotal = ((await before.json()) as { pagination: { total: number } }).pagination
       .total
@@ -199,6 +199,7 @@ test.describe('rulebook draft editor against the real API', () => {
   test('has no detectable accessibility violations and fits a narrow viewport', async ({
     page,
   }) => {
+    await signInAsAdmin(page)
     await page.goto('/rulebooks/new')
 
     const results = await new AxeBuilder({ page }).analyze()
@@ -217,5 +218,38 @@ test.describe('rulebook draft editor against the real API', () => {
       () => document.documentElement.scrollWidth > window.innerWidth + 1,
     )
     expect(overflows).toBe(false)
+  })
+
+  test('sends an anonymous author to sign in and keeps the public catalogue readable', async ({
+    page,
+  }) => {
+    await page.goto('/rulebooks/new')
+    await expect(page.getByRole('heading', { name: 'Sign in to author rulebooks' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+      'href',
+      '/login?next=%2Frulebooks%2Fnew',
+    )
+    await expect(page.getByLabel('Name')).toHaveCount(0)
+
+    await page.goto('/')
+    await expect(page.getByRole('heading', { name: 'Rulebook catalog' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'New rulebook' })).toHaveCount(0)
+    await expect(page.locator('tbody tr').first()).toBeVisible()
+  })
+
+  test('preserves unsaved editor text when the session expires on save', async ({
+    page,
+    context,
+  }) => {
+    await signInAsAdmin(page)
+    await openDraftEditor(page, 'Payment Account Rulebook')
+
+    const description = `Expiry keeps these edits ${Date.now()}`
+    await page.getByLabel('Description').fill(description)
+    await context.clearCookies()
+    await page.getByRole('button', { name: 'Save draft' }).click()
+
+    await expect(page.getByRole('heading', { name: 'Sign in again' })).toBeVisible()
+    await expect(page.getByLabel('Description')).toHaveValue(description)
   })
 })

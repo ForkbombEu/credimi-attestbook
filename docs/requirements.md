@@ -30,11 +30,11 @@ split from the closed duplicates #15–#19.
 | --- | --- | --- | --- |
 | FR-001 | Rulebook management: multiple providers, stable identity, metadata, provenance, digests | Phase 1: #28, #29, #37 | Internal metadata kept out of standards documents |
 | FR-002 | Versioning: draft/published/historical, immutable published artifacts, version-specific validation, digest verification | Phase 1: #29 | Content digest over exact stored bytes (D-6) |
-| FR-003 | Provider management, ownership and publication authority | Phase 1: #28, #35, #88, #89 | Provisional product auth only; TS11 catalogue auth is unspecified (D-10). #88 adds an optional environment-configured administrator browser session bound to an existing provider, without minting a bearer token. #89 makes that session a second transport for the existing protected write routes through the same trusted provider actor, with a session-bound CSRF token and unchanged ownership and audit semantics |
+| FR-003 | Provider management, ownership and publication authority | Phase 1: #28, #35, #88, #89; UI: #91 | Provisional product auth only; TS11 catalogue auth is unspecified (D-10). #88 adds an optional environment-configured administrator browser session bound to an existing provider, without minting a bearer token. #89 makes that session a second transport for the existing protected write routes through the same trusted provider actor, with a session-bound CSRF token and unchanged ownership and audit semantics. #91 moves the browser editor and protected capture UI actions to that session and keeps bearer authentication for headless clients |
 | FR-004 | External rulebook import: URL/JSON, preview, structural validation, compatibility, provenance, safe re-import | Phase 1: #30, #31, #36 | Adapter-based; no assumed full TS11 conformance (R4.4) |
 | FR-005 | Catalog synchronization: conditional fetch, idempotency, change detection, conflict reporting, availability | Phase 1 partial: #31; full sync later | Scheduled sync and source diagnostics are not an MVP dependency |
 | FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #43 (discovery, association, ambiguity reporting) | Implemented in #43; manual mapping and persistence remain later slices; never authoritative for rulebooks |
-| FR-007 | Rulebook editor and authoring workflow | Phase 2: #40 (working-copy editor and live validation), #41 (lifecycle/diff) | UI-003; not Phase 1; publication remains #42 |
+| FR-007 | Rulebook editor and authoring workflow | Phase 2: #40 (working-copy editor and live validation), #41 (lifecycle/diff), #91 (session-authenticated browser writes) | UI-003; not Phase 1; publication remains #42 |
 | FR-008 | Publication of validated, versioned, reproducible artifacts with provenance/integrity | Phase 1 subset: #29; full workflow Phase 2: #42 | Where signing applies, use OWF behind the JOSE policy |
 | FR-009 | Reusable validation API with structured results and evidence | Phase 1: #32, #33 | SD-JWT VC structural scope; per-dimension evidence and limitations added in #33 |
 | FR-010 | Eight independent validation dimensions | Phase 1: #33 | No dimension PASS without execution; applicability table in `docs/validation.md` §2 |
@@ -57,7 +57,7 @@ split from the closed duplicates #15–#19.
 | --- | --- | --- |
 | UI-001 | Rulebook catalog with search/filter, provider, version, status, source, compatibility | Phase 1: #36 |
 | UI-002 | Rulebook details, attestation types, schema references, compatibility, version history, provenance | Phase 1: #37 |
-| UI-003 | Rulebook editor, live validation, diff, draft management, publication | Phase 2: #40 (editor and live validation), #41 (diff/lifecycle), #42 (publication) |
+| UI-003 | Rulebook editor, live validation, diff, draft management, publication | Phase 2: #40 (editor and live validation), #41 (diff/lifecycle), #42 (publication), #91 (session-gated writes and expiry handling) |
 | UI-004 | Import interface: URL/file, preview, diagnostics, conflict resolution, sync settings | Phase 2+ follow-up (not in #40–#42); API import lands in #30/#31 |
 | UI-005 | Credential playground: input/upload, rulebook/type selection, validation, violations, export | Phase 1: #38 |
 | UI-006 | Capture explorer (mock-backed until real contracts exist) | Phase 4: #48 (implemented as a clearly labelled mock-backed `/captures` explorer) |

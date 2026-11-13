@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 
 import {
   createHttpCaptureApi,
@@ -15,7 +15,7 @@ import { PlaygroundPage } from './PlaygroundPage'
 import { RulebookDetailPage } from './RulebookDetailPage'
 import { RulebookDraftEditorPage } from './RulebookDraftEditorPage'
 import { useRoute } from './router'
-import { SessionProvider } from './session'
+import { SessionProvider, useSession } from './session'
 
 const defaultApi = createHttpCatalogApi()
 const defaultValidator = createHttpValidationApi()
@@ -33,13 +33,9 @@ export function App() {
 
 function AppRoutes() {
   const { route, navigate } = useRoute()
-  /**
-   * The provider bearer token lives only in this component's memory for the
-   * current page session. It is never persisted to storage, the URL or a
-   * rendered document, and navigating between the catalog and the editor keeps
-   * it available until a full page reload.
-   */
-  const [editorToken, setEditorToken] = useState('')
+  // The administrator session is the only credential the protected views use;
+  // there is no bearer-token state to carry between routes.
+  const session = useSession()
 
   useEffect(() => {
     if (route.name === 'catalog') {
@@ -62,29 +58,20 @@ function AppRoutes() {
         api={defaultCaptures}
         catalogApi={defaultApi}
         captureId={route.captureId}
-        token={editorToken}
-        onTokenChange={setEditorToken}
+        session={session}
         onNavigate={navigate}
       />
     )
   }
   if (route.name === 'editor-new') {
-    return (
-      <RulebookDraftEditorPage
-        api={defaultEditor}
-        token={editorToken}
-        onTokenChange={setEditorToken}
-        onNavigate={navigate}
-      />
-    )
+    return <RulebookDraftEditorPage api={defaultEditor} session={session} onNavigate={navigate} />
   }
   if (route.name === 'editor') {
     return (
       <RulebookDraftEditorPage
         api={defaultEditor}
         rulebookId={route.rulebookId}
-        token={editorToken}
-        onTokenChange={setEditorToken}
+        session={session}
         onNavigate={navigate}
       />
     )

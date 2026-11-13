@@ -18,6 +18,7 @@ import { VersionComparisonPanel } from './components/VersionComparisonPanel'
 import type { RulebookDetailSnapshot } from './detail'
 import { loadRulebookDetail } from './detail'
 import { AppLink, CATALOG_PATH, rulebookEditorPath } from './router'
+import { useSession } from './session'
 
 interface RulebookDetailPageProps {
   readonly api: CatalogApi
@@ -146,7 +147,14 @@ function DetailContent({
   readonly snapshot: RulebookDetailSnapshot
   readonly onNavigate: (path: string) => void
 }) {
+  const session = useSession()
   const { rulebook, versions } = snapshot
+  // Only the signed-in administrator bound to the owning provider is offered
+  // the editor; the server independently enforces the same ownership rule.
+  const canEditDraft =
+    session.status === 'authenticated' &&
+    session.session !== null &&
+    session.session.provider.id === rulebook.providerId
   return (
     <>
       <header className="detail-heading">
@@ -166,7 +174,7 @@ function DetailContent({
         </p>
         <div className="detail-actions">
           <VersionSummary snapshot={snapshot} />
-          {rulebook.publicationStatus === 'draft' ? (
+          {rulebook.publicationStatus === 'draft' && canEditDraft ? (
             <AppLink
               className="button button--ghost"
               href={rulebookEditorPath(rulebook.id)}
