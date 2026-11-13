@@ -337,9 +337,10 @@ merged into them.
 
 ## 7. CI and quality gates
 
-CI is GitHub Actions, with versions pinned and dependencies installed from the frozen
-lockfile. The repository requires no deployment job; nothing in CI publishes an image or
-touches production.
+CI is GitHub Actions, with versions pinned in the committed `mise.toml` and dependencies
+installed from the frozen lockfile. Every job installs Bun and Node from `mise.toml` with
+`jdx/mise-action`, so CI and local development use the same toolchain. The repository
+requires no deployment job; nothing in CI publishes an image or touches production.
 
 | Job | What it does | Introduced by |
 | --- | --- | --- |
@@ -349,7 +350,7 @@ touches production.
 | `docker` | Build image, start container, wait for health, run a catalog-page and API round-trip, stop | #26, extended by #36 |
 | `docs` | `node scripts/check-docs.mjs` (five documents, relative links, cross-references) | #25, wired into main CI by #26 |
 | `openapi` | Validate the generated OpenAPI 3.1 document and contract tests | #34 |
-| `owf-compat` | Re-run the Phase 0 OWF probe on Node 22 and Bun 1.3.1 against the pinned lockfile | #26 |
+| `owf-compat` | Re-run the Phase 0 OWF probe on Node 22.23.4 and Bun 1.3.1 from `mise.toml` against the pinned lockfile | #26 |
 | `ui` | UI typecheck, component/accessibility tests and Playwright end-to-end tests against the real API | #36, extended by #37–#38 |
 
 Rules:
@@ -359,9 +360,12 @@ Rules:
 - A test that is expected to fail or is not executed is reported as such; skipped tests do
   not count as coverage of a requirement (AC-17).
 - The agent verifies all checks are green and the head commit is the reviewed commit before
-  merging. It does not change branch protection or repository settings. #26 verifies whether
-  the workflow checks are required on `main`, reports any gap in its PR, and the repository
-  owner opens the required-settings issue (the agent does not open issues as itself).
+  merging. It does not change branch protection or repository settings. #26/#96 verify whether
+  the workflow checks are required on `main` and report any gap for the repository owner to
+  configure. At the time of #96, `main` reported `protected=false`, the branch-protection
+  endpoint returned 404 and the repository had no rulesets, while the agent account had
+  `maintain` but not `admin` permission; the gap is documented instead of bypassed, and the
+  workflow's job names (and therefore check names) are unchanged.
 - The docs check is deliberately dependency-free and runs under plain Node so it also works
   before the application scaffold exists.
 

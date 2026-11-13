@@ -500,7 +500,7 @@ versions the Phase 0 audit exercised. `src/owf.test.ts` executes the real packag
 and asserts the manifest, the installed package and transitive versions, and its structural
 validation behaviour. The Phase 0 audit probe remains reproducible from
 [`research/owf-audit/`](research/owf-audit/README.md); the `owf-compat` CI job re-runs it on
-Node.js 22 and Bun 1.3.1. Any upgrade must repeat the audit described in
+Node.js 22.23.4 and Bun 1.3.1 from `mise.toml`. Any upgrade must repeat the audit described in
 [`docs/standards.md`](docs/standards.md).
 
 The validation engine uses the pinned `@sd-jwt/core` 0.24.1 and `@sd-jwt/sd-jwt-vc` 0.24.1
@@ -526,9 +526,11 @@ Application code still uses `strict`, `exactOptionalPropertyTypes` and
 | `ui`                | UI typecheck, component/axe tests and Playwright browser flows       |
 | `acceptance`        | Phase 1 end-to-end workflow and dimension-aware evidence export      |
 | `docs`              | Documentation consistency and the checker's own tests                |
-| `owf compatibility` | Phase 0 OWF probe on Node.js 22 and Bun 1.3.1                        |
+| `owf compatibility` | Phase 0 OWF probe on Node.js 22.23.4 and Bun 1.3.1 from `mise.toml`  |
 
-No job deploys, publishes an image or needs a secret or a live external service.
+No job deploys, publishes an image or needs a secret or a live external service. Every job
+installs Bun and Node from the committed `mise.toml` with `jdx/mise-action`, so CI runs the
+same pinned toolchain as local `mise`.
 
 ## Repository layout
 
