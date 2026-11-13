@@ -7,8 +7,8 @@
 //   assess publication readiness                 GET  .../versions/{v}/publication-readiness
 //   publish a ready draft version                POST .../versions/{v}/publish
 //
-// The provider bearer token stays in the parent editor's memory; this panel
-// only forwards it to the authenticated writes. Publish is enabled only after
+// The administrator session's CSRF token comes from the parent editor; this
+// panel only forwards it to the session-authenticated writes. Publish is enabled only after
 // the server's readiness checks for that exact draft version report ready, so a
 // stale or invalid snapshot is not published from the UI by accident. Conflicts
 // (stale snapshot, duplicate label, immutable version) surface the server's
@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
 import type { EditorApi } from '../api'
-import { isAbortError } from '../api'
+import { isAbortError, isSessionAuthError } from '../api'
 import { formatDate } from '../catalog'
 import { formatDigest, versionsNewestFirst } from '../detail'
 import type {
@@ -33,10 +33,13 @@ import { LoadingState } from './CatalogStates'
 interface DraftLifecyclePanelProps {
   readonly api: EditorApi
   readonly rulebookId: string
-  readonly token: string
+  /** Live session CSRF token; `null` when the administrator is signed out. */
+  readonly csrfToken: string | null
   readonly publicationStatus: PublicationStatus
   /** Reports the rulebook status a transition produced, without a reload. */
   readonly onChanged: (publicationStatus: PublicationStatus) => void
+  /** Tells the editor to show its inline renewal prompt after a 401/403. */
+  readonly onSessionExpired?: () => void
 }
 
 type VersionsState =
@@ -58,9 +61,10 @@ function message(error: unknown, fallback: string): string {
 export function DraftLifecyclePanel({
   api,
   rulebookId,
-  token,
+  csrfToken,
   publicationStatus,
   onChanged,
+  onSessionExpired,
 }: DraftLifecyclePanelProps) {
   const [state, setState] = useState<VersionsState>({ status: 'loading' })
   const [reloadToken, setReloadToken] = useState(0)
@@ -94,28 +98,34 @@ export function DraftLifecyclePanel({
 
   const reloadVersions = useCallback(() => setReloadToken((value) => value + 1), [])
 
-  /** Returns the trimmed token or reports the missing credential. */
-  const requireToken = useCallback((): string | null => {
-    const trimmed = token.trim()
-    if (trimmed === '') {
-      setError('Enter the owning provider’s bearer token to change the draft lifecycle.')
+  /** Returns the live session CSRF token or reports the missing session. */
+  const requireCsrfToken = useCallback((): string | null => {
+    if (csrfToken === null) {
+      setError('Sign in again to change the draft lifecycle.')
+      onSessionExpired?.()
       return null
     }
-    return trimmed
-  }, [token])
+    return csrfToken
+  }, [csrfToken, onSessionExpired])
 
-  const runAction = useCallback(async (key: string, action: () => Promise<void>) => {
-    setBusy(key)
-    setError(null)
-    setStatusMessage(null)
-    try {
-      await action()
-    } catch (caught) {
-      setError(message(caught, 'The lifecycle action failed.'))
-    } finally {
-      setBusy(null)
-    }
-  }, [])
+  const runAction = useCallback(
+    async (key: string, action: () => Promise<void>) => {
+      setBusy(key)
+      setError(null)
+      setStatusMessage(null)
+      try {
+        await action()
+      } catch (caught) {
+        if (isSessionAuthError(caught)) {
+          onSessionExpired?.()
+        }
+        setError(message(caught, 'The lifecycle action failed.'))
+      } finally {
+        setBusy(null)
+      }
+    },
+    [onSessionExpired],
+  )
 
   const handleCreate = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -124,12 +134,12 @@ export function DraftLifecyclePanel({
       setError('Enter a version label such as 1.0.')
       return
     }
-    const accessToken = requireToken()
-    if (accessToken === null) {
+    const sessionToken = requireCsrfToken()
+    if (sessionToken === null) {
       return
     }
     void runAction('create', async () => {
-      const created = await api.createVersion(rulebookId, label, accessToken)
+      const created = await api.createVersion(rulebookId, label, sessionToken)
       setVersionInput('')
       setReadiness(null)
       setStatusMessage(
@@ -141,12 +151,12 @@ export function DraftLifecyclePanel({
   }
 
   const handleRefresh = (version: string) => {
-    const accessToken = requireToken()
-    if (accessToken === null) {
+    const sessionToken = requireCsrfToken()
+    if (sessionToken === null) {
       return
     }
     void runAction(`refresh:${version}`, async () => {
-      const refreshed = await api.refreshVersion(rulebookId, version, accessToken)
+      const refreshed = await api.refreshVersion(rulebookId, version, sessionToken)
       setReadiness(null)
       setStatusMessage(
         `Draft version ${refreshed.version} refreshed at ${formatDigest(refreshed.contentDigest)}.`,
@@ -171,12 +181,12 @@ export function DraftLifecyclePanel({
       setError('Publication readiness has failed checks; resolve them before publishing.')
       return
     }
-    const accessToken = requireToken()
-    if (accessToken === null) {
+    const sessionToken = requireCsrfToken()
+    if (sessionToken === null) {
       return
     }
     void runAction(`publish:${version}`, async () => {
-      const published = await api.publishVersion(rulebookId, version, accessToken)
+      const published = await api.publishVersion(rulebookId, version, sessionToken)
       setReadiness(null)
       setStatusMessage(
         `Version ${published.version} is now published and immutable. Any earlier published version became historical.`,

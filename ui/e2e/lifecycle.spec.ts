@@ -4,6 +4,7 @@ import { AxeBuilder } from '@axe-core/playwright'
 import { expect, test, type APIRequestContext, type Page } from '@playwright/test'
 
 import { EDITOR_TOKEN_FIXTURE } from './fixtures'
+import { signInAsAdmin } from './session'
 
 /**
  * Browser tests for the draft lifecycle and version comparison against the real
@@ -104,9 +105,9 @@ test.describe('draft lifecycle against the real API', () => {
     const name = `Lifecycle Rulebook ${Date.now()}`
     const rulebookId = await createRulebook(page.request, token, content(name))
 
+    await signInAsAdmin(page)
     await page.goto(`/rulebooks/${rulebookId}/edit`)
     await expect(page.getByRole('heading', { name: `Edit ${name} draft`, level: 1 })).toBeVisible()
-    await page.getByLabel('Provider bearer token').fill(token)
 
     const panel = lifecyclePanel(page)
     await expect(

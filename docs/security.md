@@ -135,6 +135,16 @@ API token in the session or changes the bearer checks above.
   publication authority, metadata, password hash or bearer token. The browser stores no
   session identifier or password in `localStorage`/`sessionStorage`; the cookie is the only
   client-side credential, and the CSRF token only accompanies it.
+- **Browser UI transport (issue #91).** The catalogue, rulebook detail, playground and
+  capture explorer stay anonymous. The rulebook editor's create/save and lifecycle actions
+  and the protected capture correlation use only the session cookie and `X-CSRF-Token`; the
+  UI never asks for, stores or sends a provider bearer token for them. An anonymous deep link
+  renders a sign-in panel whose validated same-origin `next` target returns to that view. A
+  `401` or a `403 csrf_failed` from a write keeps the editor or correlation form mounted and
+  requests re-authentication inline rather than discarding the unsaved state; a `403
+  forbidden` ownership refusal shows the server's message instead, because re-signing in
+  cannot grant access to another provider's resource. Headless clients keep the bearer
+  transport described above.
 
 ## 3. Authorization and provider ownership
 

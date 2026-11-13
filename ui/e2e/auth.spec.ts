@@ -26,7 +26,7 @@ test.describe('administrator browser login against the real API', () => {
     await expect(page).toHaveURL('/')
     await expect(page.getByRole('heading', { name: 'Rulebook catalog' })).toBeVisible()
     const identity = page.locator('.site-session__provider')
-    await expect(identity).toHaveText('E2E Administrator')
+    await expect(identity).toHaveText('Example Issuer')
     await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible()
 
     // The session cookie is the only credential the browser holds.
@@ -39,7 +39,7 @@ test.describe('administrator browser login against the real API', () => {
     // A reload restores the session from GET /api/v1/auth/me.
     await page.reload()
     await expect(page.getByRole('heading', { name: 'Rulebook catalog' })).toBeVisible()
-    await expect(identity).toHaveText('E2E Administrator')
+    await expect(identity).toHaveText('Example Issuer')
     await expect(page.getByRole('button', { name: 'Log out' })).toBeVisible()
 
     await page.getByRole('button', { name: 'Log out' }).click()

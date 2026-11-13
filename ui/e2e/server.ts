@@ -46,12 +46,10 @@ const authority = provisionProvider(database, {
   name: 'Digital Identity Authority',
   publicationAuthority: 'digital-identity-authority',
 })
-// The disposable administrator exists only for the browser login tests. Its
-// password hash is generated for this process and is never a committed secret.
-const administrator = provisionProvider(database, {
-  name: 'E2E Administrator',
-  publicationAuthority: 'e2e-administrator',
-})
+// The disposable administrator exists only for the browser tests. It is bound
+// to the seeded `Example Issuer` provider so the rulebook editor can exercise
+// provider-scoped writes through the session. Its password hash is generated
+// for this process and is never a committed secret.
 const adminAuth = new AdminAuth({
   database,
   registry,
@@ -59,7 +57,7 @@ const adminAuth = new AdminAuth({
     status: 'configured',
     username: E2E_ADMIN_USERNAME,
     passwordHash: await Bun.password.hash(E2E_ADMIN_PASSWORD, { algorithm: 'argon2id' }),
-    providerId: administrator.provider.id,
+    providerId: issuer.provider.id,
   },
 })
 

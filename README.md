@@ -176,7 +176,7 @@ publication; authenticated import preview and import; authenticated issuer metad
 discovery; public issuer fixture generation; public verifier constraints with partial
 OpenID4VP DCQL mappings; and credential validation. Successful responses use
 a `{ "data": ... }` envelope and failures use a stable `{ "error": { "code", "message" } }`
-envelope. Writes and the import preview require a provider bearer token.
+envelope. Writes and the import preview require a provider bearer token, or the administrator browser session for the rulebook editor and capture-correlation UI.
 
 `bun run openapi:check` validates the generated OpenAPI 3.1 document against the official
 OpenAPI 3.1 schema, and the contract tests compare the documented operations with the routes
@@ -426,7 +426,9 @@ AttestBook has a minimal single-administrator login for the browser. It is optio
 separate from the provider bearer-token API: login never creates a provider, never mints or
 returns a provider token and never stores one in the session. The public catalogue,
 validation and download reads stay anonymous, and existing `Authorization: Bearer` writes
-keep working unchanged.
+keep working unchanged. The browser rulebook editor, its lifecycle actions and the protected
+capture correlation use this session cookie plus the session-bound `X-CSRF-Token`; they no
+longer ask for a provider bearer token.
 
 Set the following three variables together; a partial group is invalid and the login
 answers `503 auth_unavailable` while the rest of the server keeps working. The administrator

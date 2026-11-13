@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import type { EditorApi } from './api'
-import { CatalogApiError, isAbortError } from './api'
+import { CatalogApiError, isAbortError, isSessionAuthError } from './api'
 import { SeverityBadge } from './components/Badges'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import { DraftLifecyclePanel } from './components/DraftLifecyclePanel'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { SessionRenewalForm, SignInRequiredNotice } from './components/SessionPrompt'
 import {
   describeDiagnosticPath,
   documentFromDraft,
@@ -18,14 +19,15 @@ import {
   type DraftMetadata,
 } from './draft'
 import { AppLink, CATALOG_PATH, rulebookEditorPath, rulebookPath } from './router'
+import type { SessionController } from './session'
 import type { DraftRulebook, DraftValidationReport } from './types'
 
 interface RulebookDraftEditorPageProps {
   readonly api: EditorApi
   /** Empty for a new rulebook; set when editing an existing draft. */
   readonly rulebookId?: string
-  readonly token: string
-  readonly onTokenChange: (token: string) => void
+  /** Administrator session state; writes use its CSRF token, never a bearer. */
+  readonly session: SessionController
   readonly onNavigate: (path: string) => void
 }
 
@@ -81,8 +83,7 @@ function DiagnosticsTable({ report }: { readonly report: DraftValidationReport }
 export function RulebookDraftEditorPage({
   api,
   rulebookId,
-  token,
-  onTokenChange,
+  session,
   onNavigate,
 }: RulebookDraftEditorPageProps) {
   const creating = rulebookId === undefined
@@ -104,6 +105,10 @@ export function RulebookDraftEditorPage({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [sessionSeen, setSessionSeen] = useState(session.status === 'authenticated')
+  const [dirty, setDirty] = useState(false)
+  const [sessionExpired, setSessionExpired] = useState(false)
+  const [renewedNotice, setRenewedNotice] = useState<string | null>(null)
   const pendingValidation = useRef<AbortController | null>(null)
 
   const loadDraft = useCallback(
@@ -128,6 +133,19 @@ export function RulebookDraftEditorPage({
   )
 
   useEffect(() => {
+    if (session.status === 'authenticated') {
+      setSessionSeen(true)
+    }
+  }, [session.status])
+
+  useEffect(() => {
+    // The protected view does not read or render a draft before the first
+    // authenticated session. Latching that fact (rather than depending on the
+    // current status) means signing out and back in for an expired session
+    // never re-fetches and overwrites the unsaved working copy.
+    if (!sessionSeen) {
+      return
+    }
     if (rulebookId === undefined) {
       setState({ status: 'ready', draft: null })
       return
@@ -151,12 +169,18 @@ export function RulebookDraftEditorPage({
       })
     })
     return () => controller.abort()
-  }, [loadDraft, reloadToken, rulebookId])
+  }, [loadDraft, reloadToken, rulebookId, sessionSeen])
 
   const draft = state.status === 'ready' ? state.draft : null
   const readOnly = draft !== null && draft.publicationStatus !== 'draft'
   const title = creating ? 'New rulebook draft' : 'Rulebook draft editor'
   useDocumentTitle(title)
+
+  const authenticated = session.status === 'authenticated'
+  const csrfToken = authenticated ? (session.session?.csrfToken ?? null) : null
+  /** Keep an unsaved form mounted across an expiry or a sign-out. */
+  const keepUnsavedForm = dirty || sessionExpired
+  const needsSignIn = !authenticated
 
   const parsed = useMemo(() => parseDraftDocument(jsonText), [jsonText])
   const metadataErrors = useMemo(() => validateMetadata(metadata), [metadata])
@@ -210,6 +234,7 @@ export function RulebookDraftEditorPage({
 
   const updateMetadata = (field: keyof DraftMetadata, value: string) => {
     setMetadata((current) => ({ ...current, [field]: value }))
+    setDirty(true)
     setSavedAt(null)
     setSaveError(null)
   }
@@ -251,8 +276,9 @@ export function RulebookDraftEditorPage({
       setSaveError('Only a draft rulebook can be edited.')
       return
     }
-    if (token.trim() === '') {
-      setSaveError('Enter the owning provider’s bearer token to save this draft.')
+    if (csrfToken === null) {
+      setSessionExpired(true)
+      setSaveError('Sign in again to save this draft; your edits stay on this page.')
       return
     }
     if (validation !== null && !validation.saveable) {
@@ -264,14 +290,21 @@ export function RulebookDraftEditorPage({
     setSaving(true)
     try {
       if (creating) {
-        const created = await api.createDraft(request, token)
+        const created = await api.createDraft(request, csrfToken)
         onNavigate(rulebookEditorPath(created.id))
         return
       }
-      const saved = await api.replaceDraft(rulebookId, request, token)
+      const saved = await api.replaceDraft(rulebookId, request, csrfToken)
       setState({ status: 'ready', draft: saved })
+      setDirty(false)
+      setSessionExpired(false)
+      setRenewedNotice(null)
       setSavedAt(new Date().toISOString())
     } catch (error) {
+      if (isSessionAuthError(error)) {
+        setSessionExpired(true)
+        setRenewedNotice(null)
+      }
       setSaveError(
         error instanceof Error && error.message !== ''
           ? error.message
@@ -293,16 +326,50 @@ export function RulebookDraftEditorPage({
           : 'Fix the JSON before validation can run.'
         : validationSummary(validation.diagnostics)
   const canSave =
+    authenticated &&
     !readOnly &&
     !saving &&
     parseError === null &&
     Object.keys(metadataErrors).length === 0 &&
     (validation === null || validation.saveable)
 
+  if (session.status === 'loading' && !keepUnsavedForm) {
+    return (
+      <div className="app-shell">
+        <SkipLink href="#main-content">Skip to the draft editor</SkipLink>
+        <SiteHeader section="Rulebook editor" onNavigate={onNavigate} />
+        <main className="page" id="main-content">
+          <LoadingState
+            title="Checking your administrator session…"
+            detail="The editor needs a signed-in administrator."
+          />
+        </main>
+        <SiteFooter />
+      </div>
+    )
+  }
+
+  if (needsSignIn && !keepUnsavedForm) {
+    return (
+      <div className="app-shell">
+        <SkipLink href="#main-content">Skip to the draft editor</SkipLink>
+        <SiteHeader section="Rulebook editor" onNavigate={onNavigate} />
+        <main className="page" id="main-content">
+          <SignInRequiredNotice
+            title="Sign in to author rulebooks"
+            message="Creating and editing a rulebook needs the configured administrator session. The catalogue, rulebook details and the validation playground stay available without signing in."
+            onNavigate={onNavigate}
+          />
+        </main>
+        <SiteFooter />
+      </div>
+    )
+  }
+
   if (state.status === 'loading') {
     return (
       <div className="app-shell">
-        <SkipLink href="#editor">Skip to the draft editor</SkipLink>
+        <SkipLink href="#main-content">Skip to the draft editor</SkipLink>
         <SiteHeader section="Rulebook editor" onNavigate={onNavigate} />
         <main className="page" id="main-content">
           <LoadingState title="Loading the draft…" detail="Reading the draft working copy." />
@@ -398,31 +465,24 @@ export function RulebookDraftEditorPage({
             </div>
           )}
 
-          <form onSubmit={handleSubmit} noValidate>
-            <section className="detail-card" aria-labelledby={`${fieldPrefix}-auth-heading`}>
-              <h2 id={`${fieldPrefix}-auth-heading`}>Provider authorization</h2>
-              <p className="field-hint">
-                Draft writes use the owning provider’s bearer token. It is sent only in the
-                Authorization header and kept in memory for this browser session.
-              </p>
-              <div className="field">
-                <label htmlFor={`${fieldPrefix}-token`}>Provider bearer token</label>
-                <input
-                  id={`${fieldPrefix}-token`}
-                  type="password"
-                  autoComplete="off"
-                  spellCheck={false}
-                  value={token}
-                  onChange={(event) => onTokenChange(event.target.value)}
-                  aria-describedby={`${fieldPrefix}-token-hint`}
-                />
-                <p className="field-hint" id={`${fieldPrefix}-token-hint`}>
-                  Never written to the URL, the page or the draft. A missing or non-owning token is
-                  rejected with a clear error on save.
-                </p>
-              </div>
-            </section>
+          {sessionExpired || (needsSignIn && keepUnsavedForm) ? (
+            <SessionRenewalForm
+              session={session}
+              onRenewed={() => {
+                setSessionExpired(false)
+                setRenewedNotice(
+                  'Signed in again. Your edits are preserved; save the draft to store them.',
+                )
+              }}
+            />
+          ) : null}
+          {renewedNotice === null ? null : (
+            <p className="notice" role="status">
+              {renewedNotice}
+            </p>
+          )}
 
+          <form onSubmit={handleSubmit} noValidate>
             <section className="detail-card" aria-labelledby={`${fieldPrefix}-metadata-heading`}>
               <h2 id={`${fieldPrefix}-metadata-heading`}>Rulebook metadata</h2>
               <div className="editor-grid">
@@ -515,6 +575,7 @@ export function RulebookDraftEditorPage({
                   value={jsonText}
                   onChange={(event) => {
                     setJsonText(event.target.value)
+                    setDirty(true)
                     setSavedAt(null)
                     setSaveError(null)
                   }}
@@ -601,9 +662,13 @@ export function RulebookDraftEditorPage({
             <DraftLifecyclePanel
               api={api}
               rulebookId={rulebookId}
-              token={token}
+              csrfToken={csrfToken}
               publicationStatus={draft.publicationStatus}
               onChanged={handleLifecycleChange}
+              onSessionExpired={() => {
+                setSessionExpired(true)
+                setRenewedNotice(null)
+              }}
             />
           )}
         </div>

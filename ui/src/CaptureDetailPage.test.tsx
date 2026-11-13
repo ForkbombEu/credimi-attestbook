@@ -1,5 +1,3 @@
-import { useState } from 'react'
-
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
@@ -8,25 +6,25 @@ import { CatalogApiError, type CaptureExplorerApi, type CatalogApi } from './api
 import { CaptureDetailPage } from './CaptureDetailPage'
 import { makeBoundCaptureDetail, makeCaptureDetail, makeCaptureSummary } from './test/captures'
 import { createFakeApi, makeValidationResult } from './test/fixtures'
+import type { SessionController } from './session'
 import type { CorrelateCaptureRequest } from './types'
 import { expectNoA11yViolations } from './test/a11y'
+import { anonymousSession, fakeSession } from './test/session'
 
 interface HarnessProps {
   readonly api: CaptureExplorerApi
   readonly catalogApi: CatalogApi
   readonly onNavigate: (path: string) => void
-  readonly initialToken: string
+  readonly session: SessionController
 }
 
-function Harness({ api, catalogApi, onNavigate, initialToken }: HarnessProps) {
-  const [token, setToken] = useState(initialToken)
+function Harness({ api, catalogApi, onNavigate, session }: HarnessProps) {
   return (
     <CaptureDetailPage
       api={api}
       catalogApi={catalogApi}
       captureId="mock-capture-capture-issuer-3"
-      token={token}
-      onTokenChange={setToken}
+      session={session}
       onNavigate={onNavigate}
     />
   )
@@ -39,16 +37,11 @@ function renderPage(
     correlateCapture: () => new Promise(() => {}),
   },
   catalogApi: CatalogApi = createFakeApi(),
-  initialToken = '',
+  session: SessionController = fakeSession(),
 ) {
   const onNavigate = vi.fn()
   const view = render(
-    <Harness
-      api={api}
-      catalogApi={catalogApi}
-      onNavigate={onNavigate}
-      initialToken={initialToken}
-    />,
+    <Harness api={api} catalogApi={catalogApi} onNavigate={onNavigate} session={session} />,
   )
   return { ...view, onNavigate }
 }
@@ -243,7 +236,7 @@ describe('capture detail correlation', () => {
     renderPage(api)
 
     await selectCorrelation(user)
-    await user.type(screen.getByLabelText('Provider token'), 'att_test_token')
+    expect(screen.queryByLabelText(/token/i)).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: 'Run validation' }))
 
     expect(correlate.mock.calls[0]?.[0]).toBe('mock-capture-capture-issuer-3')
@@ -252,7 +245,7 @@ describe('capture detail correlation', () => {
       rulebookVersion: '1.0',
       attestationType: 'Person Identification Data',
     })
-    expect(correlate.mock.calls[0]?.[2]).toBe('att_test_token')
+    expect(correlate.mock.calls[0]?.[2]).toBe('csrf-token-value')
     expect(await screen.findByRole('heading', { name: 'Overall result' })).toBeInTheDocument()
     expect(screen.getByText('rulebook-pid')).toBeInTheDocument()
     expect(screen.getByRole('link', { name: 'PID Rulebook' })).toHaveAttribute(
@@ -299,14 +292,13 @@ describe('capture detail correlation', () => {
     renderPage(api)
 
     await selectCorrelation(user)
-    await user.type(screen.getByLabelText('Provider token'), 'att_test_token')
     await user.click(screen.getByRole('button', { name: 'Run validation' }))
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('declared partial redacted')
   })
 
-  test('requires a provider token before sending a correlation request', async () => {
-    const user = userEvent.setup()
+  test('asks an anonymous visitor to sign in before recording a correlation', async () => {
+    window.history.replaceState({}, '', '/captures/mock-capture-capture-issuer-3')
     const correlate = vi.fn()
     const api: CaptureExplorerApi = {
       listCaptures: () =>
@@ -314,32 +306,65 @@ describe('capture detail correlation', () => {
       getCapture: () => Promise.resolve(makeCaptureDetail()),
       correlateCapture: correlate,
     }
-    renderPage(api)
+    renderPage(api, createFakeApi(), anonymousSession())
 
-    await selectCorrelation(user)
-    await user.click(screen.getByRole('button', { name: 'Run validation' }))
-    expect(screen.getByRole('alert')).toHaveTextContent(
-      'A provider token is required to record a correlation.',
+    await screen.findByLabelText('Rulebook')
+    expect(screen.getByText('Sign in to record a validation')).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+      'href',
+      '/login?next=%2Fcaptures%2Fmock-capture-capture-issuer-3',
     )
+    expect(screen.getByRole('button', { name: 'Run validation' })).toBeDisabled()
     expect(correlate).not.toHaveBeenCalled()
   })
 
-  test('shows the safe unauthorized message when the token is rejected', async () => {
+  test('keeps the correlation form after an expired session and offers re-sign-in', async () => {
     const user = userEvent.setup()
     const api: CaptureExplorerApi = {
       listCaptures: () =>
         Promise.resolve({ data: [], pagination: { limit: 100, offset: 0, total: 0 } }),
       getCapture: () => Promise.resolve(makeCaptureDetail()),
       correlateCapture: () =>
-        Promise.reject(new CatalogApiError('A valid bearer token is required.', 401)),
+        Promise.reject(new CatalogApiError('Authentication is required.', 401)),
     }
     renderPage(api)
 
     await selectCorrelation(user)
-    await user.type(screen.getByLabelText('Provider token'), 'att_unknown_token')
     await user.click(screen.getByRole('button', { name: 'Run validation' }))
-    const alert = await screen.findByRole('alert')
-    expect(alert).toHaveTextContent('A valid bearer token is required.')
+
+    expect(
+      await screen.findByRole('heading', { name: 'Sign in again to record the validation' }),
+    ).toBeVisible()
+    expect(screen.getByLabelText('Rulebook version')).toHaveValue('1.0')
+    expect(screen.getByLabelText('Attestation type')).toHaveValue('Person Identification Data')
+  })
+
+  test('reports an ownership 403 without showing a session renewal prompt', async () => {
+    const user = userEvent.setup()
+    const api: CaptureExplorerApi = {
+      listCaptures: () =>
+        Promise.resolve({ data: [], pagination: { limit: 100, offset: 0, total: 0 } }),
+      getCapture: () => Promise.resolve(makeCaptureDetail()),
+      correlateCapture: () =>
+        Promise.reject(
+          new CatalogApiError(
+            'The authenticated provider does not own this resource.',
+            403,
+            'forbidden',
+          ),
+        ),
+    }
+    renderPage(api)
+
+    await selectCorrelation(user)
+    await user.click(screen.getByRole('button', { name: 'Run validation' }))
+
+    expect(
+      await screen.findByText('The authenticated provider does not own this resource.'),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('heading', { name: 'Sign in again to record the validation' }),
+    ).not.toBeInTheDocument()
   })
 
   test('has no detectable accessibility violations with a linked validation', async () => {

@@ -5,6 +5,7 @@
 // messages of the API error envelope, so a credential or claim value can never
 // be echoed back through the client.
 
+import { ADMIN_CSRF_HEADER } from './auth'
 import type {
   Attestation,
   CaptureCorrelationResult,
@@ -59,19 +60,22 @@ export interface CatalogApi {
 }
 
 /**
- * The editor writes with a provider bearer token. It is a separate interface so
- * the read-only catalog views never depend on the mutating paths, and tests can
- * provide a fake editor without faking catalog reads.
+ * The editor writes with the administrator browser session (issue #91). The
+ * browser sends the HttpOnly session cookie automatically and the client echoes
+ * the session-bound CSRF token in `X-CSRF-Token`; no provider bearer token is
+ * read, entered or sent. It is a separate interface so the read-only catalog
+ * views never depend on the mutating paths, and tests can provide a fake editor
+ * without faking catalog reads.
  */
 export interface EditorApi {
   getDraft(rulebookId: string, signal?: AbortSignal): Promise<DraftRulebook>
   replaceDraft(
     rulebookId: string,
     request: SaveDraftRequest,
-    token: string,
+    csrfToken: string,
     signal?: AbortSignal,
   ): Promise<DraftRulebook>
-  createDraft(request: SaveDraftRequest, token: string, signal?: AbortSignal): Promise<Rulebook>
+  createDraft(request: SaveDraftRequest, csrfToken: string, signal?: AbortSignal): Promise<Rulebook>
   validateDraft(request: SaveDraftRequest, signal?: AbortSignal): Promise<DraftValidationReport>
   /** Draft lifecycle reads used by the editor's publication panel (#41). */
   listVersions(rulebookId: string, signal?: AbortSignal): Promise<readonly RulebookVersion[]>
@@ -83,19 +87,19 @@ export interface EditorApi {
   createVersion(
     rulebookId: string,
     version: string,
-    token: string,
+    csrfToken: string,
     signal?: AbortSignal,
   ): Promise<RulebookVersion>
   refreshVersion(
     rulebookId: string,
     version: string,
-    token: string,
+    csrfToken: string,
     signal?: AbortSignal,
   ): Promise<RulebookVersion>
   publishVersion(
     rulebookId: string,
     version: string,
-    token: string,
+    csrfToken: string,
     signal?: AbortSignal,
   ): Promise<RulebookVersion>
 }
@@ -120,10 +124,24 @@ export class CatalogApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Machine-readable `error.code` of the API envelope, when present. */
+    readonly code: string | null = null,
   ) {
     super(message)
     this.name = 'CatalogApiError'
   }
+}
+
+/**
+ * A write rejected because the browser session is missing, expired or lost its
+ * CSRF binding. A `403 forbidden` is an ownership refusal, not a session
+ * problem, so it must surface the server's message instead of a sign-in prompt.
+ */
+export function isSessionAuthError(error: unknown): boolean {
+  return (
+    error instanceof CatalogApiError &&
+    (error.status === 401 || (error.status === 403 && error.code === 'csrf_failed'))
+  )
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
@@ -131,19 +149,27 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 interface ErrorEnvelope {
   readonly error?: {
     readonly message?: unknown
+    readonly code?: unknown
   }
 }
 
-async function readErrorMessage(response: Response, label = 'catalog'): Promise<string> {
+async function readError(
+  response: Response,
+  label = 'catalog',
+): Promise<{ readonly message: string; readonly code: string | null }> {
   try {
     const body = (await response.json()) as ErrorEnvelope
-    if (typeof body.error?.message === 'string' && body.error.message !== '') {
-      return body.error.message
-    }
+    const message =
+      typeof body.error?.message === 'string' && body.error.message !== ''
+        ? body.error.message
+        : `The ${label} request failed with HTTP ${response.status}.`
+    const code =
+      typeof body.error?.code === 'string' && body.error.code !== '' ? body.error.code : null
+    return { message, code }
   } catch {
     // A non-JSON error body must not replace the request failure.
   }
-  return `The ${label} request failed with HTTP ${response.status}.`
+  return { message: `The ${label} request failed with HTTP ${response.status}.`, code: null }
 }
 
 function singleData<T>(body: unknown, label = 'catalog'): T {
@@ -159,7 +185,8 @@ async function getJson<T>(fetchImpl: FetchLike, path: string, signal?: AbortSign
     ...(signal === undefined ? {} : { signal }),
   })
   if (!response.ok) {
-    throw new CatalogApiError(await readErrorMessage(response), response.status)
+    const failure = await readError(response)
+    throw new CatalogApiError(failure.message, response.status, failure.code)
   }
   return (await response.json()) as T
 }
@@ -232,7 +259,8 @@ export function createHttpValidationApi(
         ...(signal === undefined ? {} : { signal }),
       })
       if (!response.ok) {
-        throw new CatalogApiError(await readErrorMessage(response, 'validation'), response.status)
+        const failure = await readError(response, 'validation')
+        throw new CatalogApiError(failure.message, response.status, failure.code)
       }
       let body: unknown
       try {
@@ -246,15 +274,16 @@ export function createHttpValidationApi(
 }
 
 /**
- * Builds the HTTP client for the draft editor. The bearer token is sent only in
- * the `Authorization` header of a write; validation is public and read-only.
+ * Builds the HTTP client for the draft editor. A write sends the same-origin
+ * session cookie and its CSRF token only; validation is public and read-only.
  */
 export function createHttpEditorApi(
   fetchImpl: FetchLike = (input, init) => fetch(input, init),
 ): EditorApi {
   async function readData<T>(response: Response, label: string): Promise<T> {
     if (!response.ok) {
-      throw new CatalogApiError(await readErrorMessage(response, label), response.status)
+      const failure = await readError(response, label)
+      throw new CatalogApiError(failure.message, response.status, failure.code)
     }
     let body: unknown
     try {
@@ -268,7 +297,7 @@ export function createHttpEditorApi(
   async function writeJson<T>(
     path: string,
     body: unknown,
-    token: string | undefined,
+    csrfToken: string | undefined,
     method: 'POST' | 'PUT',
     signal: AbortSignal | undefined,
     label: string,
@@ -278,8 +307,9 @@ export function createHttpEditorApi(
       headers: {
         accept: 'application/json',
         'content-type': 'application/json',
-        ...(token === undefined ? {} : { authorization: `Bearer ${token}` }),
+        ...(csrfToken === undefined ? {} : { [ADMIN_CSRF_HEADER]: csrfToken }),
       },
+      credentials: 'same-origin',
       ...(body === undefined ? {} : { body: JSON.stringify(body) }),
       ...(signal === undefined ? {} : { signal }),
     })
@@ -289,12 +319,12 @@ export function createHttpEditorApi(
   async function postJson<T>(
     path: string,
     request: SaveDraftRequest,
-    token: string | undefined,
+    csrfToken: string | undefined,
     method: 'POST' | 'PUT',
     signal: AbortSignal | undefined,
     label: string,
   ): Promise<T> {
-    return writeJson<T>(path, request, token, method, signal, label)
+    return writeJson<T>(path, request, csrfToken, method, signal, label)
   }
 
   const versionPath = (rulebookId: string, version: string) =>
@@ -308,18 +338,25 @@ export function createHttpEditorApi(
       })
       return readData<DraftRulebook>(response, 'draft')
     },
-    replaceDraft(rulebookId, request, token, signal) {
+    replaceDraft(rulebookId, request, csrfToken, signal) {
       return postJson<DraftRulebook>(
         rulebookDraftPath(rulebookId),
         request,
-        token,
+        csrfToken,
         'PUT',
         signal,
         'draft save',
       )
     },
-    createDraft(request, token, signal) {
-      return postJson<Rulebook>('/api/v1/rulebooks', request, token, 'POST', signal, 'draft create')
+    createDraft(request, csrfToken, signal) {
+      return postJson<Rulebook>(
+        '/api/v1/rulebooks',
+        request,
+        csrfToken,
+        'POST',
+        signal,
+        'draft create',
+      )
     },
     validateDraft(request, signal) {
       return postJson<DraftValidationReport>(
@@ -351,31 +388,31 @@ export function createHttpEditorApi(
       )
       return readData<PublicationReadiness>(response, 'publication readiness')
     },
-    createVersion(rulebookId, version, token, signal) {
+    createVersion(rulebookId, version, csrfToken, signal) {
       return writeJson<RulebookVersion>(
         `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/versions`,
         { version },
-        token,
+        csrfToken,
         'POST',
         signal,
         'version create',
       )
     },
-    refreshVersion(rulebookId, version, token, signal) {
+    refreshVersion(rulebookId, version, csrfToken, signal) {
       return writeJson<RulebookVersion>(
         `${versionPath(rulebookId, version)}/refresh`,
         {},
-        token,
+        csrfToken,
         'POST',
         signal,
         'version refresh',
       )
     },
-    publishVersion(rulebookId, version, token, signal) {
+    publishVersion(rulebookId, version, csrfToken, signal) {
       return writeJson<RulebookVersion>(
         `${versionPath(rulebookId, version)}/publish`,
         {},
-        token,
+        csrfToken,
         'POST',
         signal,
         'version publish',
@@ -392,8 +429,9 @@ export function capturePath(captureId: string): string {
 /**
  * Read interface of the mock-backed capture explorer. Every capture is served
  * by the deterministic local mock source. Correlation runs the structural
- * credential engine and records the correlation server-side, so it requires a
- * provider bearer token; the token is sent only in the Authorization header.
+ * credential engine and records the correlation server-side, so it requires an
+ * authenticated administrator session; the browser sends its session cookie
+ * and the client echoes the session-bound CSRF token.
  */
 export interface CaptureExplorerApi {
   listCaptures(signal?: AbortSignal): Promise<CaptureExplorerPage>
@@ -401,7 +439,7 @@ export interface CaptureExplorerApi {
   correlateCapture(
     captureId: string,
     request: CorrelateCaptureRequest,
-    token: string,
+    csrfToken: string,
     signal?: AbortSignal,
   ): Promise<CaptureCorrelationResult>
 }
@@ -412,7 +450,8 @@ export function createHttpCaptureApi(
 ): CaptureExplorerApi {
   async function readData<T>(response: Response, label: string): Promise<T> {
     if (!response.ok) {
-      throw new CatalogApiError(await readErrorMessage(response, label), response.status)
+      const failure = await readError(response, label)
+      throw new CatalogApiError(failure.message, response.status, failure.code)
     }
     let body: unknown
     try {
@@ -430,7 +469,8 @@ export function createHttpCaptureApi(
         ...(signal === undefined ? {} : { signal }),
       })
       if (!response.ok) {
-        throw new CatalogApiError(await readErrorMessage(response, 'capture'), response.status)
+        const failure = await readError(response, 'capture')
+        throw new CatalogApiError(failure.message, response.status, failure.code)
       }
       return (await response.json()) as CaptureExplorerPage
     },
@@ -441,14 +481,15 @@ export function createHttpCaptureApi(
       })
       return readData<CaptureExplorerDetail>(response, 'capture')
     },
-    async correlateCapture(captureId, request, token, signal) {
+    async correlateCapture(captureId, request, csrfToken, signal) {
       const response = await fetchImpl(`${capturePath(captureId)}/validate`, {
         method: 'POST',
         headers: {
           accept: 'application/json',
           'content-type': 'application/json',
-          authorization: `Bearer ${token}`,
+          [ADMIN_CSRF_HEADER]: csrfToken,
         },
+        credentials: 'same-origin',
         body: JSON.stringify(request),
         ...(signal === undefined ? {} : { signal }),
       })

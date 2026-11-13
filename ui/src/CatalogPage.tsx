@@ -8,6 +8,7 @@ import { CatalogTable } from './components/CatalogTable'
 import { EmptyState, ErrorState, LoadingState } from './components/CatalogStates'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { AppLink, NEW_RULEBOOK_PATH } from './router'
+import { useSession } from './session'
 
 interface CatalogPageProps {
   readonly api: CatalogApi
@@ -20,6 +21,8 @@ type LoadState =
   | { readonly status: 'error'; readonly message: string }
 
 export function CatalogPage({ api, onNavigate }: CatalogPageProps) {
+  const session = useSession()
+  const canAuthor = session.status === 'authenticated'
   const [state, setState] = useState<LoadState>({ status: 'loading' })
   const [filters, setFilters] = useState<Filters>(EMPTY_FILTERS)
   const [reloadToken, setReloadToken] = useState(0)
@@ -80,15 +83,17 @@ export function CatalogPage({ api, onNavigate }: CatalogPageProps) {
             Browse attestation rulebooks by provider, version, publication status and attestation
             type. Every entry comes from the public AttestBook API.
           </p>
-          <p className="page-heading__actions">
-            <AppLink
-              className="button button--primary"
-              href={NEW_RULEBOOK_PATH}
-              onNavigate={onNavigate}
-            >
-              New rulebook
-            </AppLink>
-          </p>
+          {canAuthor ? (
+            <p className="page-heading__actions">
+              <AppLink
+                className="button button--primary"
+                href={NEW_RULEBOOK_PATH}
+                onNavigate={onNavigate}
+              >
+                New rulebook
+              </AppLink>
+            </p>
+          ) : null}
         </div>
 
         {state.status === 'ready' ? (

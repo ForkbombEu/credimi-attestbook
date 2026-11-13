@@ -205,7 +205,7 @@ export interface FakeCaptureApi extends CaptureExplorerApi {
   readonly correlated: {
     readonly captureId: string
     readonly request: CorrelateCaptureRequest
-    readonly token: string
+    readonly csrfToken: string
   }[]
 }
 
@@ -215,7 +215,7 @@ export function createFakeCaptureApi(
   const correlated: {
     captureId: string
     request: CorrelateCaptureRequest
-    token: string
+    csrfToken: string
   }[] = []
   return {
     correlated,
@@ -233,9 +233,9 @@ export function createFakeCaptureApi(
     correlateCapture(
       captureId: string,
       request: CorrelateCaptureRequest,
-      token: string,
+      csrfToken: string,
     ): Promise<CaptureCorrelationResult> {
-      correlated.push({ captureId, request, token })
+      correlated.push({ captureId, request, csrfToken })
       return Promise.resolve(
         makeCaptureCorrelation(makeBoundCaptureDetail(), makeValidationResult()),
       )

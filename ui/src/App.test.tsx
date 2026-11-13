@@ -279,7 +279,7 @@ describe('app catalog and detail navigation', () => {
     window.history.replaceState({}, '', '/')
   })
 
-  function installFetch() {
+  function installFetch(options: { readonly authenticated?: boolean } = {}) {
     const fetchMock = vi.fn(async (input: string) => {
       const json = (body: unknown) =>
         Promise.resolve(
@@ -289,6 +289,25 @@ describe('app catalog and detail navigation', () => {
           }),
         )
 
+      if (input === '/api/v1/auth/me') {
+        if (options.authenticated === true) {
+          return json({
+            data: {
+              provider: PROVIDERS[0],
+              expiresAt: '2026-01-01T08:00:00.000Z',
+              csrfToken: 'csrf-token-value',
+            },
+          })
+        }
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              error: { code: 'unauthorized', message: 'Authentication is required.' },
+            }),
+            { status: 401, headers: { 'content-type': 'application/json' } },
+          ),
+        )
+      }
       if (input === '/api/v1/providers') {
         return json({ data: PROVIDERS })
       }
@@ -367,9 +386,9 @@ describe('app catalog and detail navigation', () => {
     expect(await screen.findByLabelText('Rulebook')).toBeInTheDocument()
   })
 
-  test('opens the new-rulebook editor from the catalog', async () => {
+  test('opens the new-rulebook editor from the catalog when signed in', async () => {
     const user = userEvent.setup()
-    installFetch()
+    installFetch({ authenticated: true })
 
     render(<App />)
 
@@ -378,8 +397,8 @@ describe('app catalog and detail navigation', () => {
     expect(await screen.findByRole('heading', { name: 'New rulebook draft' })).toBeInTheDocument()
   })
 
-  test('renders a deep-linked draft editor path directly', async () => {
-    installFetch()
+  test('renders a deep-linked draft editor path directly when signed in', async () => {
+    installFetch({ authenticated: true })
     window.history.replaceState({}, '', '/rulebooks/rulebook-pid/edit')
 
     render(<App />)
@@ -388,6 +407,19 @@ describe('app catalog and detail navigation', () => {
       await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' }),
     ).toBeInTheDocument()
     expect(screen.getByLabelText('Name')).toHaveValue('PID Rulebook')
+  })
+
+  test('sends an anonymous deep link to the editor to sign in', async () => {
+    installFetch()
+    window.history.replaceState({}, '', '/rulebooks/rulebook-pid/edit')
+
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Sign in to author rulebooks' }),
+    ).toBeInTheDocument()
+    expect(screen.queryByLabelText('Draft JSON')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'New rulebook' })).not.toBeInTheDocument()
   })
 
   test('renders a deep-linked detail path directly', async () => {

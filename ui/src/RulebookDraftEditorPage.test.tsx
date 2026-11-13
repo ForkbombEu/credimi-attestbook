@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
@@ -5,6 +7,8 @@ import { describe, expect, test, vi } from 'vitest'
 import { CatalogApiError, type EditorApi } from './api'
 import { RulebookDraftEditorPage } from './RulebookDraftEditorPage'
 import { expectNoA11yViolations } from './test/a11y'
+import { anonymousSession, fakeSession, TEST_SESSION } from './test/session'
+import type { SessionController } from './session'
 import type {
   DraftRulebook,
   DraftValidationReport,
@@ -115,8 +119,7 @@ function renderEditor(
   api: EditorApi,
   options: {
     readonly rulebookId?: string
-    readonly token?: string
-    readonly onTokenChange?: (token: string) => void
+    readonly session?: SessionController
     readonly onNavigate?: (path: string) => void
   } = {},
 ) {
@@ -124,10 +127,33 @@ function renderEditor(
     <RulebookDraftEditorPage
       api={api}
       {...(options.rulebookId === undefined ? {} : { rulebookId: options.rulebookId })}
-      token={options.token ?? ''}
-      onTokenChange={options.onTokenChange ?? (() => {})}
+      session={options.session ?? fakeSession()}
       onNavigate={options.onNavigate ?? (() => {})}
     />,
+  )
+}
+
+/** A mutable session controller for the sign-out then inline-sign-in path. */
+function SessionHarness({ api }: { readonly api: EditorApi }) {
+  const authenticate = () => {
+    setSession(fakeSession({ signIn: () => Promise.resolve(TEST_SESSION) }))
+    return Promise.resolve(TEST_SESSION)
+  }
+  const [session, setSession] = useState<SessionController>(() =>
+    fakeSession({ signIn: authenticate }),
+  )
+  return (
+    <>
+      <button type="button" onClick={() => setSession(anonymousSession({ signIn: authenticate }))}>
+        Become anonymous
+      </button>
+      <RulebookDraftEditorPage
+        api={api}
+        rulebookId={DRAFT.id}
+        session={session}
+        onNavigate={() => {}}
+      />
+    </>
   )
 }
 
@@ -209,12 +235,12 @@ describe('rulebook draft editor', () => {
     expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
   })
 
-  test('saves with the provider bearer token', async () => {
+  test('saves with the session CSRF token and no bearer token', async () => {
     const api = editor()
     const user = userEvent.setup()
     const saved = { ...DRAFT, description: 'Updated' }
     api.replaceDraft = vi.fn(async () => saved)
-    renderEditor(api, { rulebookId: DRAFT.id, token: 'att_secret' })
+    const view = renderEditor(api, { rulebookId: DRAFT.id })
 
     await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
     await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
@@ -225,31 +251,67 @@ describe('rulebook draft editor', () => {
     expect(api.replaceDraft).toHaveBeenCalledWith(
       DRAFT.id,
       expect.objectContaining({ name: 'PID Rulebook', applicableSpec: 'ts11@1.0.1' }),
-      'att_secret',
+      'csrf-token-value',
     )
     expect(await screen.findByText(/Draft saved at/)).toBeVisible()
+    // No bearer-token field exists in the authenticated editor.
+    expect(view.queryByLabelText(/bearer token/i)).not.toBeInTheDocument()
   })
 
-  test('requires a token before saving and never calls the write', async () => {
+  test('sends an anonymous visitor to sign in with a safe return path', async () => {
+    window.history.replaceState({}, '', '/rulebooks/rulebook-1/edit')
     const api = editor()
+    renderEditor(api, { rulebookId: DRAFT.id, session: anonymousSession() })
+
+    expect(
+      await screen.findByRole('heading', { name: 'Sign in to author rulebooks' }),
+    ).toBeVisible()
+    expect(screen.queryByLabelText('Draft JSON')).not.toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute(
+      'href',
+      '/login?next=%2Frulebooks%2Frulebook-1%2Fedit',
+    )
+    expect(api.getDraft).not.toHaveBeenCalled()
+  })
+
+  test('keeps unsaved edits on an expired session and signs in again inline', async () => {
+    const api = editor({
+      replaceDraft: vi.fn(async () => {
+        throw new CatalogApiError('Authentication is required.', 401)
+      }),
+    })
     const user = userEvent.setup()
-    renderEditor(api, { rulebookId: DRAFT.id })
+    const signIn = vi.fn(async () => ({
+      provider: { id: 'provider-1', name: 'Example Issuer', createdAt: '2026-01-01T00:00:00.000Z' },
+      expiresAt: '2026-01-01T08:00:00.000Z',
+      csrfToken: 'new-csrf-token',
+    }))
+    renderEditor(api, { rulebookId: DRAFT.id, session: fakeSession({ signIn }) })
 
     await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
     await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
+    await screen.findByText('No validation findings.')
+    await user.clear(screen.getByLabelText('Description'))
+    await user.type(screen.getByLabelText('Description'), 'Do not lose this text')
     await user.click(screen.getByRole('button', { name: 'Save draft' }))
 
-    expect(
-      await screen.findByText('Enter the owning provider’s bearer token to save this draft.'),
-    ).toBeVisible()
-    expect(api.replaceDraft).not.toHaveBeenCalled()
+    expect(await screen.findByRole('heading', { name: 'Sign in again' })).toBeVisible()
+    expect(screen.getByLabelText('Description')).toHaveValue('Do not lose this text')
+
+    await user.type(screen.getByLabelText('Username'), 'admin')
+    await user.type(screen.getByLabelText('Password'), 'secret')
+    await user.click(screen.getByRole('button', { name: 'Sign in again' }))
+
+    await waitFor(() => expect(signIn).toHaveBeenCalledWith('admin', 'secret'))
+    expect(screen.getByLabelText('Description')).toHaveValue('Do not lose this text')
+    expect(screen.queryByRole('heading', { name: 'Sign in again' })).not.toBeInTheDocument()
   })
 
   test('creates a new draft and navigates to its editor', async () => {
     const api = editor()
     const user = userEvent.setup()
     const onNavigate = vi.fn()
-    renderEditor(api, { token: 'att_secret', onNavigate })
+    renderEditor(api, { onNavigate })
 
     await screen.findByRole('heading', { name: 'New rulebook draft' })
     await user.type(screen.getByLabelText('Name'), 'New draft')
@@ -272,23 +334,96 @@ describe('rulebook draft editor', () => {
     expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
   })
 
-  test('reports the token change to its owner without persisting it', async () => {
+  test('keeps unsaved edits across sign-out and inline sign-in without re-fetching', async () => {
     const api = editor()
     const user = userEvent.setup()
-    const onTokenChange = vi.fn()
-    renderEditor(api, { rulebookId: DRAFT.id, onTokenChange })
+    render(<SessionHarness api={api} />)
 
     await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
-    const tokenInput = screen.getByLabelText('Provider bearer token')
-    expect(tokenInput).toHaveAttribute('type', 'password')
-    await user.type(tokenInput, 'att_')
-    expect(onTokenChange).toHaveBeenCalled()
+    await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
+    await screen.findByText('No validation findings.')
+    await user.clear(screen.getByLabelText('Description'))
+    await user.type(screen.getByLabelText('Description'), 'Do not lose this text')
+
+    await user.click(screen.getByRole('button', { name: 'Become anonymous' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sign in again' })).toBeVisible()
+    expect(screen.getByLabelText('Description')).toHaveValue('Do not lose this text')
+    expect(api.getDraft).toHaveBeenCalledTimes(1)
+
+    await user.type(screen.getByLabelText('Username'), 'admin')
+    await user.type(screen.getByLabelText('Password'), 'secret')
+    await user.click(screen.getByRole('button', { name: 'Sign in again' }))
+
+    await waitFor(() => expect(api.getDraft).toHaveBeenCalledTimes(1))
+    expect(screen.getByLabelText('Description')).toHaveValue('Do not lose this text')
+
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() => expect(api.replaceDraft).toHaveBeenCalled())
+    expect(api.replaceDraft).toHaveBeenCalledWith(
+      DRAFT.id,
+      expect.objectContaining({ description: 'Do not lose this text' }),
+      'csrf-token-value',
+    )
+  })
+
+  test('reports an ownership 403 without offering a pointless re-sign-in', async () => {
+    const api = editor({
+      replaceDraft: vi.fn(async () => {
+        throw new CatalogApiError(
+          'The authenticated provider does not own this resource.',
+          403,
+          'forbidden',
+        )
+      }),
+    })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
+    await screen.findByText('No validation findings.')
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(
+      await screen.findByText('The authenticated provider does not own this resource.'),
+    ).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Sign in again' })).not.toBeInTheDocument()
+  })
+
+  test('offers re-sign-in for a 403 csrf_failed rejection', async () => {
+    const api = editor({
+      replaceDraft: vi.fn(async () => {
+        throw new CatalogApiError(
+          'The request is missing or carries an invalid CSRF token; sign in again.',
+          403,
+          'csrf_failed',
+        )
+      }),
+    })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
+    await screen.findByText('No validation findings.')
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sign in again' })).toBeVisible()
+  })
+
+  test('never renders a provider bearer-token field', async () => {
+    renderEditor(editor(), { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    expect(screen.queryByLabelText(/bearer token/i)).not.toBeInTheDocument()
+    expect(screen.queryByLabelText(/provider token/i)).not.toBeInTheDocument()
   })
 
   test('gates publish on readiness and reports the published status', async () => {
     const api = editor()
     const user = userEvent.setup()
-    renderEditor(api, { rulebookId: DRAFT.id, token: 'att_secret' })
+    renderEditor(api, { rulebookId: DRAFT.id })
 
     await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
     const lifecycle = await screen.findByRole('region', {
@@ -305,7 +440,7 @@ describe('rulebook draft editor', () => {
 
     await user.click(publish)
     await waitFor(() =>
-      expect(api.publishVersion).toHaveBeenCalledWith(DRAFT.id, '1.0', 'att_secret'),
+      expect(api.publishVersion).toHaveBeenCalledWith(DRAFT.id, '1.0', 'csrf-token-value'),
     )
     expect(await within(lifecycle).findByText(/is now published and immutable/)).toBeVisible()
     expect(screen.getByText('This rulebook is published.')).toBeVisible()
@@ -328,7 +463,7 @@ describe('rulebook draft editor', () => {
       ),
     })
     const user = userEvent.setup()
-    renderEditor(api, { rulebookId: DRAFT.id, token: 'att_secret' })
+    renderEditor(api, { rulebookId: DRAFT.id })
 
     await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
     const lifecycle = await screen.findByRole('region', {
@@ -350,7 +485,7 @@ describe('rulebook draft editor', () => {
   test('freezes the working copy under a typed version label', async () => {
     const api = editor({ listVersions: vi.fn(async () => []) })
     const user = userEvent.setup()
-    renderEditor(api, { rulebookId: DRAFT.id, token: 'att_secret' })
+    renderEditor(api, { rulebookId: DRAFT.id })
 
     await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
     const lifecycle = await screen.findByRole('region', {
@@ -362,7 +497,7 @@ describe('rulebook draft editor', () => {
     await user.click(within(lifecycle).getByRole('button', { name: 'Freeze as draft version' }))
 
     await waitFor(() =>
-      expect(api.createVersion).toHaveBeenCalledWith(DRAFT.id, '2.0', 'att_secret'),
+      expect(api.createVersion).toHaveBeenCalledWith(DRAFT.id, '2.0', 'csrf-token-value'),
     )
     expect(await within(lifecycle).findByText(/Draft version 2.0 frozen/)).toBeVisible()
   })
@@ -377,7 +512,7 @@ describe('rulebook draft editor', () => {
       }),
     })
     const user = userEvent.setup()
-    renderEditor(api, { rulebookId: DRAFT.id, token: 'att_secret' })
+    renderEditor(api, { rulebookId: DRAFT.id })
 
     await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
     const lifecycle = await screen.findByRole('region', {
@@ -392,8 +527,36 @@ describe('rulebook draft editor', () => {
     expect(alert).toHaveTextContent('refresh it before publishing')
   })
 
-  test('requires a token before a lifecycle write', async () => {
-    const api = editor()
+  test('surfaces an expired session from a lifecycle write', async () => {
+    const api = editor({
+      createVersion: vi.fn(async () => {
+        throw new CatalogApiError('Authentication is required.', 401)
+      }),
+    })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    const lifecycle = await screen.findByRole('region', {
+      name: 'Draft lifecycle and publication',
+    })
+    await user.type(within(lifecycle).getByLabelText('New version label'), '2.0')
+    await user.click(within(lifecycle).getByRole('button', { name: 'Freeze as draft version' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sign in again' })).toBeVisible()
+    expect(within(lifecycle).getByLabelText('New version label')).toHaveValue('2.0')
+  })
+
+  test('reports an ownership 403 from a lifecycle write without re-sign-in', async () => {
+    const api = editor({
+      createVersion: vi.fn(async () => {
+        throw new CatalogApiError(
+          'The authenticated provider does not own this resource.',
+          403,
+          'forbidden',
+        )
+      }),
+    })
     const user = userEvent.setup()
     renderEditor(api, { rulebookId: DRAFT.id })
 
@@ -405,11 +568,9 @@ describe('rulebook draft editor', () => {
     await user.click(within(lifecycle).getByRole('button', { name: 'Freeze as draft version' }))
 
     expect(
-      await within(lifecycle).findByText(
-        'Enter the owning provider’s bearer token to change the draft lifecycle.',
-      ),
+      await within(lifecycle).findByText('The authenticated provider does not own this resource.'),
     ).toBeVisible()
-    expect(api.createVersion).not.toHaveBeenCalled()
+    expect(screen.queryByRole('heading', { name: 'Sign in again' })).not.toBeInTheDocument()
   })
 
   test('has no detectable accessibility violations', async () => {

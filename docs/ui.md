@@ -8,7 +8,8 @@ draft-editor slice of [issue #40](https://github.com/ForkbombEu/credimi-attestbo
 (UI-003), the lifecycle/comparison slice of
 [issue #41](https://github.com/ForkbombEu/credimi-attestbook/issues/41) (UI-003) and the
 mock-backed capture explorer of [issue #48](https://github.com/ForkbombEu/credimi-attestbook/issues/48)
-(UI-006, FR-019). It delivers
+(UI-006, FR-019) and the session-auth migration of
+[issue #91](https://github.com/ForkbombEu/credimi-attestbook/issues/91). It delivers
 a responsive, searchable catalog of rulebooks, a rulebook detail view with attestation types,
 schema references, provenance, standards-compatibility disclosure, version history and
 deterministic version comparison, a credential validation playground that calls the real
@@ -22,8 +23,12 @@ export link), and later follow-ups cover an import UI.
 The administrator sign-in slice of
 [issue #90](https://github.com/ForkbombEu/credimi-attestbook/issues/90) adds a `/login`
 screen, a session-aware shared header and client-side session restoration from
-`GET /api/v1/auth/me`. Editor and capture writes still use the provider bearer token; moving
-them to the administrator session is a separate issue.
+`GET /api/v1/auth/me`. [Issue #91](https://github.com/ForkbombEu/credimi-attestbook/issues/91)
+moves the rulebook editor, its lifecycle panel and the capture correlation to that session:
+those writes send the HttpOnly cookie and the session-bound `X-CSRF-Token`, the authoring
+actions are gated on the session, and an anonymous deep link or an expired write shows a
+sign-in prompt that keeps unsaved editor state. Provider bearer authentication stays in the
+API for headless clients.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) §14
 (UI-001/UI-002/UI-005/UI-006), §15 (authentication and authorization), §11 (FR-019) and §2.2
@@ -84,17 +89,20 @@ Implemented by these slices:
   - live validation of the unsaved document against the real server: structural findings
     that block a save are shown separately from standards findings, and the validation
     boundaries are listed explicitly;
-  - an explicit provider bearer-token field for the write. The token is held in the app's
-    React memory for the current page session only, sent only in the `Authorization` header,
-    and never written to browser storage, the URL or the rendered document;
-  - creation of a new draft (one authenticated `POST /api/v1/rulebooks`) and full replacement
-    of an existing draft (one authenticated `PUT /api/v1/rulebooks/<id>/draft`), followed by
-    a persisted reload;
+  - session-gated writes: the view reads the administrator session and sends the HttpOnly
+    cookie with the session-bound `X-CSRF-Token`; it never asks for, stores or sends a provider
+    bearer token. An anonymous deep link shows a sign-in panel whose validated `next` target
+    returns to the editor, and an expired session keeps the unsaved form and shows an inline
+    re-sign-in form;
+  - creation of a new draft (one session-authenticated `POST /api/v1/rulebooks`) and full
+    replacement of an existing draft (one session-authenticated
+    `PUT /api/v1/rulebooks/<id>/draft`), followed by a persisted reload;
   - a read-only state for a published or historical rulebook, which the server also refuses
     to mutate. Editing never changes a frozen version snapshot or its content-addressed
     artifact;
-  - an entry action on the catalog (`New rulebook`) and on the draft detail page
-    (`Edit draft`);
+  - entry actions on the catalog (`New rulebook`) and on the draft detail page
+    (`Edit draft`), shown only for an authenticated session (and, on the detail page, only for
+    the provider that owns the draft);
 - a deterministic version comparison panel on `/rulebooks/{id}` (#41):
   - two labelled version selects and an explicit `Compare` action; the public comparison
     endpoint returns JSON Pointer changes sorted by path, and snapshot identity fields are
@@ -110,11 +118,11 @@ Implemented by these slices:
     artifact only as its redacted default-policy projection (or an explicit "not fetched"
     notice for an external reference), the ordered evidence timeline and the explorer's
     limitations;
-  - an authenticated validation form pins the capture to a real rulebook version and attestation
-    type and runs the structural engine on the segregated inline artifact, then shows the linked
-    findings. The provider bearer token lives only in the app's React memory for the page
-    session. External and non-credential evidence (and, defensively, source-declared redaction)
-    state why it cannot be validated;
+  - a session-authenticated validation form pins the capture to a real rulebook version and
+    attestation type and runs the structural engine on the segregated inline artifact, then
+    shows the linked findings. The form sends the session cookie and `X-CSRF-Token`; anonymous
+    readers see a sign-in prompt instead and no request is sent. External and non-credential
+    evidence (and, defensively, source-declared redaction) state why it cannot be validated;
   - every view says that the evidence is mock-backed and that no live capture component is
     operational;
 - a draft lifecycle and publication panel on `/rulebooks/{id}/edit` (#41):
@@ -139,14 +147,11 @@ Implemented by these slices:
     server's CSRF check;
   - after sign-in the browser returns to a validated same-origin `next` destination; absolute,
     protocol-relative, backslash and off-origin targets are refused;
-  - catalogue, detail, playground, capture and editor reads stay usable anonymously; editor
-    write authorization is intentionally unchanged in this slice.
+  - catalogue, rulebook detail, playground, capture-explorer reads and the public API stay
+    usable anonymously; the editor, lifecycle and capture-correlation writes are the
+    session-gated actions.
 
 Deliberately **not** in these slices:
-
-- migrating editor and capture write requests to the administrator session. Issue #90 is the
-  authentication UI/navigation slice only; those writes keep the provider bearer-token flow
-  described below until the dependent migration issue.
 
 - schema-document supply in the playground. The API accepts caller-supplied schema documents
   for the pinned references, but UI-005 does not require an editor for them, so schema
@@ -205,18 +210,18 @@ The browser is a client of the public API only:
    the dependent selects, one `POST /api/v1/credentials/validate` per run, and a client-side
    JSON download for the result;
 8. on `/rulebooks/new`: no read is required; the editor validates the unsaved document with
-   `POST /api/v1/rulebooks/validate-draft`, and `Create draft` performs one authenticated
-   `POST /api/v1/rulebooks`;
+   the public `POST /api/v1/rulebooks/validate-draft`, and `Create draft` performs one
+   session-authenticated `POST /api/v1/rulebooks`;
 9. on `/rulebooks/{id}/edit`: `GET /api/v1/rulebooks/{id}/draft` reads the editable document,
    live validation uses `POST /api/v1/rulebooks/validate-draft`, and `Save draft` performs one
-   authenticated `PUT /api/v1/rulebooks/{id}/draft`;
+   session-authenticated `PUT /api/v1/rulebooks/{id}/draft`;
 10. on `/captures`: `GET /api/v1/captures?limit=100&offset=0`; the detail reads
     `GET /api/v1/captures/{captureId}` and, when a correlation is run,
-    the authenticated `POST /api/v1/captures/{captureId}/validate` with the selected rulebook,
-    version, attestation type and the provider bearer token;
+    the session-authenticated `POST /api/v1/captures/{captureId}/validate` with the selected
+    rulebook, version and attestation type;
 11. the lifecycle panel reads `GET /api/v1/rulebooks/{id}/versions` and
     `GET /api/v1/rulebooks/{id}/versions/{version}/publication-readiness`, and performs the
-    authenticated `POST /api/v1/rulebooks/{id}/versions`, `.../{version}/refresh` and
+    session-authenticated `POST /api/v1/rulebooks/{id}/versions`, `.../{version}/refresh` and
     `.../{version}/publish` transitions;
 12. the comparison panel calls
     `GET /api/v1/rulebooks/{id}/versions/{version}/compare?to={version}`; the result is
@@ -226,6 +231,12 @@ The browser is a client of the public API only:
     `Log out` action posts `POST /api/v1/auth/logout` with the session CSRF token. The
     HttpOnly session cookie and its in-memory `X-CSRF-Token` are the only credentials
     involved, and no bearer token is read or written by these calls.
+
+Every protected write in the client (create/save draft, freeze/refresh/publish a version and
+record a capture correlation) is a same-origin fetch with `credentials: "same-origin"` and the
+live session's `X-CSRF-Token` header, matching the server rule from #89. The UI never asks for,
+stores or sends a provider bearer token; headless API clients keep using the bearer transport
+documented in [`docs/security.md`](security.md) §2.
 
 The client router uses real paths with the History API. The Bun server serves the built
 entry document for `/`, `/rulebooks/*`, `/playground`, `/captures/*` and `/login`; `/api/*`
@@ -341,11 +352,19 @@ dimensions.
   draft (the registry stores profile enumerations as extensible text, decision D-5). An
   unknown `applicableSpec` reports that no standards checks ran instead of validating it
   against the wrong baseline;
-- the provider bearer token is entered in a password field. It is held only in the app's
-  React memory for this page session, so navigating to another view and back keeps it but a
-  reload clears it. It is sent only as the `Authorization` header of the write request. A
-  missing token, a foreign provider's token and a published rulebook's mutation each produce
-  the API's safe error message; nothing is saved on failure;
+- the view is protected by the administrator session: an anonymous deep link renders a
+  **Sign in to author rulebooks** panel with a `Sign in` link whose validated `next` value is
+  the current editor path. The form is not rendered and no draft is read until
+  `GET /api/v1/auth/me` confirms an authenticated session. The catalogue's **New rulebook**
+  action and the detail view's **Edit draft** action appear only when the session is
+  authenticated (and, for a draft, bound to the owning provider);
+- draft and lifecycle writes send the HttpOnly session cookie and its in-memory
+  `X-CSRF-Token` only; there is no provider-token field to paste and no `Authorization`
+  header. A `401` or a `403 csrf_failed` keeps the form mounted, shows an inline **Sign in
+  again** form and preserves every unsaved field so the user can re-authenticate and save
+  without losing work. A `403 forbidden` is an ownership refusal, not an expired session, so
+  it shows the server's safe message without a re-sign-in prompt; a published rulebook's
+  mutation still surfaces its safe error message. Nothing is saved on failure;
 - a published or historical rulebook opens read-only with an explanation, and the server
   independently answers `409 immutable`, so the UI cannot bypass the guarantee. A successful
   save reports that frozen and published versions were not changed; the test suite verifies
@@ -385,9 +404,19 @@ delivered by #88; it is not a provider-bearer-token form:
   same-origin path. Absolute URLs, protocol-relative paths, backslash variants, control
   characters and normalised off-origin paths are dropped, so the form cannot be used as an
   open redirect; without a valid target it returns to the catalogue;
-- the catalogue, detail, playground, capture and editor views remain reachable anonymously,
-  and no route is guarded or hidden in this slice. The editor and capture writes keep their
-  provider bearer-token flow until the dependent migration issue.
+- the catalogue, rulebook detail, playground and capture explorer views remain reachable
+  anonymously, and the public API reads keep working without a session. The authoring actions
+  are session-gated as described in §3.4: **New rulebook**, **Edit draft** and the protected
+  capture correlation are hidden or replaced by a sign-in prompt when anonymous, and a direct
+  editor URL renders the sign-in panel with the editor path as its `next` target;
+- an expired session is detected when a write answers `401` (or `403 csrf_failed` after a
+  session rotation). The editor and the capture correlation form keep their state and show an
+  inline **Sign in again** form backed by the same auth API; a fresh sign-in clears the prompt
+  and the user retries the write. Only those two answers trigger re-sign-in: a `403
+  forbidden` ownership refusal keeps the server's message and does not ask for credentials
+  that cannot help. The full `/login` page remains the destination for an anonymous deep
+  link, so the same-origin return target is validated by the shared `safeRedirectPath`
+  guard.
 
 ## 4. Build, serve and develop
 
@@ -486,16 +515,18 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   clear-form behaviour and axe-core checks for the form and result;
 - the draft editor: JSON parse/serialize/request helpers; loaded working-copy population;
   debounced live validation with structural errors disabling save and standards warnings
-  keeping it available; immediate JSON-syntax feedback; authorized save with the token;
-  missing-token handling without a write; create-and-navigate; read-only published state;
-  the memory-only token field; axe-core checks for the editor page;
+  keeping it available; immediate JSON-syntax feedback; session-authenticated save with the
+  CSRF token and no bearer header; anonymous deep-link gating with the safe `next` target;
+  inline re-sign-in after a `401` with the unsaved description preserved; create-and-navigate;
+  read-only published state; absence of a bearer-token field; axe-core checks for the editor
+  page;
 - the mock-backed capture explorer: loading, error and retry, empty and truncation states, the
   normalized summary columns and evidence gaps, the redacted projection (never the raw claim
   values), external and non-credential evidence refusals, the correlation form and its
-  complete-selection and required-token rules, a successful
-  correlation rendering the linked findings, safe correlation errors including a rejected
-  token, responsive labels, the shared header navigation and axe-core checks
-  (`ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`,
+  complete-selection and anonymous sign-in gating, a successful session correlation rendering
+  the linked findings, safe correlation errors including an expired session that keeps the
+  selected rulebook/version/attestation, responsive labels, the shared header navigation and
+  axe-core checks (`ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`,
   `ui/src/capture.test.ts`);
 - the shared chrome: the Credimi Extras top and footer strips (text, the single
   `https://credimi.io` link with `target="_blank"` and `rel="noopener"`, wordmark
@@ -548,11 +579,16 @@ Chromium):
   `503` error surfaced without leaking the credential and a successful retry, an incomplete
   request rejected in the browser with no API call, file upload validation and the exported
   report;
-- the draft editor against the real server: live TS11 adapter findings as the JSON changes,
-  immediate invalid-JSON feedback and a disabled save, an authorized save that persists the
-  working copy, an unchanged published snapshot's exact bytes and `Content-Digest` after a
-  working-copy edit, the API's `409 immutable` for a published rulebook, the read-only UI
-  state, and an unchanged catalog total when the new-rulebook page renders;
+- the draft editor against the real server after signing in through `/login`: live TS11
+  adapter findings as the JSON changes, immediate invalid-JSON feedback and a disabled save,
+  a session-authenticated save that persists the working copy without a token field, an
+  unchanged published snapshot's exact bytes and `Content-Digest` after a working-copy edit,
+  the API's `409 immutable` for a published rulebook, the read-only UI state, and an unchanged
+  catalog total when the new-rulebook page renders;
+- anonymous authoring: `/rulebooks/new` shows the sign-in panel with the editor path as its
+  `next` target, the catalog hides `New rulebook`, and the catalogue stays readable; clearing
+  the session cookie before a save keeps the typed description in the editor and shows the
+  inline **Sign in again** form;
 - an authorized `Create draft` with the Source URL left empty, which must navigate to the new
   draft's editor and persist a `null` source URL; because this spec creates a rulebook in the
   one shared in-memory registry, the Playwright suite runs with one worker and catalog specs
@@ -569,8 +605,9 @@ The capture explorer is covered by `ui/e2e/captures.spec.ts`: the eight seeded m
 the mock labelling and explicit gaps, the redacted projection of one JSON fixture (and the
 absence of its raw claim values), the external-reference and non-credential refusals, a real
 correlation of the seeded signed SD-JWT VC against the `Validator Sandbox Rulebook` with the
-structural findings and the exact pinned version, the required-token refusal, full axe-core
-scans of the list and detail, and a 390 px no-horizontal-overflow check.
+structural findings and the exact pinned version, the anonymous sign-in gating with the
+capture path as its `next` target, full axe-core scans of the list and detail, and a 390 px
+no-horizontal-overflow check.
 
 CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test:e2e`. The
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves
@@ -588,6 +625,20 @@ merge):
 | Anonymous catalog header | [`catalog-before.png`](ui/auth/catalog-before.png) — no session control | [`catalog-after.png`](ui/auth/catalog-after.png) — the `Log in` link next to the navigation |
 | Authenticated catalog header | no authenticated browser state existed | [`catalog-authenticated-after.png`](ui/auth/catalog-authenticated-after.png) — `Signed in: E2E Administrator` and `Log out` |
 | Login error state | none (no login screen) | [`login-error-after.png`](ui/auth/login-error-after.png) — the API's generic `Invalid username or password.` message |
+
+The session-auth migration (issue #91) carries these before/after captures at 1440×1000 in
+the same light theme, against the seeded end-to-end server. The baseline is `dd7a9e8`
+(`main` after #90, before this slice); the after images are from this PR's head. The
+authenticated pair signs in through the real `/login` form as the same disposable
+administrator (bound to the seeded `Example Issuer` provider) in both revisions, so only the
+write-transport and session-gating difference is visible.
+
+| View | Before (`dd7a9e8`) | After (this slice) |
+| --- | --- | --- |
+| Anonymous catalog | [`catalog-anonymous-before.png`](ui/session-auth/catalog-anonymous-before.png) — `New rulebook` is shown to everyone | [`catalog-anonymous-after.png`](ui/session-auth/catalog-anonymous-after.png) — the authoring action is session-gated |
+| Anonymous `/rulebooks/new` | [`editor-new-anonymous-before.png`](ui/session-auth/editor-new-anonymous-before.png) — the editor renders with the provider bearer-token field | [`editor-new-anonymous-after.png`](ui/session-auth/editor-new-anonymous-after.png) — a sign-in panel with the editor path as the validated `next` target |
+| Authenticated `/rulebooks/new` | [`editor-new-authenticated-before.png`](ui/session-auth/editor-new-authenticated-before.png) — the administrator session is signed in, but the form still asks for a bearer token | [`editor-new-authenticated-after.png`](ui/session-auth/editor-new-authenticated-after.png) — no token field; the session cookie and CSRF token authorize the write |
+| Anonymous capture correlation | [`capture-correlation-before.png`](ui/session-auth/capture-correlation-before.png) — the correlation form asks for a provider token | [`capture-correlation-after.png`](ui/session-auth/capture-correlation-after.png) — a sign-in prompt replaces the token input and the action stays disabled |
 
 The draft-editor slice's captures at 1280 px and the same light theme follow; the baseline is
 `c35e160` (`main` before the slice):
@@ -734,20 +785,20 @@ The catalog and detail slices' captures remain in the same directory
   source URL as the rulebook URI and a fixed placeholder when none is set; trusted
   authorities, the draft version label and the schema bodies are not edited or fetched. A
   saved draft is not a conformance result.
-- The editor holds the provider bearer token in React memory only, so a full page reload
-  clears it; it is never written to browser storage. The administrator sign-in page exists,
-  but this editor still authenticates writes with the provider bearer token; migrating write
-  requests to the administrator session is a dependent issue.
-  The save is a last-write-wins full replacement with no optimistic-concurrency token, so two
-  open editor tabs can overwrite each other's working copy. The lifecycle panel surfaces the
-  server's stale-snapshot, duplicate-label and immutability conflicts, and publish stays
-  disabled until readiness passes for that exact draft version, but there is still no
-  optimistic-concurrency token for the working copy itself.
-- The administrator sign-in session is read on mount and after a reload; the UI does not
-  poll `auth/me`, so a session that expires while a tab stays open keeps its last rendered
-  identity until the next reload or session action, when the `401` reverts it to anonymous.
-  The slice provides no password reset, account management or route guarding, and the login
-  page is the only new surface; editor and capture writes still use provider bearer tokens.
+- The editor and capture correlation now authenticate only with the administrator session.
+  There is no password reset, account management or multi-user administration, and the
+  session is still read on mount and after a reload rather than polled. An expiry is
+  therefore detected by the next protected write (`401`/`403 csrf_failed`), which shows the inline
+  re-sign-in prompt and keeps the form; a tab that only reads never notices its session
+  ended. The save is a last-write-wins full replacement with no optimistic-concurrency
+  token, so two open editor tabs can overwrite each other's working copy. The lifecycle panel
+  surfaces the server's stale-snapshot, duplicate-label and immutability conflicts, and
+  publish stays disabled until readiness passes for that exact draft version, but there is
+  still no optimistic-concurrency token for the working copy itself.
+- The inline re-sign-in form requests the administrator username and password again; it does
+  not silently refresh a session, and a failed attempt leaves the unsaved form in place. A
+  sign-out from the header while an editor has unsaved changes also keeps the form and offers
+  the same prompt instead of discarding it.
 - The capture explorer is deliberately mock-backed and in-memory: it shows deterministic local
   fixtures, never a live `capture-issuer`/`capture-verifier` interaction, and a recorded
   correlation is lost on restart. External artifact references are not fetched, a captured
