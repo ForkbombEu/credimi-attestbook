@@ -2,8 +2,11 @@
 //
 // The request is bounded before it reaches the schema synthesiser: the same
 // rulebook-identifier, semantic-version, attestation-name, schema-document and
-// URI limits as credential validation, plus a bounded override list. A message
-// names fields only; it never echoes an override value or a schema document.
+// URI limits as credential validation, plus a bounded override list.
+// `schemaDocuments` is optional: it is needed only for external references,
+// while a canonical AttestBook-hosted reference is resolved by the generator.
+// A message names fields only; it never echoes an override value or a schema
+// document.
 
 import { invalidInput } from '../registry/errors'
 import { requireIdentifier, requireSemanticVersion, requireText } from '../registry/validation'

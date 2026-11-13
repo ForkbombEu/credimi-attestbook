@@ -431,6 +431,12 @@ trail is not exposed over HTTP; it is read by operators from the database.
   schema applies without `schemaDocuments`, produces real positive/negative findings, cannot be
   overridden by caller bytes, and reports an unpinned/mismatched/missing/corrupt document as
   `NOT_TESTED`/`FAIL`; external-only and mixed versions keep the caller-supplied flow.
+- `src/fixtures/hosted-schema.test.ts` and `src/api/hosted-fixtures.test.ts` cover the same
+  boundary for issuer fixtures: a canonical hosted reference grounds a fixture without caller
+  bytes, caller content cannot override it, and a missing, corrupt, unpinned or mismatched
+  hosted document aborts generation with an explicit `400` instead of an ungrounded fixture;
+  external-only and mixed versions keep the caller-supplied document flow, and hosted Type
+  Metadata is never used as a JSON Schema.
 - `src/api/session-writes.test.ts` covers the dual transport end to end: a session creates,
   edits, versions, publishes, imports and correlates; a cookie write without its CSRF token, a
   wrong or foreign token and a cross-origin write all answer `403 csrf_failed` and write

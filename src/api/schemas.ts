@@ -1342,6 +1342,7 @@ export const issuerFixtureSchema = z.object({
       uri: z.string(),
       integrity: nullableString,
       integrityVerified: z.boolean(),
+      source: z.enum(['hosted', 'caller']).nullable(),
       kind: z.enum(['json_schema', 'type_metadata']).nullable(),
       applied: z.boolean(),
       diagnostic: z.string().optional(),
