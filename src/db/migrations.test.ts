@@ -49,6 +49,7 @@ describe('registry migrations', () => {
         'attestations',
         'audit_log',
         'auth_tokens',
+        'credential_schema_documents',
         'providers',
         'rulebook_versions',
         'rulebooks',
@@ -469,6 +470,85 @@ describe('registry migrations', () => {
         .query<{ csrf_token: string }, []>('SELECT csrf_token FROM admin_sessions')
         .get()
       expect(row?.csrf_token).toMatch(/^[0-9a-f]{64}$/)
+    } finally {
+      database.close()
+    }
+  })
+
+  test('adds credential schema documents to a populated pre-feature database', () => {
+    const database = createDatabase()
+    try {
+      // Reproduce a deployed database that predates issue #97: every earlier
+      // migration is applied and real registry, artifact and version rows exist.
+      database.exec(`
+        CREATE TABLE schema_migrations (
+          version TEXT PRIMARY KEY,
+          checksum TEXT NOT NULL CHECK (length(checksum) = 64),
+          applied_at TEXT NOT NULL
+        )
+      `)
+      for (const migration of MIGRATIONS.filter(
+        (candidate) => candidate.version !== '0006_credential_schema_documents',
+      )) {
+        database.exec(migration.sql)
+        database
+          .query('INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (?, ?, ?)')
+          .run(migration.version, migrationChecksum(migration.sql), FIXED_NOW)
+      }
+
+      database
+        .query(
+          `INSERT INTO providers (id, name, publication_authority, metadata_json, created_at)
+           VALUES ('provider-legacy', 'Provider', 'account-legacy', '{}', ?)`,
+        )
+        .run(FIXED_NOW)
+      database
+        .query(
+          `INSERT INTO rulebooks (id, provider_id, name, applicable_spec, created_at, updated_at)
+           VALUES ('rulebook-legacy', 'provider-legacy', 'Legacy', 'ts11@1.0.1', ?, ?)`,
+        )
+        .run(FIXED_NOW, FIXED_NOW)
+      const artifactDigest = 'a'.repeat(64)
+      database
+        .query(
+          `INSERT INTO artifacts (digest, media_type, bytes, created_at)
+           VALUES (?, 'application/vnd.attestbook.rulebook-version+json', X'7b7d', ?)`,
+        )
+        .run(artifactDigest, FIXED_NOW)
+      database
+        .query(
+          `INSERT INTO rulebook_versions (
+             id, rulebook_id, version, status, content_digest, spec_version,
+             provenance_json, created_at, published_at
+           ) VALUES ('version-legacy', 'rulebook-legacy', '1.0', 'published', ?,
+             'ts11@1.0.1', '{}', ?, ?)`,
+        )
+        .run(artifactDigest, FIXED_NOW, FIXED_NOW)
+
+      const applied = applyMigrations(database, { now: () => FIXED_NOW })
+      expect(applied.map((migration) => migration.version)).toEqual([
+        '0006_credential_schema_documents',
+      ])
+      expect(listAppliedMigrations(database)).toHaveLength(MIGRATIONS.length)
+
+      // Existing frozen content and metadata are byte-for-byte unchanged.
+      const legacyVersion = database
+        .query<{ content_digest: string; status: string }, []>(
+          "SELECT content_digest, status FROM rulebook_versions WHERE id = 'version-legacy'",
+        )
+        .get()
+      expect(legacyVersion).toEqual({ content_digest: artifactDigest, status: 'published' })
+      const legacyArtifact = database
+        .query<{ bytes: Uint8Array }, [string]>('SELECT bytes FROM artifacts WHERE digest = ?')
+        .get(artifactDigest)
+      expect(Array.from(legacyArtifact?.bytes ?? [])).toEqual([0x7b, 0x7d])
+
+      const documentTable = database
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'credential_schema_documents'",
+        )
+        .get()
+      expect(documentTable?.name).toBe('credential_schema_documents')
     } finally {
       database.close()
     }

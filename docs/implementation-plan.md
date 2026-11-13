@@ -286,6 +286,7 @@ not by this plan.
 | `attestations` | Attestation types bound to a rulebook version | Values stored as extensible data (D-5) |
 | `schema_refs` | Format identifier, URI, SRI and resolved reference | `formatIdentifier` unique per version; resolution status recorded |
 | `artifacts` | Content-addressed exact bytes | `digest` primary key; `bytes` immutable; SHA-256 over exact bytes (D-6) |
+| `credential_schema_documents` | Provider-owned immutable credential schema documents (issue #97) | Exact bytes shared through `artifacts`; `UNIQUE(provider_id, content_digest)`; kind fixes the media type; `UPDATE`/`DELETE` rejected |
 | `import_runs` / `import_entries` | Import attempt, adapter, source, conformance and conflicts | Idempotency key; no destructive overwrite |
 | `validations` | Validation request/result snapshots | References `rulebook_version` + digest; result is reproducible |
 | `audit_log` | Publication and privileged mutations | Actor, action, entity, timestamp, digest |
@@ -295,10 +296,11 @@ not by this plan.
 
 The #28 implementation lives in `src/db/`, `src/registry/` and
 `migrations/0001_registry.sql`; #29 added the version and artifact tables in
-`migrations/0002_versions_artifacts.sql`. Their concrete columns, stable identifiers,
-standards-metadata boundary, authorization model and version lifecycle are documented in
-[`docs/registry.md`](registry.md): versioned content is stored beside the product columns, not
-merged into them.
+`migrations/0002_versions_artifacts.sql`, and #97 added the provider-owned credential schema
+document association in `migrations/0006_credential_schema_documents.sql`. Their concrete
+columns, stable identifiers, standards-metadata boundary, authorization model and version
+lifecycle are documented in [`docs/registry.md`](registry.md): versioned content is stored
+beside the product columns, not merged into them.
 
 ### 5.3 Storage rules
 

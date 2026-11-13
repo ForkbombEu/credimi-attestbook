@@ -167,6 +167,74 @@ export interface VersionDigestVerification {
   readonly verified: boolean
 }
 
+/**
+ * Supported profiles for a provider-owned credential schema document (#97):
+ * a JSON Schema 2020-12 document or an SD-JWT VC Type Metadata document.
+ */
+export const CREDENTIAL_SCHEMA_KINDS = ['json_schema_2020_12', 'sd_jwt_vc_type_metadata'] as const
+
+export type CredentialSchemaKind = (typeof CREDENTIAL_SCHEMA_KINDS)[number]
+
+/** Media type fixed for each supported credential schema profile. */
+export type CredentialSchemaMediaType = 'application/schema+json' | 'application/json'
+
+export const CREDENTIAL_SCHEMA_MEDIA_TYPES: Readonly<
+  Record<CredentialSchemaKind, CredentialSchemaMediaType>
+> = {
+  json_schema_2020_12: 'application/schema+json',
+  sd_jwt_vc_type_metadata: 'application/json',
+}
+
+/**
+ * A provider-owned, content-addressed credential schema document (#97). The
+ * exact bytes live once in `artifacts`, keyed by `contentDigest`; this record
+ * carries the stable association identity, media type and creation provenance
+ * that later HTTP endpoints expose. `provenance` is registry-internal and never
+ * part of the document bytes.
+ */
+export interface CredentialSchemaDocument {
+  /** Stable opaque identifier; later HTTP routes expose it as the document id. */
+  readonly id: string
+  readonly providerId: string
+  readonly kind: CredentialSchemaKind
+  /** Lowercase hex SHA-256 of the exact document bytes. */
+  readonly contentDigest: string
+  readonly mediaType: CredentialSchemaMediaType
+  readonly provenance: JsonObject
+  readonly createdAt: string
+}
+
+/** A schema document plus its exact immutable UTF-8 bytes. */
+export interface CredentialSchemaDocumentContent {
+  readonly document: CredentialSchemaDocument
+  readonly bytes: Uint8Array
+}
+
+export interface RegisterCredentialSchemaDocumentInput {
+  readonly kind: CredentialSchemaKind
+  /**
+   * Exact document bytes. The service computes the SHA-256 over these bytes
+   * after taking its own copy; caller-supplied mutable buffers cannot change
+   * what is stored.
+   */
+  readonly bytes: Uint8Array
+  /**
+   * Optional expected lowercase hex SHA-256. When supplied, a mismatch aborts
+   * the registration before anything is written.
+   */
+  readonly expectedDigest?: string
+  /** Creation provenance (for example how the document was registered). */
+  readonly provenance?: JsonObject
+}
+
+/** Result of recomputing a schema document's digest from its stored bytes. */
+export interface CredentialSchemaDocumentDigestVerification {
+  readonly document: CredentialSchemaDocument
+  readonly expectedDigest: string
+  readonly actualDigest: string
+  readonly verified: boolean
+}
+
 export interface CreateRulebookVersionInput {
   readonly version: string
   /**
@@ -329,6 +397,7 @@ export const AUDIT_ACTIONS = [
   'version.create',
   'version.refresh',
   'version.publish',
+  'schema_document.create',
 ] as const
 
 export type AuditAction = (typeof AUDIT_ACTIONS)[number]
