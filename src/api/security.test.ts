@@ -128,6 +128,7 @@ describe('write operation security surface', () => {
       'previewImport',
       'publishRulebookVersion',
       'refreshRulebookVersion',
+      'registerSchemaDocument',
       'replaceRulebookDraft',
       'validateCapture',
     ])

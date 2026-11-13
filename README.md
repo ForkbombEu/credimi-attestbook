@@ -448,6 +448,7 @@ The public routes are:
 
 | Method | Path                                            | Auth | Purpose                                                                                                         |
 | ------ | ----------------------------------------------- | ---- | --------------------------------------------------------------------------------------------------------------- |
+| `POST` | `/api/v1/schema-documents?kind={kind}`          | yes  | Register the raw JSON body (JSON Schema 2020-12 or SD-JWT VC Type Metadata) and return its hosted URL and SRI.  |
 | `GET`  | `/api/v1/schema-documents`                      | no   | Paginated public metadata of stored documents (`limit`, `offset`), including each canonical URL and SRI pin.    |
 | `GET`  | `/api/v1/schema-documents/{documentId}`         | no   | One document's public metadata: kind, media type, SHA-256 digest, W3C SRI pin, creation time and canonical URL. |
 | `GET`  | `/api/v1/schema-documents/{documentId}/content` | no   | The exact immutable bytes under the recorded `application/schema+json` or `application/json` media type.        |
@@ -456,17 +457,37 @@ The content response is returned byte-for-byte and never re-serialized. `Content
 (RFC 9530), `ETag` and the metadata `integrity` field carry the SHA-256 of those bytes,
 `Cache-Control: public, max-age=31536000, immutable` permits permanent caching, and a matching
 `If-None-Match` answers `304`. Unknown identifiers answer `404`; invalid or oversized
-identifiers are rejected by the bounded identifier rules. The route is read-only: no method
-other than `GET` is registered, and provider ownership, provenance and token material are never
-returned.
+identifiers are rejected by the bounded identifier rules. The public routes are read-only and
+never return provider ownership, provenance or token material.
+
+Registration requires a provider bearer token or the administrator session with its
+`X-CSRF-Token`; it is refused without one. The raw request body is the exact document and the
+`kind` query parameter selects the profile (`json_schema_2020_12` or
+`sd_jwt_vc_type_metadata`). The response carries the canonical hosted URL, the
+`sha256-<base64>` SRI pin, the hex SHA-256 and the media type; re-registering identical bytes
+for the same provider returns the existing document unchanged, and there is no route that
+replaces or deletes one. A provider may own at most 100 document associations.
+
+```bash
+curl --fail --request POST \
+  --header "Authorization: Bearer $TOKEN" \
+  --header "Content-Type: application/schema+json" \
+  --data-binary '{"$schema":"https://json-schema.org/draft/2020-12/schema","type":"object"}' \
+  "http://127.0.0.1:3000/api/v1/schema-documents?kind=json_schema_2020_12"
+```
+
+The returned `url` and `integrity` are ordinary schema-reference values: put them in an
+existing per-attestation `schemaReferences` entry as `uri` and `integrity` through the
+rulebook create or draft API. No proprietary field is added to TS11 `SchemaMeta` or a published
+snapshot, and an external schema URL supplied by the caller keeps working without uploading or
+rewriting it.
 
 The canonical origin is deployment configuration only. `Host`, `Forwarded`,
 `X-Forwarded-Host` and `X-Forwarded-Proto` are never consulted, so a caller cannot make
-AttestBook publish an attacker-controlled schema URL. The provider registration API that
-returns a hosted URI/SRI pair when a document is uploaded is a later slice; until it lands,
-documents are created through the registry service (the local UAT setup seeds one disposable
-document and writes its URL to `dist/uat/fixtures.json`). Existing external schema URLs are
-untouched and stay external references.
+AttestBook publish an attacker-controlled schema URL. The local UAT setup seeds one disposable
+document and writes its URL to `dist/uat/fixtures.json`; provider registration API tests create
+the rest through the documented route. Existing external schema URLs are untouched and stay
+external references.
 
 ## Administrator browser login
 

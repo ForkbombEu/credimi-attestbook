@@ -159,9 +159,10 @@ Implemented by #97 (`migrations/0006_credential_schema_documents.sql`):
   metadata, exact bytes and digest verification to later HTTP endpoints. They are public
   reads, like the rest of the catalogue.
 
-Deliberately **not** in #97: the public URL/HTTP surface ([#98](https://github.com/ForkbombEu/credimi-attestbook/issues/98)),
-provider registration/reference API ([#99](https://github.com/ForkbombEu/credimi-attestbook/issues/99)),
-editor controls, fixture generation and validation-time resolution
+Deliberately **not** in #97 (added by later slices): the public URL/HTTP surface
+([#98](https://github.com/ForkbombEu/credimi-attestbook/issues/98)) and the provider
+registration/reference API ([#99](https://github.com/ForkbombEu/credimi-attestbook/issues/99)),
+plus the still-follow-up editor controls, fixture generation and validation-time resolution
 ([#100](https://github.com/ForkbombEu/credimi-attestbook/issues/100)–[#103](https://github.com/ForkbombEu/credimi-attestbook/issues/103)).
 Existing external `{formatIdentifier, uri, integrity}` references and published/historical
 snapshots are unchanged.
@@ -558,17 +559,21 @@ bytes. It is deliberately not a second general-purpose blob store:
   endpoints (#98); they return the exact bytes, media type, digest, owner and provenance. There is no update or
   delete operation, and the database rejects both;
 - an existing external schema reference (`uri` + optional SRI) and every rulebook version
-  artifact are untouched. A stored schema document is not linked into a version snapshot yet;
-  the later URI/SRI registration slice (#99) supplies that association.
+  artifact are untouched. A stored schema document is not linked by a foreign key: the
+  registration slice (#99) returns its hosted URI/SRI pair, and callers use those as ordinary
+  `schemaReferences[].uri`/`integrity` values. No proprietary field enters a TS11 `SchemaMeta`
+  or a version snapshot, and the exact-bytes store stays independent of rulebook content.
 
 The compile shares the existing sandbox's concurrency budget; when the sandbox is busy or
 unavailable, registration fails closed as a server fault instead of compiling in-process.
-There is no per-provider document quota yet: the registration endpoint (#99) must bound how
-many documents one provider may create.
+Issue #99 adds a per-provider bound of 100 document associations, enforced before compilation
+and again inside the write transaction. Replaying an existing provider/content registration
+remains idempotent at the limit, so the bound never locks a provider out of its own documents;
+a new document over the bound answers `409 conflict`.
 
-Issue #98 adds the public HTTPS URL surface on top of this store; the provider registration
-API, editor controls and validation-time resolution remain the follow-up issues #99–#103 and
-are not implemented here. See §6.7.
+Issue #98 adds the public HTTPS URL surface on top of this store and #99 adds authenticated
+registration. The editor controls and validation-time resolution remain the follow-up issues
+#100–#103 and are not implemented here. See §6.7.
 
 ### 6.7 Public hosted-schema URLs
 
@@ -596,7 +601,15 @@ ${PUBLIC_BASE_URL}/api/v1/schema-documents/{documentId}/content
   an attacker-controlled URL for a published rulebook or snapshot.
 - Existing external `schemaReferences[].uri` values are unchanged and remain external
   references; storing a document does not rewrite them and does not link it into a version
-  snapshot. Provider registration and the returned URI/SRI pair are issue #99.
+  snapshot. Issue #99 adds `POST /api/v1/schema-documents?kind=...`, which registers the raw
+  JSON body under the authenticated provider and returns the same public projection: the
+  canonical hosted URL, the `sha256-<base64>` SRI pin, the hex digest and the media type.
+  Registration is idempotent per provider/content (`201` on a new association, `200` on a
+  replay), is refused before any write when no `PUBLIC_BASE_URL` is configured, and has no
+  replace or delete route. Callers write `url` and `integrity` into an ordinary
+  `schemaReferences` entry; the draft API and the version snapshot carry exactly
+  `formatIdentifier`, `uri` and `integrity`, so a stored-URI reference is indistinguishable
+  from an external one in the persisted rulebook. See [`docs/api.md`](api.md) §3.13.
 
 ## 7. Validation and failure model
 

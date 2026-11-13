@@ -35,6 +35,13 @@ export const MAX_CREDENTIAL_SCHEMA_DOCUMENT_DEPTH = 64
 /** Bound on parsed JSON values; keeps breadth as well as depth bounded. */
 export const MAX_CREDENTIAL_SCHEMA_DOCUMENT_NODES = 32_768
 
+/**
+ * Hard bound on document associations one provider may create (#99). Replaying
+ * an existing provider/content registration stays idempotent at the limit, so a
+ * provider is never locked out of the documents it already owns.
+ */
+export const MAX_CREDENTIAL_SCHEMA_DOCUMENTS_PER_PROVIDER = 100
+
 /** Bound on the type metadata `vct` value; it is a URL, not free text. */
 const MAX_VCT_LENGTH = 2_048
 

@@ -240,6 +240,15 @@ export const credentialSchemaDocumentPageSchema = z.object({
   pagination: paginationSchema,
 })
 
+/**
+ * Raw request body of a schema document registration (#99). The body is the
+ * exact JSON document bytes; the required `kind` query parameter selects the
+ * supported profile (and therefore the canonical media type). It is any JSON
+ * value because a JSON Schema 2020-12 document may be a boolean and an SD-JWT
+ * VC Type Metadata document is an object.
+ */
+export const registerSchemaDocumentRequestSchema = z.unknown()
+
 // --------------------------------------------- version comparison & readiness
 
 export const VERSION_DIFF_CHANGE_KIND_SCHEMA = z.enum(['added', 'removed', 'changed'])
@@ -1504,6 +1513,7 @@ export const OPENAPI_COMPONENTS = {
   CredentialSchemaDocument: credentialSchemaDocumentSchema,
   CredentialSchemaDocumentResponse: credentialSchemaDocumentResponseSchema,
   CredentialSchemaDocumentPageResponse: credentialSchemaDocumentPageSchema,
+  RegisterSchemaDocumentRequest: registerSchemaDocumentRequestSchema,
   VersionDiff: versionDiffSchema,
   VersionDiffResponse: versionDiffResponseSchema,
   PublicationReadiness: publicationReadinessSchema,
