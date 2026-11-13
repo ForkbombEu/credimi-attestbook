@@ -267,6 +267,73 @@ describe('insertSchemaReference', () => {
     ])
   })
 
+  test('refuses an insert when the expected attestation name no longer matches', () => {
+    const text = JSON.stringify({
+      attestations: [
+        {
+          name: 'Payment Account',
+          supportedFormats: ['dc+sd-jwt'],
+          schemaReferences: [],
+        },
+      ],
+      schemaReferences: [],
+    })
+    const reference = { formatIdentifier: 'dc+sd-jwt', uri: 'https://example.org/new' }
+
+    expect(insertSchemaReference(text, 0, reference, 'Account Details')).toEqual({
+      ok: false,
+      message:
+        'The attestation changed while the schema was being registered; insert the reference again.',
+    })
+    expect(insertSchemaReference(text, 0, reference, 'Payment Account').ok).toBe(true)
+    expect(
+      insertSchemaReference(
+        JSON.stringify({ attestations: [{ schemaReferences: [] }] }),
+        0,
+        reference,
+        'Attestation 1',
+      ).ok,
+    ).toBe(true)
+  })
+
+  test('preserves members of references on other formats', () => {
+    const text = JSON.stringify({
+      attestations: [
+        {
+          name: 'Payment Account',
+          supportedFormats: ['dc+sd-jwt', 'mso_mdoc'],
+          schemaReferences: [
+            {
+              formatIdentifier: 'mso_mdoc',
+              uri: 'https://example.org/mdoc',
+              metadata: { source: 'imported' },
+            },
+          ],
+        },
+      ],
+      schemaReferences: [],
+    })
+    const result = insertSchemaReference(text, 0, {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: 'https://example.org/sd-jwt',
+    })
+    expect(result.ok).toBe(true)
+    if (!result.ok) {
+      throw new Error(result.message)
+    }
+    expect(
+      (JSON.parse(result.text) as { attestations: { schemaReferences: unknown[] }[] })
+        .attestations[0]?.schemaReferences,
+    ).toEqual([
+      {
+        formatIdentifier: 'mso_mdoc',
+        uri: 'https://example.org/mdoc',
+        metadata: { source: 'imported' },
+      },
+      { formatIdentifier: 'dc+sd-jwt', uri: 'https://example.org/sd-jwt' },
+    ])
+  })
+
   test('refuses to guess when the document or the attestation is malformed', () => {
     expect(insertSchemaReference('{nope', 0, { formatIdentifier: 'a', uri: 'https://x' })).toEqual({
       ok: false,

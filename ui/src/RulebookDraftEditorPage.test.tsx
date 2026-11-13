@@ -1,6 +1,6 @@
 import { useState } from 'react'
 
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 
@@ -73,6 +73,22 @@ const CREATED: Rulebook = {
   publicationStatus: 'draft',
   createdAt: '2026-01-01T00:00:00.000Z',
   updatedAt: '2026-01-01T00:00:00.000Z',
+}
+
+function deferred<T>(): {
+  readonly promise: Promise<T>
+  readonly resolve: (value: T) => void
+} {
+  let resolve: ((value: T) => void) | undefined
+  const promise = new Promise<T>((settle) => {
+    resolve = settle
+  })
+  return {
+    promise,
+    resolve: (value: T) => {
+      resolve?.(value)
+    },
+  }
 }
 
 function report(overrides: Partial<DraftValidationReport> = {}): DraftValidationReport {
@@ -629,6 +645,116 @@ describe('rulebook draft editor', () => {
     const json = screen.getByLabelText('Draft JSON') as HTMLTextAreaElement
     expect(json.value).toContain(REGISTERED.url)
     expect(json.value).toContain(REGISTERED.integrity)
+  })
+
+  test('inserts a registered schema into the latest Draft JSON, not the click-time copy', async () => {
+    const pending = deferred<CredentialSchemaDocument>()
+    const api = editor({ registerSchemaDocument: vi.fn(() => pending.promise) })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+      }),
+    )
+    await user.click(screen.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ }))
+    fireEvent.change(screen.getByLabelText('JSON Schema document'), {
+      target: { value: SCHEMA_TEXT },
+    })
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Register and insert schema for Person Identification Data (dc+sd-jwt)',
+      }),
+    )
+
+    // The Draft JSON stays editable while the registration is in flight.
+    const json = screen.getByLabelText('Draft JSON') as HTMLTextAreaElement
+    const edited = JSON.parse(json.value) as Record<string, unknown>
+    edited.xNote = 'kept'
+    fireEvent.change(json, { target: { value: JSON.stringify(edited, null, 2) } })
+
+    await act(async () => {
+      pending.resolve(REGISTERED)
+      await pending.promise
+    })
+
+    await waitFor(() =>
+      expect((screen.getByLabelText('Draft JSON') as HTMLTextAreaElement).value).toContain(
+        '"xNote": "kept"',
+      ),
+    )
+    const saved = JSON.parse(
+      (screen.getByLabelText('Draft JSON') as HTMLTextAreaElement).value,
+    ) as {
+      xNote: string
+      attestations: readonly { schemaReferences: readonly unknown[] }[]
+    }
+    expect(saved.xNote).toBe('kept')
+    expect(saved.attestations[0]?.schemaReferences).toContainEqual({
+      formatIdentifier: 'dc+sd-jwt',
+      uri: REGISTERED.url,
+      integrity: REGISTERED.integrity,
+    })
+    expect(
+      await screen.findByText('Hosted schema registered and added to the draft.'),
+    ).toBeVisible()
+  })
+
+  test('keeps the registered URL when the attestation changed during registration', async () => {
+    const pending = deferred<CredentialSchemaDocument>()
+    const api = editor({ registerSchemaDocument: vi.fn(() => pending.promise) })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+      }),
+    )
+    await user.click(screen.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ }))
+    fireEvent.change(screen.getByLabelText('JSON Schema document'), {
+      target: { value: SCHEMA_TEXT },
+    })
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Register and insert schema for Person Identification Data (dc+sd-jwt)',
+      }),
+    )
+
+    const json = screen.getByLabelText('Draft JSON') as HTMLTextAreaElement
+    const edited = JSON.parse(json.value) as {
+      attestations: { name: string; schemaReferences: readonly unknown[] }[]
+    }
+    edited.attestations[0]!.name = 'Renamed Attestation'
+    fireEvent.change(json, { target: { value: JSON.stringify(edited, null, 2) } })
+
+    await act(async () => {
+      pending.resolve(REGISTERED)
+      await pending.promise
+    })
+
+    expect(
+      await screen.findByText(
+        'The attestation changed while the schema was being registered; insert the reference again.',
+      ),
+    ).toBeVisible()
+    expect(await screen.findByText('Hosted schema registered but not inserted.')).toBeVisible()
+    expect(screen.getByText(REGISTERED.url)).toBeVisible()
+
+    const saved = JSON.parse(
+      (screen.getByLabelText('Draft JSON') as HTMLTextAreaElement).value,
+    ) as {
+      attestations: readonly { name: string; schemaReferences: readonly { uri: string }[] }[]
+    }
+    expect(saved.attestations[0]?.name).toBe('Renamed Attestation')
+    expect(saved.attestations[0]?.schemaReferences.map((reference) => reference.uri)).not.toContain(
+      REGISTERED.url,
+    )
   })
 
   test('accepts a .json file for a hosted schema and reports parse feedback', async () => {

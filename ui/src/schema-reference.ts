@@ -155,6 +155,12 @@ export interface SchemaControlAttestation {
   readonly references: readonly DraftSchemaReference[]
 }
 
+function attestationName(record: Record<string, unknown>, index: number): string {
+  return typeof record.name === 'string' && record.name.trim() !== ''
+    ? record.name.trim()
+    : `Attestation ${index + 1}`
+}
+
 /**
  * Projects the parsed draft document into the attestation/format rows the
  * controls render. Malformed members are tolerated rather than throwing: the
@@ -166,10 +172,7 @@ export function schemaControlAttestations(
 ): readonly SchemaControlAttestation[] {
   return (document.attestations as readonly unknown[]).map((entry, index) => {
     const record = isRecord(entry) ? entry : {}
-    const name =
-      typeof record.name === 'string' && record.name.trim() !== ''
-        ? record.name.trim()
-        : `Attestation ${index + 1}`
+    const name = attestationName(record, index)
 
     const supported = Array.isArray(record.supportedFormats)
       ? record.supportedFormats.filter((format): format is string => typeof format === 'string')
@@ -248,31 +251,38 @@ function readAttestationForEdit(
   return isRecord(attestation) ? attestation : null
 }
 
+type EditableSchemaReference = Record<string, unknown>
+
+/**
+ * Copies every existing reference object unchanged so members the UI does not
+ * model (such as reference `metadata`) survive an edit on another format. A
+ * reference that lacks a string `formatIdentifier`/`uri` is malformed, so the
+ * edit refuses rather than silently rewriting it.
+ */
 function readReferencesForEdit(
   attestation: Record<string, unknown>,
-): DraftSchemaReferenceInput[] | null {
+): EditableSchemaReference[] | null {
   if (attestation.schemaReferences === undefined) {
     return []
   }
   if (!Array.isArray(attestation.schemaReferences)) {
     return null
   }
-  const references: DraftSchemaReferenceInput[] = []
+  const references: EditableSchemaReference[] = []
   for (const raw of attestation.schemaReferences) {
     if (!isRecord(raw)) {
       return null
     }
-    references.push({
-      formatIdentifier: typeof raw.formatIdentifier === 'string' ? raw.formatIdentifier : '',
-      uri: typeof raw.uri === 'string' ? raw.uri : '',
-      ...(typeof raw.integrity === 'string' ? { integrity: raw.integrity } : {}),
-    })
+    if (typeof raw.formatIdentifier !== 'string' || typeof raw.uri !== 'string') {
+      return null
+    }
+    references.push(raw)
   }
   return references
 }
 
 function findReferenceIndex(
-  references: readonly DraftSchemaReferenceInput[],
+  references: readonly EditableSchemaReference[],
   formatIdentifier: string,
 ): number {
   return references.findIndex((reference) => reference.formatIdentifier === formatIdentifier)
@@ -288,6 +298,7 @@ export function insertSchemaReference(
   documentText: string,
   attestationIndex: number,
   reference: DraftSchemaReferenceInput,
+  expectedName?: string,
 ): SchemaReferenceEdit {
   const document = readDocumentForEdit(documentText)
   if (document === null) {
@@ -300,6 +311,16 @@ export function insertSchemaReference(
   if (attestation === null) {
     return { ok: false, message: 'That attestation is no longer in the Draft JSON.' }
   }
+  if (
+    expectedName !== undefined &&
+    attestationName(attestation, attestationIndex) !== expectedName.trim()
+  ) {
+    return {
+      ok: false,
+      message:
+        'The attestation changed while the schema was being registered; insert the reference again.',
+    }
+  }
   const references = readReferencesForEdit(attestation)
   if (references === null) {
     return {
@@ -309,10 +330,11 @@ export function insertSchemaReference(
   }
   const next = [...references]
   const index = findReferenceIndex(next, reference.formatIdentifier)
+  const inserted: EditableSchemaReference = { ...reference }
   if (index === -1) {
-    next.push(reference)
+    next.push(inserted)
   } else {
-    next[index] = reference
+    next[index] = inserted
   }
   attestation.schemaReferences = next
   return { ok: true, text: JSON.stringify(document.root, null, 2) }

@@ -6,7 +6,7 @@
 // CSRF token, then the API's canonical URI and SRI pin become ordinary
 // `schemaReferences` values. External references are entered directly.
 
-import { useId, useMemo, useState, type ChangeEvent } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from 'react'
 
 import { isSessionAuthError, type EditorApi } from '../api'
 import {
@@ -48,11 +48,13 @@ function rowKey(attestationIndex: number, formatIdentifier: string): string {
   return `${attestationIndex}:${formatIdentifier}`
 }
 
-/** A hosted reference is recognised by the AttestBook document path. */
+/** A hosted reference is this origin's AttestBook document path. */
 function isHostedReference(reference: DraftSchemaReference): boolean {
   try {
     const url = new URL(reference.uri, window.location.origin)
-    return url.pathname.startsWith('/api/v1/schema-documents/')
+    return (
+      url.origin === window.location.origin && url.pathname.startsWith('/api/v1/schema-documents/')
+    )
   } catch {
     return false
   }
@@ -97,6 +99,12 @@ export function SchemaReferenceControls({
   const [working, setWorking] = useState(false)
   const [result, setResult] = useState<ResultNotice | null>(null)
   const [status, setStatus] = useState<string | null>(null)
+  // Registration is asynchronous and the Draft JSON stays editable, so a
+  // reference must be inserted into the latest text, never the click-time copy.
+  const documentTextRef = useRef(documentText)
+  useEffect(() => {
+    documentTextRef.current = documentText
+  }, [documentText])
 
   const preview = useMemo(() => previewHostedSchema(schemaText), [schemaText])
   const showPreview = schemaText.trim() !== ''
@@ -149,7 +157,18 @@ export function SchemaReferenceControls({
       return
     }
     try {
-      const text = await file.text()
+      const bytes = new Uint8Array(await file.arrayBuffer())
+      if (bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+        setFormError('The file starts with a byte-order mark; save it as UTF-8 without a BOM.')
+        return
+      }
+      let text: string
+      try {
+        text = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(bytes)
+      } catch {
+        setFormError('The file is not valid UTF-8. Save it as UTF-8 and choose it again.')
+        return
+      }
       setSchemaText(text)
       setFileName(file.name)
     } catch {
@@ -175,12 +194,25 @@ export function SchemaReferenceControls({
     setFormError(null)
     try {
       const registered = await api.registerSchemaDocument(HOSTED_SCHEMA_KIND, schemaText, csrfToken)
-      const edit = insertSchemaReference(documentText, attestation.index, {
-        formatIdentifier,
-        uri: registered.url,
-        integrity: registered.integrity,
-      })
+      const edit = insertSchemaReference(
+        documentTextRef.current,
+        attestation.index,
+        {
+          formatIdentifier,
+          uri: registered.url,
+          integrity: registered.integrity,
+        },
+        attestation.name,
+      )
       if (!edit.ok) {
+        // The document was stored, so keep its URL and SRI visible even when
+        // the attestation changed and the reference cannot be inserted.
+        setResult({
+          title: 'Hosted schema registered but not inserted.',
+          uri: registered.url,
+          integrity: registered.integrity,
+          href: registered.url,
+        })
         setFormError(edit.message)
         return
       }
@@ -216,10 +248,15 @@ export function SchemaReferenceControls({
     if (validation.reference === null) {
       return
     }
-    const edit = insertSchemaReference(documentText, attestation.index, {
-      ...validation.reference,
-      formatIdentifier,
-    })
+    const edit = insertSchemaReference(
+      documentTextRef.current,
+      attestation.index,
+      {
+        ...validation.reference,
+        formatIdentifier,
+      },
+      attestation.name,
+    )
     if (!edit.ok) {
       setFormError(edit.message)
       return
@@ -237,7 +274,7 @@ export function SchemaReferenceControls({
   }
 
   const handleRemove = (attestation: SchemaControlAttestation, formatIdentifier: string) => {
-    const edit = removeSchemaReference(documentText, attestation.index, formatIdentifier)
+    const edit = removeSchemaReference(documentTextRef.current, attestation.index, formatIdentifier)
     if (!edit.ok) {
       setStatus(edit.message)
       return

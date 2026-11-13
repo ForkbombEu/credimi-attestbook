@@ -343,20 +343,26 @@ dimensions.
 - a **Schema references** card offers one row per attestation type and supported format, so
   multiple attestations and formats stay unambiguous. A row can add or replace
   `Upload/paste schema to AttestBook` or `Use existing external URL` (issue #100):
-  - hosted mode accepts pasted text or a local `.json` file. The browser checks the exact
-    UTF-8 byte bound (256 KiB), parses the document, previews it as text without executing or
-    fetching anything, and requires a JSON Schema 2020-12 object or boolean before the
-    register button enables. Registration is `POST /api/v1/schema-documents?kind=json_schema_2020_12`
-    with the session cookie, the `X-CSRF-Token` header and the exact document bytes; the
-    returned canonical `url` and W3C SRI `integrity` become ordinary
+  - hosted mode accepts pasted text or a local `.json` file. A file is read as bytes and
+    refused when it begins with a byte-order mark or is not valid UTF-8, so the text that is
+    registered is the file's exact content. The browser checks the exact UTF-8 byte bound
+    (256 KiB), parses the document, previews it as text without executing or fetching
+    anything, and requires a JSON Schema 2020-12 object or boolean before the register button
+    enables. Registration is `POST /api/v1/schema-documents?kind=json_schema_2020_12` with the
+    session cookie, the `X-CSRF-Token` header and the exact document bytes; the returned
+    canonical `url` and W3C SRI `integrity` become ordinary
     `schemaReferences[].uri`/`integrity` values in the Draft JSON;
   - external mode records an absolute `https` URL and an optional W3C SRI value without any
     upload or registration call; both modes replace the existing reference for the same
     attestation format instead of duplicating it, and a remove action edits the same JSON;
   - every insertion or removal edits the existing Draft JSON text (preserving unknown
-    members) and marks the form dirty, so it follows the ordinary save path. A published or
-    historical rulebook renders the rows read-only, and an expired session keeps the pasted
-    document mounted behind the inline **Sign in again** form so registration can be retried;
+    members, including unrecognised members of references on other formats) and marks the
+    form dirty, so it follows the ordinary save path. Registration is asynchronous while the
+    Draft JSON stays editable: the reference is applied to the latest text, never the
+    click-time copy, and a changed attestation name refuses the insert while keeping the
+    registered URL and SRI visible. A published or historical rulebook renders the rows
+    read-only, and an expired session keeps the pasted document mounted behind the inline
+    **Sign in again** form so registration can be retried;
 - the JSON is parsed locally on every change so a syntax error is shown immediately and
   prevents a save. All deeper checks are server-side: a 350 ms debounced
   `POST /api/v1/rulebooks/validate-draft` runs the registry's structural bounds and projects
