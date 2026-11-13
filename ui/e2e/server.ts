@@ -241,7 +241,17 @@ const captures = createMockCaptureExplorer({
   additionalIssuerEnvelopes: [realCredentialCapture],
 })
 
-const app = createApp({ registry, validation, captures, adminAuth, uiRoot: './dist/ui' })
+// The browser suite registers hosted schemas through the real API. A loopback
+// public origin is the same test-only configuration the UAT setup uses, and it
+// keeps the canonical URL fetchable from the test browser.
+const app = createApp({
+  registry,
+  validation,
+  captures,
+  adminAuth,
+  uiRoot: './dist/ui',
+  publicBaseUrl: `http://127.0.0.1:${port}`,
+})
 
 const server = Bun.serve({
   hostname: '127.0.0.1',

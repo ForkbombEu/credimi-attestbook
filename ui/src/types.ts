@@ -297,6 +297,27 @@ export interface SaveDraftRequest {
   readonly schemaReferences?: readonly DraftSchemaReferenceInput[]
 }
 
+/** Profiles the schema registration API accepts (`?kind=`). */
+export type CredentialSchemaKind = 'json_schema_2020_12' | 'sd_jwt_vc_type_metadata'
+
+/**
+ * Public metadata of one immutable AttestBook-hosted credential schema
+ * document, as returned by `POST /api/v1/schema-documents` (issues #99/#100).
+ * `url` and `integrity` are ordinary `schemaReferences[].uri` and `integrity`
+ * values; no proprietary field is added to the draft representation.
+ */
+export interface CredentialSchemaDocument {
+  readonly id: string
+  readonly kind: CredentialSchemaKind
+  readonly mediaType: 'application/schema+json' | 'application/json'
+  readonly contentDigest: string
+  /** W3C SRI pin such as `sha256-<base64>`. */
+  readonly integrity: string
+  /** Canonical permanent AttestBook URL of the exact bytes. */
+  readonly url: string
+  readonly createdAt: string
+}
+
 export type DraftDiagnosticSeverity = 'error' | 'warning'
 
 export interface DraftDiagnostic {

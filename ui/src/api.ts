@@ -12,6 +12,8 @@ import type {
   CaptureExplorerDetail,
   CaptureExplorerPage,
   CorrelateCaptureRequest,
+  CredentialSchemaDocument,
+  CredentialSchemaKind,
   CredentialValidationResult,
   DraftRulebook,
   DraftValidationReport,
@@ -77,6 +79,17 @@ export interface EditorApi {
   ): Promise<DraftRulebook>
   createDraft(request: SaveDraftRequest, csrfToken: string, signal?: AbortSignal): Promise<Rulebook>
   validateDraft(request: SaveDraftRequest, signal?: AbortSignal): Promise<DraftValidationReport>
+  /**
+   * Registers a hosted schema document through the administrator session and
+   * returns its canonical URI and SRI pin (#100). The body is the exact pasted
+   * or uploaded text; the server computes the digest over those bytes.
+   */
+  registerSchemaDocument(
+    kind: CredentialSchemaKind,
+    documentText: string,
+    csrfToken: string,
+    signal?: AbortSignal,
+  ): Promise<CredentialSchemaDocument>
   /** Draft lifecycle reads used by the editor's publication panel (#41). */
   listVersions(rulebookId: string, signal?: AbortSignal): Promise<readonly RulebookVersion[]>
   getPublicationReadiness(
@@ -367,6 +380,23 @@ export function createHttpEditorApi(
         signal,
         'draft validation',
       )
+    },
+    async registerSchemaDocument(kind, documentText, csrfToken, signal) {
+      const response = await fetchImpl(
+        `/api/v1/schema-documents?kind=${encodeURIComponent(kind)}`,
+        {
+          method: 'POST',
+          headers: {
+            accept: 'application/json',
+            'content-type': 'application/schema+json',
+            [ADMIN_CSRF_HEADER]: csrfToken,
+          },
+          credentials: 'same-origin',
+          body: documentText,
+          ...(signal === undefined ? {} : { signal }),
+        },
+      )
+      return readData<CredentialSchemaDocument>(response, 'schema registration')
     },
     async listVersions(rulebookId, signal) {
       const response = await fetchImpl(
