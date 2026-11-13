@@ -47,7 +47,15 @@ const validation = new CredentialValidator({
     ? {}
     : { hostedSchemas: { publicBaseUrl: config.publicBaseUrl, store: registry } }),
 })
-const issuerFixtures = new IssuerFixtureGenerator({ source: registry, sandbox: schemaSandbox })
+const issuerFixtures = new IssuerFixtureGenerator({
+  source: registry,
+  sandbox: schemaSandbox,
+  // A fixture may ground a canonical hosted reference in the immutable schema
+  // store; without a configured origin every reference keeps the caller flow.
+  ...(config.publicBaseUrl === null
+    ? {}
+    : { hostedSchemas: { publicBaseUrl: config.publicBaseUrl, store: registry } }),
+})
 // UI-006 is deliberately mock-backed: the explorer is seeded from the
 // deterministic local mock source and labels every capture `transport: mock`.
 const captures = createMockCaptureExplorer({ validation })

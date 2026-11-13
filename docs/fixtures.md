@@ -1,10 +1,12 @@
 # Rulebook-driven issuer fixtures
 
 **Status:** Phase 3 implementation of the issuer-fixture slice by
-[issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44) (specification FR-013).
-It turns the JSON Schema attribute constraints referenced by one pinned rulebook version into
-an unsigned credential claim payload, caller-selected attribute overrides and labelled,
-verified negative cases. It never signs, issues or presents a credential.
+[issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44) (specification FR-013),
+extended by [issue #102](https://github.com/ForkbombEu/credimi-attestbook/issues/102) to ground
+a canonical AttestBook-hosted schema reference in the immutable local schema store. It turns
+the JSON Schema attribute constraints referenced by one pinned rulebook version into an
+unsigned credential claim payload, caller-selected attribute overrides and labelled, verified
+negative cases. It never signs, issues or presents a credential.
 
 **Authoritative spec:** [`docs/specification.md`](specification.md) §9 (FR-013) and §15
 **Requirements:** [`docs/requirements.md`](requirements.md) FR-013 and AC-10
@@ -15,29 +17,33 @@ digests).
 
 ## 1. Scope and boundaries
 
-Implemented by #44:
+Implemented by #44 and extended by #102:
 
 - selection of one rulebook, one published/historical/draft version and one attestation type
   from the registry, with the version digest recomputed and verified before generation;
 - extraction of the effective attribute constraints from the JSON Schema 2020-12 documents
   that the selected attestation type references in that exact version;
-- matching each caller-supplied document to a version schema reference by URI and verifying
-  the reference's sha256 SRI value before the document can ground a payload;
+- resolution of a canonical AttestBook-hosted reference from the immutable local schema store
+  (never over HTTP), requiring the stored bytes to match both their recorded SHA-256 digest and
+  the pinned rulebook `sha256-...` SRI value before they can ground a payload;
+- matching each caller-supplied document to an external version schema reference by URI and
+  verifying the reference's sha256 SRI value before the document can ground a payload;
 - synthesis of a complete object payload that satisfies every applied document, with an
   attribute definition for each generated property (JSON Pointer, name, required flag,
   effective types and constraints, declaring reference URIs);
 - caller-selected attribute overrides addressed by JSON Pointer, reported back with the
   resulting payload validation;
 - deterministic negative cases derived from the effective constraints, each labelled and
-  verified to fail the supplied documents before it is returned;
+  verified to fail the applied documents before it is returned;
 - the public `POST /api/v1/issuers/fixtures` route and its OpenAPI components.
 
-Deliberately **not** in #44:
+Deliberately **not** implemented:
 
 - signing, key management, credential issuance, OpenID4VCI protocol execution or a wallet
   exchange. The payload is unsigned claim data, not an SD-JWT VC compact serialization;
-- fetching the referenced schema documents. As in credential validation, the caller supplies
-  the exact bytes; no remote schema is retrieved by this slice;
+- fetching a referenced schema document over HTTP. A canonical AttestBook-hosted reference is
+  read from the local immutable store; any other reference needs the exact caller-supplied
+  bytes. An SSRF-safe fetch path is a separate issue and is not used here;
 - synthesis from SD-JWT VC Type Metadata alone. Type Metadata describes claims and display
   values, but not attribute types or value constraints, so guessing a payload from it would
   not be grounded in the rulebook;
@@ -51,24 +57,40 @@ Deliberately **not** in #44:
 `src/fixtures/` exposes `IssuerFixtureGenerator`:
 
 ```ts
-const generator = new IssuerFixtureGenerator({ source: registry })
-const fixture = await generator.generate({
+// A canonical AttestBook-hosted reference is read from the immutable store.
+const hosted = new IssuerFixtureGenerator({
+  source: registry,
+  hostedSchemas: { publicBaseUrl: 'https://attestbook.example', store: registry },
+})
+const hostedFixture = await hosted.generate({
+  rulebookId: rulebook.id,
+  rulebookVersion: '1.0',
+  attestationType: 'PID',
+  overrides: [{ path: '/given_name', value: 'Ada' }],
+})
+
+// An external reference keeps the exact caller-supplied document bytes.
+const externalFixture = await generator.generate({
   rulebookId: rulebook.id,
   rulebookVersion: '1.0',
   attestationType: 'PID',
   schemaDocuments: [{ uri: 'https://issuer.example/schema/pid.json', content: schemaText }],
-  overrides: [{ path: '/given_name', value: 'Ada' }],
 })
 ```
+
+`schemaDocuments` is optional: it is needed only for external references. `hostedSchemas` is
+absent when the deployment has no configured `PUBLIC_BASE_URL`, and then a canonical hosted
+URL is an ordinary external reference that needs caller bytes.
 
 `generate` is asynchronous: the expensive schema work runs in a resource-bounded sandbox
 child (see §2.4). It writes nothing. It throws a typed `RegistryError`:
 
 - `not_found` when the rulebook, version or attestation type does not exist;
 - `invalid_input` for a malformed request, a supplied document that does not belong to the
-  selected attestation type or format, a document that does not match its sha256 SRI value,
-  an override path that does not exist in the generated payload, constraints outside the
-  supported synthesis subset, or a sandbox timeout/memory/output limit;
+  selected attestation type or format, a document that does not match its sha256 SRI value, a
+  selected hosted reference that is missing, corrupt, unpinned or mismatched, an override path
+  that does not exist in the generated payload, constraints outside the supported synthesis
+  subset, or a sandbox timeout/memory/output limit;
 - `IssuerFixtureUnavailableError` (API code `fixture_unavailable`, HTTP `503`) when the shared
   sandbox is at its concurrency limit or unavailable on the platform.
 
@@ -81,30 +103,48 @@ The result is an `IssuerFixtureResult`:
 | `rulebook` | Pinned rulebook id/name/version, recomputed digest, `digestVerified: true`, profile and status. |
 | `attestation` | Selected attestation type, attestation LoS, binding type and supported formats. |
 | `formats` | Distinct formats whose schema references grounded the payload. |
-| `schemaReferences` | Per reference: URI, integrity pin, `integrityVerified`, document kind, `applied` and a safe diagnostic. |
+| `schemaReferences` | Per reference: URI, integrity pin, `integrityVerified`, `source` (`hosted`, `caller` or `null`), document kind, `applied` and a safe diagnostic. |
 | `attributes` | Effective attribute definitions, generated or omitted with a reason. |
 | `payload` | The unsigned claim payload (a JSON object). |
 | `payloadValidation` | `PASS`/`FAIL` of the payload against the applied schema documents, with non-sensitive findings. |
 | `overrides` | Every applied override, its JSON Pointer and value. |
 | `negativeCases` | Labelled, reproducible negative payloads, each verified to fail. |
 | `diagnostics` | Safe, machine-readable findings about references and generation. |
-| `limitations` | The explicit boundaries in §7. |
+| `limitations` | The explicit boundaries in §8. |
 
 ### 2.1 Grounding and integrity
 
-AttestBook does not store schema bodies in a version snapshot. A fixture is therefore
-grounded in a caller-supplied document only when all of the following hold:
+AttestBook does not store schema bodies in a version snapshot. A reference is resolved from
+exactly one deterministic source:
 
-1. the document URI is a schema reference of the selected attestation type in that exact
-   version (and of the requested `format`, when one is given);
-2. the reference carries a sha256 SRI value and the supplied bytes match it;
-3. the document is a JSON Schema 2020-12 object inside the shared document, depth and
-   unsupported-keyword bounds.
+1. **Canonical AttestBook-hosted reference (#102).** The URI must be exactly
+   `${PUBLIC_BASE_URL}/api/v1/schema-documents/{documentId}/content` for this deployment's
+   configured origin, with no credentials, query, fragment or extra path. The generator reads
+   the document from the immutable local store — never over HTTP — recomputes SHA-256 over the
+   stored bytes, requires it to equal the document's recorded `contentDigest`, and requires
+   the reference `sha256-...` SRI to equal that digest. A look-alike origin, prefixed string or
+   near-miss path is not hosted and stays external. A caller document for the same URI is
+   ignored, so caller content cannot override a trusted pinned hosted schema.
+2. **External reference.** The request carries `schemaDocuments` with the exact UTF-8 document
+   text for that URI; the supplied bytes must match the reference sha256 SRI value.
 
-References without a verifiable sha256 pin, references whose document is not supplied and
-SD-JWT VC Type Metadata references are reported in `schemaReferences` and `diagnostics` and
-never silently used. If no reference survives these checks the request fails with
-`invalid_input` instead of returning an ungrounded payload.
+A fixture is grounded only when all of the following hold for a selected reference:
+
+1. it is one of the selected attestation type's references in that exact version (and of the
+   requested `format`, when one is given);
+2. the reference carries a verifiable sha256 SRI value and the resolved bytes match it;
+3. the document is a JSON Schema 2020-12 object inside the shared document, depth,
+   ambiguous-kind and unsupported-keyword bounds.
+
+A selected hosted reference that is missing from the store, whose stored bytes no longer hash
+to their recorded digest, whose SRI is absent or not sha256, or whose stored digest does not
+match the pinned SRI aborts generation with an explicit `invalid_input` diagnostic: a trusted
+pinned hosted reference never silently degrades into an ungrounded partial fixture. References
+without a verifiable caller-supplied document and SD-JWT VC Type Metadata references are
+reported in `schemaReferences` and `diagnostics` and never silently used; a missing external
+document does not prevent a hosted document in the same selection from grounding the payload.
+If no reference survives these checks the request fails with `invalid_input` instead of
+returning an ungrounded payload.
 
 ### 2.2 Attribute definitions
 
@@ -141,14 +181,15 @@ deliberately violates a constraint is allowed and reflected honestly as
 
 ### 2.4 Sandboxed synthesis
 
-The parent process performs only the cheap, already-shared preparation: reference matching,
-JSON parsing, sha256 SRI verification, depth and validation-unsafe keyword checks. The
-untrusted schema documents are then compiled, evaluated and synthesized inside the same
-resource-bounded sandbox runner used by credential validation, with a hard timeout, RSS
-watchdog, output cap and a concurrency limit shared across both features. A hostile or merely
-expensive pinned schema therefore cannot block the HTTP event loop, and `/health` stays
-responsive during generation. Sandbox timeout, memory and output failures are reported as
-`invalid_input` with the limit that was exceeded; a busy or unavailable sandbox is a `503`.
+The parent process performs only the cheap, already-shared preparation: hosted resolution and
+stored-digest verification, reference matching, JSON parsing, sha256 SRI verification, depth
+and validation-unsafe keyword checks. The untrusted schema documents are then compiled,
+evaluated and synthesized inside the same resource-bounded sandbox runner used by credential
+validation, with a hard timeout, RSS watchdog, output cap and a concurrency limit shared across
+both features. A hostile or merely expensive pinned schema therefore cannot block the HTTP
+event loop, and `/health` stays responsive during generation. Sandbox timeout, memory and output
+failures are reported as `invalid_input` with the limit that was exceeded; a busy or unavailable
+sandbox is a `503`.
 
 The fixture evaluator checks only own object properties, so an undeclared `__proto__` key in
 an override value is evaluated as an ordinary own property (for example by
@@ -235,8 +276,8 @@ reproducible starting point for an external issuer's own negative tests.
 
 ## 5. HTTP contract
 
-`POST /api/v1/issuers/fixtures` is public (it reads only public rulebook data and computes
-locally) and accepts:
+`POST /api/v1/issuers/fixtures` is public (it reads only public rulebook data, the local
+schema store and computes locally) and accepts:
 
 ```json
 {
@@ -251,10 +292,13 @@ locally) and accepts:
 }
 ```
 
-`format` and `overrides` are optional; `schemaDocuments` must contain at least one document
-that survives the grounding rules. The response is `{ "data": IssuerFixture }` and validates
-against the `IssuerFixtureResponse` OpenAPI component. The route writes nothing and does not
-perform a network request. A malformed request, unmatched/unpinnable document, unsupported
+`format`, `schemaDocuments` and `overrides` are optional. `schemaDocuments` is needed only for
+external references; a canonical AttestBook-hosted reference is resolved from the store and a
+request without `schemaDocuments` succeeds when at least one selected hosted JSON Schema
+grounds the payload. The response is `{ "data": IssuerFixture }` and validates against the
+`IssuerFixtureResponse` OpenAPI component; each `schemaReferences` entry names its `source`.
+The route writes nothing and does not perform a network request. A malformed request,
+unmatched/unpinnable external document, missing/corrupt/tampered hosted reference, unsupported
 synthesis constraint or exceeded sandbox limit is `400 invalid_request`; a busy or unavailable
 sandbox is `503 fixture_unavailable`; a missing rulebook, version or attestation type is
 `404 not_found`. See [`docs/api.md`](api.md) §3.6 and §4 for the shared error envelope.
@@ -268,8 +312,9 @@ AttestBook deliberately does not produce credentials. A returned payload:
   route, which parses SD-JWT VCs;
 - carries `kind`, `signed: false` and `issued: false`, plus an explicit limitation, so an
   external tool cannot confuse it with an issued credential;
-- validates only the supplied schema documents. Even a structurally valid payload says
-  nothing about cryptography, issuer trust, protocol conformance or interoperability.
+- validates only the applied schema documents, whether resolved from the hosted store or
+  supplied by the caller. Even a structurally valid payload says nothing about cryptography,
+  issuer trust, protocol conformance or interoperability.
 
 An external issuer that wants to test its real credential flow must sign and issue the
 payload itself, with its own keys and protocols, and validate the resulting artifact through
@@ -287,10 +332,20 @@ its own issuer/verifier pipeline.
   skipped optional and `dependentRequired` positions, multi-document `applied: false`
   reporting, the generic evaluator blind-spot guard, the name-collection/probe helpers, an
   unconstrained optional property and large-enum intersection;
+- `src/fixtures/hosted-schema.test.ts` — hosted resolution without caller documents, caller
+  bytes not overriding a hosted reference, a missing hosted document, stored bytes that no
+  longer match their digest, a mismatched SRI pin, an unpinned reference, an unsupported pin
+  algorithm, hosted Type Metadata rejection, Type Metadata kept distinct from a hosted JSON
+  Schema, mixed hosted/external selection with explicit missing-reference behavior, an
+  external-only reference and an unconfigured public origin;
 - `src/api/fixtures.test.ts` — the Hono route, OpenAPI component validation, overrides,
   400/404/503 cases, the `fixture_unavailable` mapping, an HTTP `__proto__` schema refusal, an
   undeclared-`__proto__` override failure, empty-name and nested-subschema unenforced-name
   refusals and a `/health` responsiveness race against a running fixture sandbox;
+- `src/api/hosted-fixtures.test.ts` — the HTTP route wired with a configured public origin:
+  valid hosted generation, missing/tampered/mismatched hosted references, Type-Metadata-only
+  rejection, mixed hosted/external requests with and without the external document, and the
+  no-origin fallback;
 - `bun run openapi:check` — the generated document including the new operation and
   components;
 - `bun run check` — formatting, lint, strict typecheck and the whole test suite.
@@ -298,15 +353,23 @@ its own issuer/verifier pipeline.
 Run them from the repository root:
 
 ```
-bun test src/fixtures src/api/fixtures.test.ts
+bun test src/fixtures src/api/fixtures.test.ts src/api/hosted-fixtures.test.ts
 bun run openapi:check
 bun run check
 ```
 
 ## 8. Limitations
 
-- The generated payload is only as grounded as the caller-supplied, integrity-verified schema
-  documents; AttestBook does not fetch, cache or re-publish them.
+- The generated payload is only as grounded as the resolved, integrity-verified schema
+  documents. A hosted document comes from this deployment's immutable store; an external one
+  from the caller's exact bytes. AttestBook does not fetch, cache or re-publish a remote schema
+  in this slice.
+- A deployment without `PUBLIC_BASE_URL` cannot recognise a canonical hosted URL, so such a
+  reference behaves as an external reference and needs caller bytes. The deployment that
+  published the hosted reference is the one that can resolve it.
+- A selected hosted reference that is missing, corrupt, unpinned or mismatched aborts the
+  request. Partial grounding from other references would hide that a trusted, pinned document
+  was unavailable.
 - The synthesis subset is intentionally small. A rulebook whose constraints rely on patterns,
   formats, references or conditional schemas does not produce a fixture in this slice; the
   request names the unsupported keyword instead of fabricating a value.
@@ -329,5 +392,5 @@ bun run check
   shared resource-bounded sandbox. The sandbox limits are configurable through the same
   `SCHEMA_SANDBOX_*` settings as credential validation and the concurrency cap is shared, so
   a busy sandbox can answer `503 fixture_unavailable` instead of queueing indefinitely.
-- No fixture or schema document is persisted, so a response is only reproducible from the
-  same pinned version, documents and overrides.
+- No fixture or generation history is persisted, so a response is only reproducible from the
+  same pinned version, resolved schema documents and overrides.

@@ -41,7 +41,8 @@ Implemented and exposed by this slice:
   server-side session (added by
   [issue #88](https://github.com/ForkbombEu/credimi-attestbook/issues/88));
 - public rulebook-driven unsigned issuer fixture generation (added by
-  [issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44));
+  [issue #44](https://github.com/ForkbombEu/credimi-attestbook/issues/44), hosted-schema
+  grounding added by [issue #102](https://github.com/ForkbombEu/credimi-attestbook/issues/102));
 - structural credential validation against a pinned rulebook version;
 - reproducible continuous-conformance evidence with a stable content-addressed result
   reference (added by [issue #51](https://github.com/ForkbombEu/credimi-attestbook/issues/51));
@@ -91,15 +92,15 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.13.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.14.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
   export operations added by #42, issuer discovery added by #43, issuer fixture generation
   added by #44, the mock-backed capture explorer added by #48, the optional pinned
   correlation digest added by #49, the read-only headless-wallet comparison added by
   #50, the reproducible conformance run added by #51, the public hosted
-  credential-schema document reads added by #98 and the authenticated schema document
-  registration added by #99); it is separate from the package version reported by
-  `/health`.
+  credential-schema document reads added by #98, the authenticated schema document
+  registration added by #99 and hosted-schema issuer fixture grounding added by #102); it is
+  separate from the package version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
   metadata, provenance and the import identity can never be set through the API).
@@ -429,22 +430,26 @@ rulebook version references. It is not a credential issuer: the payload carries
 }
 ```
 
-The caller supplies the exact schema document bytes, exactly as for credential validation.
-Each URI must be a schema reference of the selected attestation type in that version (and of
-the requested `format`, when present), and its sha256 SRI value must match before the
-document can ground a payload. References without a verifiable pin, references without a
-supplied document and SD-JWT VC Type Metadata references are reported and never used; when
-no reference is usable the route answers `400 invalid_request` rather than an ungrounded
-fixture.
+The caller supplies the exact schema document bytes for an **external** reference, exactly as
+for credential validation. A **canonical AttestBook-hosted** reference — this deployment's
+`${PUBLIC_BASE_URL}/api/v1/schema-documents/{documentId}/content` URL — is instead resolved
+from the immutable local store, never over HTTP, and needs no `schemaDocuments` entry. Each
+URI must be a schema reference of the selected attestation type in that version (and of the
+requested `format`, when present), and its sha256 SRI value must match the resolved bytes
+before the document can ground a payload. A missing, corrupt, unpinned or mismatched hosted
+reference aborts the request with an explicit diagnostic; references without a supplied
+external document and SD-JWT VC Type Metadata references are reported and never used; when no
+reference is usable the route answers `400 invalid_request` rather than an ungrounded fixture.
 
 The response carries the pinned rulebook evidence, the effective attribute definitions (JSON
 Pointer, required flag, types and supported constraints), the generated payload, an explicit
-payload-validation status against the supplied documents, the applied overrides, labelled
-negative cases and limitations. `overrides` replace existing attributes by JSON Pointer and
-are re-validated; an override that deliberately violates a constraint yields
+payload-validation status against the applied documents, the applied overrides, labelled
+negative cases and limitations. Each `schemaReferences` entry includes `source` (`hosted`,
+`caller` or `null`). `overrides` replace existing attributes by JSON Pointer and are
+re-validated; an override that deliberately violates a constraint yields
 `payloadValidation.status: "FAIL"` with findings instead of pretending success. Negative cases
 are derived from the supported constraints in deterministic order, each verified to fail the
-supplied documents before it is returned. Their `id` is stable (`<category>:<path>`) and
+applied documents before it is returned. Their `id` is stable (`<category>:<path>`) and
 `expected` is always `FAIL`.
 
 Compilation, synthesis, payload evaluation and negative-case verification run in the same
@@ -856,7 +861,7 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Import or issuer discovery | unsafe/malformed/unsupported source or issuer metadata, limits, refused input | `422` | `import_rejected` |
 | Import or issuer discovery | remote fetch failure, DNS failure, timeout, redirect limit, oversized remote response, unsupported remote status | `502` | `import_fetch_failed` |
 | Import or issuer discovery | `invalid_source`/`invalid_url` client input | `400` | `invalid_request` |
-| Issuer fixtures | malformed request, unmatched/unpinnable schema document, unsupported synthesis constraint, unknown override path | `400` | `invalid_request` |
+| Issuer fixtures | malformed request, unmatched/unpinnable external schema document, missing/corrupt/unpinned/mismatched hosted reference, unsupported synthesis constraint, unknown override path | `400` | `invalid_request` |
 | Issuer fixtures | rulebook, version, attestation type or stored snapshot does not exist | `404` | `not_found` |
 | Issuer fixtures | fixture sandbox at its concurrency limit or unavailable on this platform | `503` | `fixture_unavailable` |
 | Verifier constraints | malformed request, foreign/unpinned schema document, integrity mismatch, invalid JSON, exceeded inspection bound or unsupported format | `400` | `invalid_request` |

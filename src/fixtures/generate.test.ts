@@ -202,6 +202,7 @@ describe('IssuerFixtureGenerator', () => {
         uri: SCHEMA_URI,
         integrity: sha256Sri(CLAIMS_SCHEMA_TEXT),
         integrityVerified: true,
+        source: 'caller',
         kind: 'json_schema',
         applied: true,
       },

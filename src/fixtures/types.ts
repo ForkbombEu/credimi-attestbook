@@ -4,8 +4,11 @@
 // constraints that a pinned rulebook version references. It is deliberately not
 // a credential: AttestBook does not sign, issue or present it, and the result
 // carries explicit `signed`/`issued` flags plus the limitations of applying a
-// caller-supplied schema document. Negative cases are labelled, deterministic
-// mutations of the same payload, each verified to fail the supplied schemas.
+// schema document. A canonical AttestBook-hosted reference is grounded in the
+// exact bytes of the immutable local schema store; an external reference stays
+// grounded in the exact bytes the caller supplies. Negative cases are labelled,
+// deterministic mutations of the same payload, each verified to fail the
+// applied schemas.
 
 import type { Rulebook, RulebookVersion, RulebookVersionContent } from '../registry/types'
 import type { SchemaDocumentInput } from '../validation/types'
@@ -60,8 +63,14 @@ export interface IssuerFixtureSchemaReferenceEvidence {
   readonly formatIdentifier: string
   readonly uri: string
   readonly integrity: string | null
-  /** Whether the supplied bytes matched the reference's sha256 SRI value. */
+  /** Whether the verified bytes matched the reference's sha256 SRI value. */
   readonly integrityVerified: boolean
+  /**
+   * Where the verified bytes came from: the immutable AttestBook store for a
+   * canonical hosted URL, the caller's `schemaDocuments`, or neither when no
+   * document could ground the fixture.
+   */
+  readonly source: 'hosted' | 'caller' | null
   readonly kind: 'json_schema' | 'type_metadata' | null
   /** Whether the document participated in synthesis and payload validation. */
   readonly applied: boolean
@@ -168,7 +177,7 @@ export interface GenerateIssuerFixtureInput {
   readonly attestationType: string
   /** Restricts eligible schema references to this credential format. */
   readonly format?: string
-  /** Exact schema document bytes, as in credential validation. */
+  /** Exact bytes for external schema references; a hosted reference needs none. */
   readonly schemaDocuments?: readonly SchemaDocumentInput[]
   readonly overrides?: readonly IssuerFixtureOverrideInput[]
 }

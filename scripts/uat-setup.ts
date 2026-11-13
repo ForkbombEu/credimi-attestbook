@@ -25,6 +25,7 @@ import { join, resolve } from 'node:path'
 
 import { openDatabase } from '../src/db/database'
 import { applyMigrations } from '../src/db/migrations'
+import { credentialSchemaDocumentUrl, sha256Sri } from '../src/public-urls'
 import { Registry } from '../src/registry/registry'
 import { provisionProvider } from '../src/registry/bootstrap'
 import { RegistryStore } from '../src/registry/store'
@@ -65,7 +66,7 @@ const UAT_HOSTED_SCHEMA_TEXT = JSON.stringify({
   type: 'object',
   required: ['family_name'],
   properties: {
-    family_name: { type: 'string' },
+    family_name: { type: 'string', minLength: 1, maxLength: 40 },
   },
   additionalProperties: false,
 })
@@ -120,6 +121,40 @@ try {
     bytes: new TextEncoder().encode(UAT_HOSTED_SCHEMA_TEXT),
     provenance: { source: 'uat-setup' },
   })
+  const hostedSchemaUri = credentialSchemaDocumentUrl(UAT_PUBLIC_BASE_URL, hostedSchema.id)
+
+  // Seed a published rulebook version whose attestation references the hosted
+  // schema, so the issuer-fixture UAT can request a fixture without supplying
+  // `schemaDocuments`. The reference carries the sha256 SRI of the stored bytes.
+  const hostedRulebook = registry.createRulebook(writer.actor, {
+    name: 'UAT Hosted Schema Rulebook',
+    description: 'Disposable published rulebook version grounded in a hosted JSON Schema',
+    applicableSpec: 'ts11@1.0.1',
+    attestations: [
+      {
+        name: 'PID',
+        attestationLoS: 'iso_18045_high',
+        bindingType: 'key',
+        supportedFormats: ['dc+sd-jwt'],
+      },
+    ],
+  })
+  const hostedAttestation = registry
+    .listAttestations(hostedRulebook.id)
+    .find((candidate) => candidate.name === 'PID')
+  if (hostedAttestation === undefined) {
+    throw new Error('UAT setup failed to create the hosted-schema attestation type')
+  }
+  registry.addSchemaReference(writer.actor, hostedRulebook.id, {
+    formatIdentifier: 'dc+sd-jwt',
+    uri: hostedSchemaUri,
+    integrity: sha256Sri(hostedSchema.contentDigest),
+    attestationId: hostedAttestation.id,
+  })
+  const hostedVersion = registry.createRulebookVersion(writer.actor, hostedRulebook.id, {
+    version: '1.0',
+  })
+  registry.publishRulebookVersion(writer.actor, hostedRulebook.id, '1.0')
 
   const passwordHash = await Bun.password.hash(UAT_ADMIN_PASSWORD, { algorithm: 'argon2id' })
   const environment: readonly (readonly [string, string])[] = [
@@ -155,8 +190,15 @@ try {
           kind: hostedSchema.kind,
           mediaType: hostedSchema.mediaType,
           contentDigest: hostedSchema.contentDigest,
-          url: `${UAT_PUBLIC_BASE_URL}/api/v1/schema-documents/${hostedSchema.id}/content`,
+          url: hostedSchemaUri,
           metadataUrl: `${UAT_PUBLIC_BASE_URL}/api/v1/schema-documents/${hostedSchema.id}`,
+        },
+        hostedFixtureRulebook: {
+          rulebookId: hostedRulebook.id,
+          rulebookName: hostedRulebook.name,
+          version: hostedVersion.version,
+          attestationType: hostedAttestation.name,
+          format: 'dc+sd-jwt',
         },
       },
       null,
@@ -166,7 +208,7 @@ try {
   )
 
   console.log(
-    `UAT fixtures provisioned: administrator provider ${administrator.provider.id}, writer provider ${writer.provider.id}, hosted schema document ${hostedSchema.id} (test credentials only; writer token is the fixed UAT fixture value)`,
+    `UAT fixtures provisioned: administrator provider ${administrator.provider.id}, writer provider ${writer.provider.id}, hosted schema document ${hostedSchema.id}, hosted fixture rulebook ${hostedRulebook.id} (test credentials only; writer token is the fixed UAT fixture value)`,
   )
 } finally {
   database.close()

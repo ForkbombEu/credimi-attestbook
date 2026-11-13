@@ -226,21 +226,25 @@ in `{ "data": ... }` like the other product-API successes. See
 `POST /api/v1/issuers/fixtures` synthesizes an **unsigned** credential claim payload from the
 JSON Schema 2020-12 attribute constraints referenced by one pinned rulebook version. It is
 not an issuer: the response carries `kind: "attestbook.unsigned-issuer-fixture@1"`,
-`signed: false`, `issued: false` and an explicit limitations list. As with credential
-validation, the caller supplies the exact schema document bytes; each URI must be a schema
-reference of the selected attestation type in that version and its sha256 SRI value must
-match before it grounds a payload. References without a verifiable pin, references without a
-supplied document and Type Metadata references are reported, never silently used.
+`signed: false`, `issued: false` and an explicit limitations list. For a **canonical
+AttestBook-hosted** schema reference, the generator reads the exact bytes from the immutable
+local schema store (never over HTTP) and verifies both the stored digest and the pinned sha256
+SRI value, so a request needs no `schemaDocuments` entry. Any other reference is external: the
+caller supplies the exact document bytes, each URI must be a schema reference of the selected
+attestation type in that version and its sha256 SRI value must match before it grounds a
+payload. A missing, corrupt, unpinned or mismatched hosted reference fails the request with an
+explicit diagnostic; references without a supplied external document and Type Metadata
+references are reported, never silently used.
 
 Schema compilation, payload synthesis and negative-case verification run in the same
 resource-bounded sandbox as credential validation, so a hostile pinned schema cannot block the
 HTTP event loop. The response contains the effective attribute definitions (JSON Pointer,
 required flag, types and supported constraints), the generated payload, its validation against
-the supplied documents, the applied JSON-Pointer overrides and deterministic, labelled
-negative cases.
+the applied documents, each reference's `source` (`hosted`, `caller` or `null`), the applied
+JSON-Pointer overrides and deterministic, labelled negative cases.
 Each negative case is verified to fail before it is returned and carries a stable
 `<category>:<path>` id. The supported synthesis subset, the unsigned boundary and the
-non-claims (no signing, issuance, schema fetching, cryptography or interoperability) are
+non-claims (no signing, issuance, remote schema fetching, cryptography or interoperability) are
 documented in [`docs/fixtures.md`](fixtures.md).
 
 ## Verifier constraints
@@ -500,6 +504,13 @@ AttestBook publish an attacker-controlled schema URL. The local UAT setup seeds 
 document and writes its URL to `dist/uat/fixtures.json`; provider registration API tests create
 the rest through the documented route. Existing external schema URLs are untouched and stay
 external references.
+
+The same setup seeds a published rulebook version named **`UAT Hosted Schema Rulebook`**
+(version `1.0`, attestation type `PID`, format `dc+sd-jwt`) whose schema reference is that
+hosted document and its `sha256` SRI value. A local fixture UAT can find it through the public
+API and request `POST /api/v1/issuers/fixtures` with only `rulebookId`, `rulebookVersion` and
+`attestationType`; `dist/uat/fixtures.json` also records the seeded `hostedFixtureRulebook`
+ids for a client that can read the sandbox filesystem.
 
 ## Administrator browser login
 

@@ -1042,7 +1042,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: ISSUER_FIXTURE_PATH,
     summary: 'Generate unsigned issuer fixtures from a pinned rulebook version',
     description:
-      'Synthesizes an unsigned credential claim payload from the JSON Schema 2020-12 attribute constraints that the selected attestation type references in one pinned rulebook version. The caller supplies the exact schema document bytes; they are matched to the version references and verified against their sha256 SRI value before grounding the payload. Attribute definitions, deterministic overrides and labelled negative cases are returned. The payload is never signed or issued and is validated only against the supplied schema documents.',
+      'Synthesizes an unsigned credential claim payload from the JSON Schema 2020-12 attribute constraints that the selected attestation type references in one pinned rulebook version. A canonical AttestBook-hosted reference is grounded in the exact bytes of the immutable local schema store, verified against the stored digest and the pinned sha256 SRI value; any other reference needs the exact document bytes supplied in `schemaDocuments` and verified the same way. Attribute definitions, deterministic overrides and labelled negative cases are returned. The payload is never signed or issued and is validated only against the applied schema documents.',
     tag: 'issuers',
     security: false,
     request: {
@@ -1050,7 +1050,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
       mediaType: 'application/json',
       required: true,
       description:
-        'Pinned rulebook version, attestation type, the exact schema documents and optional attribute overrides.',
+        'Pinned rulebook version, attestation type, optional exact documents for external schema references and optional attribute overrides. A hosted reference needs no caller document.',
     },
     responses: [
       {
@@ -2553,7 +2553,17 @@ export function createApiHandlers(
     dependencies.issuerFixtures ??
     (dependencies.registry === undefined
       ? undefined
-      : new IssuerFixtureGenerator({ source: dependencies.registry }))
+      : new IssuerFixtureGenerator({
+          source: dependencies.registry,
+          ...(dependencies.publicBaseUrl === undefined || dependencies.publicBaseUrl === null
+            ? {}
+            : {
+                hostedSchemas: {
+                  publicBaseUrl: dependencies.publicBaseUrl,
+                  store: dependencies.registry,
+                },
+              }),
+        }))
   const verifierPolicy =
     dependencies.verifierPolicy ??
     (dependencies.registry === undefined
