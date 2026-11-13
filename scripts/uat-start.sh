@@ -17,4 +17,9 @@ set -a
 . "$environment_file"
 set +a
 
-exec bun dist/server.js
+# Run the application under the test-only supervisor so a local UAT can restart
+# it through `POST http://127.0.0.1:3001/restart` and observe restart
+# persistence. The supervisor forwards the application's output and keeps the
+# application on its normal port; it binds loopback only and is never used by
+# the production image.
+exec bun scripts/uat-supervisor.ts

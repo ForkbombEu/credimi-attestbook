@@ -531,6 +531,20 @@ filesystem, so provider B's token is the documented disposable fixture value
 `att_uat_writer_disposable_test_token_only`: it is inserted only into the sandbox database,
 is never emitted by the application and is not a production credential.
 
+The UAT start command runs the application under a small test-only supervisor on loopback.
+A local UAT that needs to observe restart persistence can restart the application without
+process or container control by calling:
+
+```bash
+curl --fail --request POST http://127.0.0.1:3001/restart
+```
+
+The supervisor stops the application, starts it again against the same environment and
+SQLite database, waits for `/health` to become ready and answers `200` with the new process
+id. The application stays on its normal port (`3000` by default) and the supervisor forwards
+its output. This supervisor is test tooling only: it lives under `scripts/`, is not part of
+the production image or server, and both it and the application bind loopback.
+
 A live browser session authorizes the same protected write routes as a provider bearer token
 (issue #89): both resolve to the same provider actor, ownership and audit attribution are
 unchanged, and an explicit invalid bearer never falls back to the cookie. `POST
