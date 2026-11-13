@@ -6,6 +6,7 @@ import {
   documentFromDraft,
   draftRequest,
   EMPTY_METADATA,
+  hostedSchemasFromDraft,
   parseDraftDocument,
   serializeDraftDocument,
   validationSummary,
@@ -13,6 +14,7 @@ import {
   type DraftMetadata,
 } from './draft'
 import type { DraftContentDocument, DraftDiagnostic, DraftRulebook } from './types'
+import { HOSTED_SCHEMA } from './test/fixtures'
 
 const DOCUMENT: DraftContentDocument = {
   attestations: [
@@ -102,6 +104,30 @@ describe('draft JSON helpers', () => {
 
   test('extracts the editable document from a loaded draft', () => {
     expect(documentFromDraft(draft())).toEqual(DOCUMENT)
+  })
+
+  test('collects the server-resolved hosted association without changing the JSON', () => {
+    const loaded = draft({
+      attestations: [
+        {
+          ...DOCUMENT.attestations[0]!,
+          schemaReferences: [
+            {
+              ...DOCUMENT.attestations[0]!.schemaReferences[0]!,
+              uri: HOSTED_SCHEMA.url,
+              integrity: HOSTED_SCHEMA.integrity,
+              hostedSchema: HOSTED_SCHEMA,
+            },
+            DOCUMENT.attestations[0]!.schemaReferences[0]!,
+          ],
+        },
+      ],
+    })
+
+    const schemas = hostedSchemasFromDraft(loaded)
+    expect(schemas.get(HOSTED_SCHEMA.url)).toEqual(HOSTED_SCHEMA)
+    expect(schemas.size).toBe(1)
+    expect(serializeDraftDocument(documentFromDraft(loaded))).not.toContain('hostedSchema')
   })
 
   test('builds one request body for create and save, omitting an empty source URL', () => {

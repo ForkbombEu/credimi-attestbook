@@ -245,6 +245,12 @@ token because it records server state that every reader sees.
   HTTP only for loopback hosts) without credentials, path, query or fragment, and an invalid
   value fails startup. A missing origin leaves the content route working but makes the
   metadata routes answer an explicit `503 public_base_url_unavailable`.
+- The hosted/external provenance added to detail, draft and exact-version reads (#103) is a
+  read-time projection over the public document metadata. It includes the document id, kind,
+  media type, digest, SRI pin, URL and creation time only; provider ownership, registration
+  provenance and tokens remain registry-internal. A reference is recognised only by the exact
+  canonical content URL, so a look-alike host, extra path or header-derived URL stays
+  external; snapshot bytes are parsed, never rewritten.
 - Credential validation recognises an AttestBook-hosted reference only by the exact canonical
   content URL of that configured origin, and resolves it from the immutable local store
   (`src/validation/hosted-schema.ts`). It never performs an HTTP request to the URL, never

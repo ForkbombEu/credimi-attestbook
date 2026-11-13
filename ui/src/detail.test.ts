@@ -6,15 +6,21 @@ import {
   attestationNameFor,
   describeReference,
   formatDigest,
+  hostedIntegrityState,
+  hostedSchemaDownloadName,
   loadRulebookDetail,
+  referenceSource,
   referencesForAttestation,
   rulebookLevelReferences,
   versionsNewestFirst,
 } from './detail'
 import {
   createFakeApi,
+  HOSTED_SCHEMA,
   makeAttestation,
+  makeHostedSchema,
   makeRulebook,
+  makeSchemaReference,
   makeVersion,
   PID_SCHEMA_REFERENCE,
   RULEBOOK_SCHEMA_REFERENCE,
@@ -135,6 +141,35 @@ describe('detail helpers', () => {
   test('shortens a digest while keeping the full value available to the caller', () => {
     expect(formatDigest('a'.repeat(64))).toBe(`${'a'.repeat(16)}…`)
     expect(formatDigest('short')).toBe('short')
+  })
+
+  test('derives reference provenance from the stored-document association', () => {
+    const hosted = makeSchemaReference({ hostedSchema: HOSTED_SCHEMA })
+    const external = makeSchemaReference({ hostedSchema: null })
+
+    expect(referenceSource(hosted)).toBe('hosted')
+    expect(referenceSource(external)).toBe('external')
+    expect(hostedSchemaDownloadName(HOSTED_SCHEMA)).toBe('attestbook-json-schema-document-pid.json')
+    expect(hostedSchemaDownloadName(makeHostedSchema({ kind: 'sd_jwt_vc_type_metadata' }))).toBe(
+      'attestbook-type-metadata-document-pid.json',
+    )
+  })
+
+  test('checks the persisted SRI pin against the stored document digest', () => {
+    expect(
+      hostedIntegrityState(
+        makeSchemaReference({ integrity: HOSTED_SCHEMA.integrity, hostedSchema: HOSTED_SCHEMA }),
+      ),
+    ).toBe('matches')
+    expect(
+      hostedIntegrityState(makeSchemaReference({ integrity: null, hostedSchema: HOSTED_SCHEMA })),
+    ).toBe('missing')
+    expect(
+      hostedIntegrityState(
+        makeSchemaReference({ integrity: 'sha256-diZmVyZQ', hostedSchema: HOSTED_SCHEMA }),
+      ),
+    ).toBe('mismatch')
+    expect(hostedIntegrityState(makeSchemaReference({ hostedSchema: null }))).toBe('not_hosted')
   })
 
   test('builds a detail snapshot for a rulebook with no versions', async () => {

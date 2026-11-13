@@ -6,8 +6,10 @@ import { type CatalogApi } from './api'
 import { RulebookDetailPage } from './RulebookDetailPage'
 import {
   createFakeApi,
+  HOSTED_SCHEMA,
   makeAttestation,
   makeRulebook,
+  makeSchemaReference,
   makeVersion,
   SAMPLE_DATASET,
 } from './test/fixtures'
@@ -30,6 +32,7 @@ describe('rulebook detail states', () => {
       listAttestations: () => new Promise(() => {}),
       listSchemaReferences: () => new Promise(() => {}),
       listVersions: () => new Promise(() => {}),
+      getVersionSchemaReferences: () => new Promise(() => {}),
       getVersionDiff: () => new Promise(() => {}),
     }
 
@@ -250,6 +253,137 @@ describe('rulebook detail content', () => {
     expect(await screen.findByText('Not published')).toBeInTheDocument()
     expect(screen.getByText('not-a-date')).toBeInTheDocument()
     expect(screen.getByText('short')).toBeInTheDocument()
+  })
+})
+
+describe('hosted and external schema provenance', () => {
+  const hosted = makeSchemaReference({
+    id: 'reference-hosted',
+    formatIdentifier: 'dc+sd-jwt',
+    uri: HOSTED_SCHEMA.url,
+    integrity: HOSTED_SCHEMA.integrity,
+    hostedSchema: HOSTED_SCHEMA,
+  })
+  const external = makeSchemaReference({
+    id: 'reference-external',
+    formatIdentifier: 'mso_mdoc',
+    uri: 'https://issuer.example.org/schemas/pid-mdoc',
+    integrity: null,
+    hostedSchema: null,
+  })
+  const dataset = {
+    ...SAMPLE_DATASET,
+    attestations: {
+      'rulebook-pid': [makeAttestation({ schemaReferences: [hosted, external] })],
+    },
+    schemaReferences: { 'rulebook-pid': [hosted, external] },
+  }
+
+  test('distinguishes hosted documents from external URLs in the same rulebook', async () => {
+    renderDetail(createFakeApi(dataset))
+
+    const section = await screen.findByRole('region', { name: 'Schema references' })
+    expect(within(section).getAllByText('Hosted by AttestBook').length).toBeGreaterThan(0)
+    expect(within(section).getAllByText('External URL').length).toBeGreaterThan(0)
+    expect(within(section).getAllByText('JSON Schema 2020-12').length).toBeGreaterThan(0)
+    expect(within(section).getAllByText('application/schema+json').length).toBeGreaterThan(0)
+    expect(within(section).getAllByText(`${'c'.repeat(16)}…`).length).toBeGreaterThan(0)
+    expect(within(section).getAllByText('Pin matches stored digest').length).toBeGreaterThan(0)
+
+    const download = within(section).getAllByRole('link', {
+      name: /Download the JSON Schema 2020-12 document for dc\+sd-jwt/,
+    })[0]!
+    expect(download).toHaveAttribute('href', HOSTED_SCHEMA.url)
+    expect(download).toHaveAttribute('download', 'attestbook-json-schema-document-pid.json')
+
+    const externalLink = within(section).getAllByRole('link', {
+      name: /https:\/\/issuer\.example\.org\/schemas\/pid-mdoc/,
+    })[0]!
+    expect(externalLink).toHaveAttribute('href', 'https://issuer.example.org/schemas/pid-mdoc')
+    expect(externalLink).toHaveAttribute('target', '_blank')
+  })
+
+  test('inspects the exact frozen version and names its hosted references', async () => {
+    const user = userEvent.setup()
+    renderDetail(
+      createFakeApi({
+        ...dataset,
+        versionSchemaReferences: {
+          'rulebook-pid:1.0': {
+            version: '1.0',
+            contentDigest: 'a'.repeat(64),
+            status: 'published',
+            publishedAt: '2026-02-03T10:00:00.000Z',
+            attestations: [
+              {
+                name: 'Person Identification Data',
+                schemaReferences: [
+                  {
+                    formatIdentifier: 'dc+sd-jwt',
+                    uri: HOSTED_SCHEMA.url,
+                    integrity: HOSTED_SCHEMA.integrity,
+                    hostedSchema: HOSTED_SCHEMA,
+                  },
+                  {
+                    formatIdentifier: 'mso_mdoc',
+                    uri: 'https://issuer.example.org/schemas/pid-mdoc',
+                    integrity: null,
+                    hostedSchema: null,
+                  },
+                ],
+              },
+            ],
+            schemaReferences: [],
+          },
+        },
+      }),
+    )
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Inspect references for version 1.0',
+      }),
+    )
+
+    expect(await screen.findByText('Schema references in version 1.0')).toBeInTheDocument()
+    expect(screen.getByText(/Exact frozen version/)).toBeInTheDocument()
+    expect(screen.getAllByText(`${'a'.repeat(16)}…`).length).toBeGreaterThan(0)
+    expect(screen.getAllByText('Hosted by AttestBook').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('External URL').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('application/schema+json').length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByRole('link', {
+        name: /Download the JSON Schema 2020-12 document for dc\+sd-jwt/,
+      }).length,
+    ).toBeGreaterThan(0)
+  })
+
+  test('reports a failed version inspection and retries it', async () => {
+    const user = userEvent.setup()
+    const api = createFakeApi(dataset)
+    let attempts = 0
+    renderDetail({
+      ...api,
+      getVersionSchemaReferences: async (rulebookId, version, signal) => {
+        attempts += 1
+        if (attempts === 1) {
+          throw new Error('The version schema references could not be read.')
+        }
+        return api.getVersionSchemaReferences(rulebookId, version, signal)
+      },
+    })
+
+    await user.click(
+      await screen.findByRole('button', {
+        name: 'Inspect references for version 1.0',
+      }),
+    )
+    const alert = await screen.findByRole('alert')
+    expect(alert).toHaveTextContent('The version schema references could not be read.')
+
+    await user.click(within(alert).getByRole('button', { name: 'Retry' }))
+    expect(await screen.findByText('Schema references in version 1.0')).toBeInTheDocument()
+    expect(attempts).toBe(2)
   })
 })
 

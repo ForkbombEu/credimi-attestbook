@@ -617,6 +617,17 @@ ${PUBLIC_BASE_URL}/api/v1/schema-documents/{documentId}/content
   `schemaReferences` entry; the draft API and the version snapshot carry exactly
   `formatIdentifier`, `uri` and `integrity`, so a stored-URI reference is indistinguishable
   from an external one in the persisted rulebook. See [`docs/api.md`](api.md) §3.13.
+- Issue #103 adds a **read-time** hosted association to the public reference projections
+  (`GET .../schema-references`, `.../attestations`, `.../draft` and
+  `.../versions/{version}/schema-references`). A reference whose exact URI equals a stored
+  document's canonical content URL carries `hostedSchema` with the public id, kind, media
+  type, SHA-256 digest, SRI pin, URL and creation time; every other reference carries
+  `hostedSchema: null`. The lookup reuses the strict canonical-URL parser, so a look-alike
+  host, extra path, query or fragment stays external. The member is derived on read, is
+  never persisted or frozen into a snapshot, and exposes no provider ownership, provenance
+  or token. The exact-version read parses the frozen artifact without rewriting its bytes
+  and reports the version label and content digest with the grouped references. See
+  [`docs/api.md`](api.md) §3.14 and [`docs/schema-authoring.md`](schema-authoring.md).
 
 ## 7. Validation and failure model
 

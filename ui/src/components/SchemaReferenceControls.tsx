@@ -9,6 +9,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from 'react'
 
 import { isSessionAuthError, type EditorApi } from '../api'
+import { formatDigest, hostedIntegrityState, hostedSchemaDownloadName } from '../detail'
 import {
   HOSTED_SCHEMA_KIND,
   MAX_HOSTED_SCHEMA_BYTES,
@@ -20,7 +21,7 @@ import {
   validateExternalSchema,
   type SchemaControlAttestation,
 } from '../schema-reference'
-import type { DraftContentDocument, DraftSchemaReference } from '../types'
+import type { DraftContentDocument, DraftSchemaReference, HostedSchema } from '../types'
 
 type SchemaSource = 'hosted' | 'external'
 
@@ -33,6 +34,12 @@ interface SchemaReferenceControlsProps {
   /** Null means the administrator session cannot authorize a registration. */
   readonly csrfToken: string | null
   readonly api: EditorApi
+  /**
+   * Stored-document associations the API resolved for the loaded draft (#103).
+   * Keyed by the exact reference URI; registrations made in this view are added
+   * locally so a just-inserted reference is identified before it is saved.
+   */
+  readonly hostedSchemas?: ReadonlyMap<string, HostedSchema>
   readonly onDocumentChange: (text: string) => void
   readonly onSessionExpired: () => void
 }
@@ -48,23 +55,12 @@ function rowKey(attestationIndex: number, formatIdentifier: string): string {
   return `${attestationIndex}:${formatIdentifier}`
 }
 
-/** A hosted reference is this origin's AttestBook document path. */
-function isHostedReference(reference: DraftSchemaReference): boolean {
-  try {
-    const url = new URL(reference.uri, window.location.origin)
-    return (
-      url.origin === window.location.origin && url.pathname.startsWith('/api/v1/schema-documents/')
-    )
-  } catch {
-    return false
-  }
+function kindLabel(kind: HostedSchema['kind']): string {
+  return kind === 'json_schema_2020_12' ? 'JSON Schema 2020-12' : 'SD-JWT VC Type Metadata'
 }
 
-function defaultMode(reference: DraftSchemaReference | null): SchemaSource {
-  if (reference === null) {
-    return 'hosted'
-  }
-  return isHostedReference(reference) ? 'hosted' : 'external'
+function defaultMode(hosted: HostedSchema | null): SchemaSource {
+  return hosted === null ? 'external' : 'hosted'
 }
 
 function formatName(formatIdentifier: string): string {
@@ -78,12 +74,29 @@ export function SchemaReferenceControls({
   disabledReason,
   csrfToken,
   api,
+  hostedSchemas,
   onDocumentChange,
   onSessionExpired,
 }: SchemaReferenceControlsProps) {
   const fieldId = useId()
   const prefix = `schema-${fieldId.replaceAll(':', '')}`
   const attestations = useMemo(() => schemaControlAttestations(document), [document])
+  // Registrations made in this view are known associations even though the
+  // inserted JSON is the ordinary URI/integrity pair. Loaded associations come
+  // from the API, so the row never has to guess from a URL prefix.
+  const registeredSchemas = useRef(new Map<string, HostedSchema>())
+
+  const hostedFor = (reference: DraftSchemaReference | null): HostedSchema | null => {
+    if (reference === null) {
+      return null
+    }
+    return (
+      registeredSchemas.current.get(reference.uri) ??
+      hostedSchemas?.get(reference.uri) ??
+      reference.hostedSchema ??
+      null
+    )
+  }
 
   const [openKey, setOpenKey] = useState<string | null>(null)
   const [mode, setMode] = useState<SchemaSource>('hosted')
@@ -121,7 +134,7 @@ export function SchemaReferenceControls({
   const openForm = (attestation: SchemaControlAttestation, formatIdentifier: string) => {
     const reference = referenceForFormat(attestation, formatIdentifier)
     setOpenKey(rowKey(attestation.index, formatIdentifier))
-    setMode(defaultMode(reference))
+    setMode(defaultMode(hostedFor(reference)))
     setResult(null)
     setStatus(null)
     resetForm()
@@ -194,6 +207,7 @@ export function SchemaReferenceControls({
     setFormError(null)
     try {
       const registered = await api.registerSchemaDocument(HOSTED_SCHEMA_KIND, schemaText, csrfToken)
+      registeredSchemas.current.set(registered.url, registered)
       const edit = insertSchemaReference(
         documentTextRef.current,
         attestation.index,
@@ -608,6 +622,11 @@ export function SchemaReferenceControls({
             {attestation.formats.map((formatIdentifier) => {
               const key = rowKey(attestation.index, formatIdentifier)
               const reference = referenceForFormat(attestation, formatIdentifier)
+              const hosted = hostedFor(reference)
+              const pinState = hostedIntegrityState({
+                integrity: reference?.integrity ?? null,
+                hostedSchema: hosted,
+              })
               const open = openKey === key
               return (
                 <div className="schema-row" key={formatIdentifier}>
@@ -617,8 +636,10 @@ export function SchemaReferenceControls({
                       {reference === null ? (
                         <span className="schema-row__missing">No schema attached</span>
                       ) : (
-                        <span className="schema-row__source">
-                          {isHostedReference(reference) ? 'AttestBook-hosted' : 'External'}
+                        <span
+                          className={`schema-row__source schema-row__source--${hosted === null ? 'external' : 'hosted'}`}
+                        >
+                          {hosted === null ? 'External URL' : 'Hosted by AttestBook'}
                         </span>
                       )}
                     </p>
@@ -633,7 +654,39 @@ export function SchemaReferenceControls({
                           ) : (
                             <code>{reference.integrity}</code>
                           )}
+                          {pinState === 'matches' ? (
+                            <span className="schema-row__pin schema-row__pin--ok">
+                              {' '}
+                              · Pin matches stored digest
+                            </span>
+                          ) : null}
+                          {pinState === 'mismatch' ? (
+                            <span className="schema-row__pin schema-row__pin--mismatch">
+                              {' '}
+                              · Pin does not match stored digest
+                            </span>
+                          ) : null}
                         </p>
+                        {hosted === null ? null : (
+                          <p className="schema-row__hosted">
+                            <span>{kindLabel(hosted.kind)}</span>
+                            <span>
+                              <code>{hosted.mediaType}</code>
+                            </span>
+                            <span title={hosted.contentDigest}>
+                              SHA-256 <code>{formatDigest(hosted.contentDigest)}</code>
+                            </span>
+                            <a
+                              href={hosted.url}
+                              download={hostedSchemaDownloadName(hosted)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              aria-label={`Download the hosted ${kindLabel(hosted.kind)} document for ${attestation.name} (${formatName(formatIdentifier)})`}
+                            >
+                              Download
+                            </a>
+                          </p>
+                        )}
                       </>
                     )}
                   </div>

@@ -26,6 +26,7 @@ import type {
   SchemaReference,
   ValidateCredentialRequest,
   VersionDiff,
+  VersionSchemaReferences,
 } from './types'
 
 /** Hard cap of the catalogue API page size (`limit` maximum). */
@@ -53,6 +54,16 @@ export interface CatalogApi {
     signal?: AbortSignal,
   ): Promise<readonly SchemaReference[]>
   listVersions(rulebookId: string, signal?: AbortSignal): Promise<readonly RulebookVersion[]>
+  /**
+   * Reads the schema references frozen in one exact version snapshot, with the
+   * public hosted-document association the server derived from its store
+   * (#103). The version label and digest pin which snapshot was inspected.
+   */
+  getVersionSchemaReferences(
+    rulebookId: string,
+    version: string,
+    signal?: AbortSignal,
+  ): Promise<VersionSchemaReferences>
   getVersionDiff(
     rulebookId: string,
     fromVersion: string,
@@ -237,6 +248,11 @@ export function createHttpCatalogApi(
       const body = await getJson<unknown>(fetchImpl, path, signal)
       return singleData<readonly RulebookVersion[]>(body)
     },
+    async getVersionSchemaReferences(rulebookId, version, signal) {
+      const path = versionSchemaReferencesPath(rulebookId, version)
+      const body = await getJson<unknown>(fetchImpl, path, signal)
+      return singleData<VersionSchemaReferences>(body, 'version schema references')
+    },
     async getVersionDiff(rulebookId, fromVersion, toVersion, signal) {
       const query = new URLSearchParams({ to: toVersion })
       const path = `${rulebookPath(rulebookId)}/versions/${encodeURIComponent(fromVersion)}/compare?${query.toString()}`
@@ -253,6 +269,11 @@ export function createHttpCatalogApi(
  */
 export function versionContentPath(rulebookId: string, version: string): string {
   return `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/versions/${encodeURIComponent(version)}/content`
+}
+
+/** Public path of one exact version's schema references and hosted provenance. */
+export function versionSchemaReferencesPath(rulebookId: string, version: string): string {
+  return `/api/v1/rulebooks/${encodeURIComponent(rulebookId)}/versions/${encodeURIComponent(version)}/schema-references`
 }
 
 /**

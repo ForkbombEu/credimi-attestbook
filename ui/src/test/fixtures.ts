@@ -5,6 +5,7 @@ import { CatalogApiError, type CatalogApi, type ValidationApi } from '../api'
 import type {
   Attestation,
   CredentialValidationResult,
+  HostedSchema,
   Provider,
   Rulebook,
   RulebookVersion,
@@ -14,6 +15,7 @@ import type {
   ValidationSeverity,
   ValidationStatus,
   VersionDiff,
+  VersionSchemaReferences,
 } from '../types'
 
 export const PROVIDERS: readonly Provider[] = [
@@ -39,6 +41,25 @@ export const RULEBOOK_SCHEMA_REFERENCE: SchemaReference = {
   uri: 'https://issuer.example.org/schemas/common',
   integrity: null,
   createdAt: '2026-02-01T10:00:00.000Z',
+}
+
+/** A stored immutable document as the public API projects it (#103). */
+export const HOSTED_SCHEMA: HostedSchema = {
+  id: 'document-pid',
+  kind: 'json_schema_2020_12',
+  mediaType: 'application/schema+json',
+  contentDigest: 'c'.repeat(64),
+  integrity: 'sha256-c2NoZW1hLWludGVncml0eQ==',
+  url: 'https://schemas.example/api/v1/schema-documents/document-pid/content',
+  createdAt: '2026-02-01T09:00:00.000Z',
+}
+
+export function makeHostedSchema(overrides: Partial<HostedSchema> = {}): HostedSchema {
+  return { ...HOSTED_SCHEMA, ...overrides }
+}
+
+export function makeSchemaReference(overrides: Partial<SchemaReference> = {}): SchemaReference {
+  return { ...PID_SCHEMA_REFERENCE, ...overrides }
 }
 
 export function makeRulebook(overrides: Partial<Rulebook> = {}): Rulebook {
@@ -90,6 +111,8 @@ export interface CatalogDataset {
   readonly attestations: Readonly<Record<string, readonly Attestation[]>>
   readonly schemaReferences: Readonly<Record<string, readonly SchemaReference[]>>
   readonly versions: Readonly<Record<string, readonly RulebookVersion[]>>
+  /** Explicit per-version inspection fixtures, keyed by `${rulebookId}:${version}`. */
+  readonly versionSchemaReferences?: Readonly<Record<string, VersionSchemaReferences>>
 }
 
 export const SAMPLE_DATASET: CatalogDataset = {
@@ -158,6 +181,40 @@ export function createFakeApi(dataset: CatalogDataset = SAMPLE_DATASET): Catalog
     listSchemaReferences: (rulebookId) =>
       Promise.resolve(dataset.schemaReferences[rulebookId] ?? []),
     listVersions: (rulebookId) => Promise.resolve(dataset.versions[rulebookId] ?? []),
+    getVersionSchemaReferences: (rulebookId, version) => {
+      const explicit = dataset.versionSchemaReferences?.[`${rulebookId}:${version}`]
+      if (explicit !== undefined) {
+        return Promise.resolve(explicit)
+      }
+      const record = (dataset.versions[rulebookId] ?? []).find(
+        (candidate) => candidate.version === version,
+      )
+      if (record === undefined) {
+        return Promise.reject(new CatalogApiError('No route matches the request path.', 404))
+      }
+      const references = dataset.schemaReferences[rulebookId] ?? []
+      const toVersionReference = (reference: SchemaReference) => ({
+        formatIdentifier: reference.formatIdentifier,
+        uri: reference.uri,
+        integrity: reference.integrity,
+        hostedSchema: reference.hostedSchema ?? null,
+      })
+      return Promise.resolve<VersionSchemaReferences>({
+        version: record.version,
+        contentDigest: record.contentDigest,
+        status: record.status,
+        publishedAt: record.publishedAt,
+        attestations: (dataset.attestations[rulebookId] ?? []).map((attestation) => ({
+          name: attestation.name,
+          schemaReferences: references
+            .filter((reference) => reference.attestationId === attestation.id)
+            .map(toVersionReference),
+        })),
+        schemaReferences: references
+          .filter((reference) => reference.attestationId === null)
+          .map(toVersionReference),
+      })
+    },
     getVersionDiff: (rulebookId, fromVersion, toVersion) => {
       const versions = dataset.versions[rulebookId] ?? []
       const from = versions.find((candidate) => candidate.version === fromVersion)

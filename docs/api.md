@@ -92,14 +92,15 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.14.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.15.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
   export operations added by #42, issuer discovery added by #43, issuer fixture generation
   added by #44, the mock-backed capture explorer added by #48, the optional pinned
   correlation digest added by #49, the read-only headless-wallet comparison added by
   #50, the reproducible conformance run added by #51, the public hosted
   credential-schema document reads added by #98, the authenticated schema document
-  registration added by #99 and hosted-schema issuer fixture grounding added by #102); it is
+  registration added by #99, hosted-schema issuer fixture grounding added by #102 and the
+  hosted/external schema provenance projection added by #103); it is
   separate from the package version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
@@ -131,6 +132,7 @@ All operations are synchronous in Phase 1.
 | `POST` | `/api/v1/rulebooks/{rulebookId}/versions` | yes | `201` + `Location` | Freeze the current working copy as a new draft version. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}` | no | `200` | One version record and its content digest. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/content` | no | `200` | The exact snapshot bytes; `Content-Digest` and `ETag` carry the SHA-256. |
+| `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/schema-references` | no | `200` | Schema references frozen in the exact version snapshot, grouped by attestation type plus rulebook-level references. A reference whose exact URI is a stored AttestBook document carries its hosted media type, SHA-256 digest, SRI pin and permanent URL; every other value is reported as external. The snapshot bytes are never rewritten. |
 | `POST` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publish` | yes | `200` | Publish the owning provider's draft version. |
 | `POST` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/refresh` | yes | `200` | Re-snapshot a draft version from the current working copy; an unchanged snapshot is a no-op and published/historical versions answer `409 immutable`. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/compare?to={version}` | no | `200` | Deterministic structural comparison of two snapshots. Identity fields are excluded and changes are JSON Pointer paths sorted by path. |
@@ -821,6 +823,50 @@ Neither the draft API nor the version snapshot learns that the URI is AttestBook
 snapshot serializes the same `formatIdentifier`, `uri` and `integrity` members, with no
 proprietary field. An external absolute `https` schema URI and optional SRI keep working
 exactly as before, without an upload or conversion, and an omitted SRI stays `null`.
+
+### 3.14 Hosted-schema provenance in detail, draft and version reads
+
+The public read projections derived from the registry (`GET .../schema-references`,
+`GET .../attestations`, `GET .../draft` and `GET .../versions/{version}/schema-references`)
+add a `hostedSchema` member to every reference (issue #103):
+
+```json
+{
+  "formatIdentifier": "dc+sd-jwt",
+  "uri": "https://schemas.example/api/v1/schema-documents/<id>/content",
+  "integrity": "sha256-<base64>",
+  "hostedSchema": {
+    "id": "<id>",
+    "kind": "json_schema_2020_12",
+    "mediaType": "application/schema+json",
+    "contentDigest": "<lowercase hex sha-256>",
+    "integrity": "sha256-<base64>",
+    "url": "https://schemas.example/api/v1/schema-documents/<id>/content",
+    "createdAt": "2026-01-01T00:00:00.000Z"
+  }
+}
+```
+
+- `hostedSchema` is `null` for an external reference. The member is a read-only,
+  store-derived projection: it is not persisted, does not enter the Draft JSON or a version
+  snapshot, and does not change the TS11 `SchemaMeta` boundary (TS11 carries schema URIs,
+  not embedded bodies).
+- The association is exact, not a URL-prefix guess: the reference URI must equal the
+  canonical content URL of a stored document built from the configured `PUBLIC_BASE_URL`.
+  A look-alike host, an extra path segment, a query, a fragment or a near-miss path stays an
+  external reference.
+- The projection carries only the public document fields the content route already exposes.
+  Provider ownership, registration provenance, bearer tokens and private records are never
+  returned.
+- `GET .../versions/{version}/schema-references` reads the exact frozen snapshot for that
+  version and groups its references by attestation type, plus rulebook-level references. It
+  reports the version label, content digest, status and publication time so a consumer can
+  name the exact version a hosted document is referenced by. The snapshot bytes themselves
+  are never rewritten and remain the export artifact.
+- The UI compares the persisted `integrity` pin with the stored document's `sha256-<base64>`
+  value and reports a missing or mismatching pin rather than presenting it as verified.
+  See [`docs/schema-authoring.md`](schema-authoring.md) for the complete local authoring,
+  publication and consumption walkthrough.
 
 ## 4. Errors
 

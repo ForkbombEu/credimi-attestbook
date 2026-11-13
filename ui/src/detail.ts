@@ -9,7 +9,14 @@
 import type { CatalogApi } from './api'
 import { isAbortError } from './api'
 import { selectLatestVersion } from './catalog'
-import type { Attestation, Provider, Rulebook, RulebookVersion, SchemaReference } from './types'
+import type {
+  Attestation,
+  HostedSchema,
+  Provider,
+  Rulebook,
+  RulebookVersion,
+  SchemaReference,
+} from './types'
 
 export interface DetailAvailability {
   readonly provider: boolean
@@ -137,6 +144,43 @@ export function attestationNameFor(
   return (
     attestations.find((attestation) => attestation.id === attestationId)?.name ?? 'Unknown type'
   )
+}
+
+/** A reference-shaped value that may carry the derived hosted association. */
+export interface ReferenceWithHostedSchema {
+  readonly integrity: string | null
+  readonly hostedSchema?: HostedSchema | null
+}
+
+/** Whether the public API associated this exact reference URI with a stored document. */
+export function referenceSource(reference: ReferenceWithHostedSchema): 'hosted' | 'external' {
+  return reference.hostedSchema == null ? 'external' : 'hosted'
+}
+
+/**
+ * How the reference's own W3C SRI pin relates to the stored document's digest.
+ * `not_hosted` is an ordinary external reference; `missing` means a hosted
+ * reference records no pin; `mismatch` means the persisted pin does not identify
+ * the stored bytes and must be shown as a warning rather than a success.
+ */
+export type IntegrityPinState = 'not_hosted' | 'matches' | 'missing' | 'mismatch'
+
+export function hostedIntegrityState(reference: ReferenceWithHostedSchema): IntegrityPinState {
+  const hosted = reference.hostedSchema
+  if (hosted == null) {
+    return 'not_hosted'
+  }
+  if (reference.integrity === null) {
+    return 'missing'
+  }
+  return reference.integrity === hosted.integrity ? 'matches' : 'mismatch'
+}
+
+/** Download filename for the exact hosted schema bytes; stable per document. */
+export function hostedSchemaDownloadName(hosted: HostedSchema): string {
+  const prefix =
+    hosted.kind === 'json_schema_2020_12' ? 'attestbook-json-schema' : 'attestbook-type-metadata'
+  return `${prefix}-${hosted.id}.json`
 }
 
 /** The most recent version, used to label the current snapshot. */

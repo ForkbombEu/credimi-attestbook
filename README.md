@@ -437,7 +437,9 @@ AttestBook serves the exact bytes of an immutable credential schema document sto
 registry (JSON Schema 2020-12 or SD-JWT VC Type Metadata) at a permanent, unauthenticated
 URL. Such a URL is written into an existing TS11 `schemaURIs[].uri` or rulebook
 `schemaReferences[].uri`, so it must stay stable for the document's lifetime and must never
-depend on a request header.
+depend on a request header. A complete local walkthrough from configuration and provider
+provisioning through authoring, draft, version, publication and consumption is in
+[`docs/schema-authoring.md`](docs/schema-authoring.md).
 
 Set `PUBLIC_BASE_URL` to the deployment's public origin: an absolute `https` origin with no
 path, query, credentials or fragment. Plain `http` is accepted only for `127.0.0.1`,
