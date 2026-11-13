@@ -1,3 +1,5 @@
+import { useState } from 'react'
+
 import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
@@ -5,7 +7,7 @@ import { describe, expect, test, vi } from 'vitest'
 import { CatalogApiError, type EditorApi } from './api'
 import { RulebookDraftEditorPage } from './RulebookDraftEditorPage'
 import { expectNoA11yViolations } from './test/a11y'
-import { anonymousSession, fakeSession } from './test/session'
+import { anonymousSession, fakeSession, TEST_SESSION } from './test/session'
 import type { SessionController } from './session'
 import type {
   DraftRulebook,
@@ -128,6 +130,30 @@ function renderEditor(
       session={options.session ?? fakeSession()}
       onNavigate={options.onNavigate ?? (() => {})}
     />,
+  )
+}
+
+/** A mutable session controller for the sign-out then inline-sign-in path. */
+function SessionHarness({ api }: { readonly api: EditorApi }) {
+  const authenticate = () => {
+    setSession(fakeSession({ signIn: () => Promise.resolve(TEST_SESSION) }))
+    return Promise.resolve(TEST_SESSION)
+  }
+  const [session, setSession] = useState<SessionController>(() =>
+    fakeSession({ signIn: authenticate }),
+  )
+  return (
+    <>
+      <button type="button" onClick={() => setSession(anonymousSession({ signIn: authenticate }))}>
+        Become anonymous
+      </button>
+      <RulebookDraftEditorPage
+        api={api}
+        rulebookId={DRAFT.id}
+        session={session}
+        onNavigate={() => {}}
+      />
+    </>
   )
 }
 
@@ -308,6 +334,84 @@ describe('rulebook draft editor', () => {
     expect(screen.getByRole('button', { name: 'Save draft' })).toBeDisabled()
   })
 
+  test('keeps unsaved edits across sign-out and inline sign-in without re-fetching', async () => {
+    const api = editor()
+    const user = userEvent.setup()
+    render(<SessionHarness api={api} />)
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
+    await screen.findByText('No validation findings.')
+    await user.clear(screen.getByLabelText('Description'))
+    await user.type(screen.getByLabelText('Description'), 'Do not lose this text')
+
+    await user.click(screen.getByRole('button', { name: 'Become anonymous' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sign in again' })).toBeVisible()
+    expect(screen.getByLabelText('Description')).toHaveValue('Do not lose this text')
+    expect(api.getDraft).toHaveBeenCalledTimes(1)
+
+    await user.type(screen.getByLabelText('Username'), 'admin')
+    await user.type(screen.getByLabelText('Password'), 'secret')
+    await user.click(screen.getByRole('button', { name: 'Sign in again' }))
+
+    await waitFor(() => expect(api.getDraft).toHaveBeenCalledTimes(1))
+    expect(screen.getByLabelText('Description')).toHaveValue('Do not lose this text')
+
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() => expect(api.replaceDraft).toHaveBeenCalled())
+    expect(api.replaceDraft).toHaveBeenCalledWith(
+      DRAFT.id,
+      expect.objectContaining({ description: 'Do not lose this text' }),
+      'csrf-token-value',
+    )
+  })
+
+  test('reports an ownership 403 without offering a pointless re-sign-in', async () => {
+    const api = editor({
+      replaceDraft: vi.fn(async () => {
+        throw new CatalogApiError(
+          'The authenticated provider does not own this resource.',
+          403,
+          'forbidden',
+        )
+      }),
+    })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
+    await screen.findByText('No validation findings.')
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(
+      await screen.findByText('The authenticated provider does not own this resource.'),
+    ).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Sign in again' })).not.toBeInTheDocument()
+  })
+
+  test('offers re-sign-in for a 403 csrf_failed rejection', async () => {
+    const api = editor({
+      replaceDraft: vi.fn(async () => {
+        throw new CatalogApiError(
+          'The request is missing or carries an invalid CSRF token; sign in again.',
+          403,
+          'csrf_failed',
+        )
+      }),
+    })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
+    await screen.findByText('No validation findings.')
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+
+    expect(await screen.findByRole('heading', { name: 'Sign in again' })).toBeVisible()
+  })
+
   test('never renders a provider bearer-token field', async () => {
     renderEditor(editor(), { rulebookId: DRAFT.id })
 
@@ -441,6 +545,32 @@ describe('rulebook draft editor', () => {
 
     expect(await screen.findByRole('heading', { name: 'Sign in again' })).toBeVisible()
     expect(within(lifecycle).getByLabelText('New version label')).toHaveValue('2.0')
+  })
+
+  test('reports an ownership 403 from a lifecycle write without re-sign-in', async () => {
+    const api = editor({
+      createVersion: vi.fn(async () => {
+        throw new CatalogApiError(
+          'The authenticated provider does not own this resource.',
+          403,
+          'forbidden',
+        )
+      }),
+    })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    const lifecycle = await screen.findByRole('region', {
+      name: 'Draft lifecycle and publication',
+    })
+    await user.type(within(lifecycle).getByLabelText('New version label'), '2.0')
+    await user.click(within(lifecycle).getByRole('button', { name: 'Freeze as draft version' }))
+
+    expect(
+      await within(lifecycle).findByText('The authenticated provider does not own this resource.'),
+    ).toBeVisible()
+    expect(screen.queryByRole('heading', { name: 'Sign in again' })).not.toBeInTheDocument()
   })
 
   test('has no detectable accessibility violations', async () => {

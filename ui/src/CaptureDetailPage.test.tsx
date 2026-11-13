@@ -339,6 +339,34 @@ describe('capture detail correlation', () => {
     expect(screen.getByLabelText('Attestation type')).toHaveValue('Person Identification Data')
   })
 
+  test('reports an ownership 403 without showing a session renewal prompt', async () => {
+    const user = userEvent.setup()
+    const api: CaptureExplorerApi = {
+      listCaptures: () =>
+        Promise.resolve({ data: [], pagination: { limit: 100, offset: 0, total: 0 } }),
+      getCapture: () => Promise.resolve(makeCaptureDetail()),
+      correlateCapture: () =>
+        Promise.reject(
+          new CatalogApiError(
+            'The authenticated provider does not own this resource.',
+            403,
+            'forbidden',
+          ),
+        ),
+    }
+    renderPage(api)
+
+    await selectCorrelation(user)
+    await user.click(screen.getByRole('button', { name: 'Run validation' }))
+
+    expect(
+      await screen.findByText('The authenticated provider does not own this resource.'),
+    ).toBeVisible()
+    expect(
+      screen.queryByRole('heading', { name: 'Sign in again to record the validation' }),
+    ).not.toBeInTheDocument()
+  })
+
   test('has no detectable accessibility violations with a linked validation', async () => {
     const api: CaptureExplorerApi = {
       ...pendingApi,

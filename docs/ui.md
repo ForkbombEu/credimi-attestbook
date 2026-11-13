@@ -360,10 +360,11 @@ dimensions.
   authenticated (and, for a draft, bound to the owning provider);
 - draft and lifecycle writes send the HttpOnly session cookie and its in-memory
   `X-CSRF-Token` only; there is no provider-token field to paste and no `Authorization`
-  header. A `401` or `403 csrf_failed` keeps the form mounted, shows an inline **Sign in
+  header. A `401` or a `403 csrf_failed` keeps the form mounted, shows an inline **Sign in
   again** form and preserves every unsaved field so the user can re-authenticate and save
-  without losing work. A foreign provider's write and a published rulebook's mutation still
-  surface the API's safe error message; nothing is saved on failure;
+  without losing work. A `403 forbidden` is an ownership refusal, not an expired session, so
+  it shows the server's safe message without a re-sign-in prompt; a published rulebook's
+  mutation still surfaces its safe error message. Nothing is saved on failure;
 - a published or historical rulebook opens read-only with an explanation, and the server
   independently answers `409 immutable`, so the UI cannot bypass the guarantee. A successful
   save reports that frozen and published versions were not changed; the test suite verifies
@@ -411,9 +412,11 @@ delivered by #88; it is not a provider-bearer-token form:
 - an expired session is detected when a write answers `401` (or `403 csrf_failed` after a
   session rotation). The editor and the capture correlation form keep their state and show an
   inline **Sign in again** form backed by the same auth API; a fresh sign-in clears the prompt
-  and the user retries the write. The full `/login` page remains the destination for an
-  anonymous deep link, so the same-origin return target is validated by the shared
-  `safeRedirectPath` guard.
+  and the user retries the write. Only those two answers trigger re-sign-in: a `403
+  forbidden` ownership refusal keeps the server's message and does not ask for credentials
+  that cannot help. The full `/login` page remains the destination for an anonymous deep
+  link, so the same-origin return target is validated by the shared `safeRedirectPath`
+  guard.
 
 ## 4. Build, serve and develop
 
@@ -785,7 +788,7 @@ The catalog and detail slices' captures remain in the same directory
 - The editor and capture correlation now authenticate only with the administrator session.
   There is no password reset, account management or multi-user administration, and the
   session is still read on mount and after a reload rather than polled. An expiry is
-  therefore detected by the next protected write (`401`/`403`), which shows the inline
+  therefore detected by the next protected write (`401`/`403 csrf_failed`), which shows the inline
   re-sign-in prompt and keeps the form; a tab that only reads never notices its session
   ended. The save is a last-write-wins full replacement with no optimistic-concurrency
   token, so two open editor tabs can overwrite each other's working copy. The lifecycle panel

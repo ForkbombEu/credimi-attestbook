@@ -17,7 +17,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react'
 
 import type { EditorApi } from '../api'
-import { CatalogApiError, isAbortError } from '../api'
+import { isAbortError, isSessionAuthError } from '../api'
 import { formatDate } from '../catalog'
 import { formatDigest, versionsNewestFirst } from '../detail'
 import type {
@@ -116,7 +116,7 @@ export function DraftLifecyclePanel({
       try {
         await action()
       } catch (caught) {
-        if (caught instanceof CatalogApiError && (caught.status === 401 || caught.status === 403)) {
+        if (isSessionAuthError(caught)) {
           onSessionExpired?.()
         }
         setError(message(caught, 'The lifecycle action failed.'))

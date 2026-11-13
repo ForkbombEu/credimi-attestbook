@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react'
 
 import type { EditorApi } from './api'
-import { CatalogApiError, isAbortError } from './api'
+import { CatalogApiError, isAbortError, isSessionAuthError } from './api'
 import { SeverityBadge } from './components/Badges'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import { DraftLifecyclePanel } from './components/DraftLifecyclePanel'
@@ -105,6 +105,7 @@ export function RulebookDraftEditorPage({
   const [saveError, setSaveError] = useState<string | null>(null)
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const [sessionSeen, setSessionSeen] = useState(session.status === 'authenticated')
   const [dirty, setDirty] = useState(false)
   const [sessionExpired, setSessionExpired] = useState(false)
   const [renewedNotice, setRenewedNotice] = useState<string | null>(null)
@@ -132,10 +133,17 @@ export function RulebookDraftEditorPage({
   )
 
   useEffect(() => {
-    // The protected view does not read or render a draft before the session is
-    // known to be authenticated; an expired session keeps the already loaded
-    // form mounted instead.
-    if (session.status !== 'authenticated') {
+    if (session.status === 'authenticated') {
+      setSessionSeen(true)
+    }
+  }, [session.status])
+
+  useEffect(() => {
+    // The protected view does not read or render a draft before the first
+    // authenticated session. Latching that fact (rather than depending on the
+    // current status) means signing out and back in for an expired session
+    // never re-fetches and overwrites the unsaved working copy.
+    if (!sessionSeen) {
       return
     }
     if (rulebookId === undefined) {
@@ -161,7 +169,7 @@ export function RulebookDraftEditorPage({
       })
     })
     return () => controller.abort()
-  }, [loadDraft, reloadToken, rulebookId, session.status])
+  }, [loadDraft, reloadToken, rulebookId, sessionSeen])
 
   const draft = state.status === 'ready' ? state.draft : null
   const readOnly = draft !== null && draft.publicationStatus !== 'draft'
@@ -293,7 +301,7 @@ export function RulebookDraftEditorPage({
       setRenewedNotice(null)
       setSavedAt(new Date().toISOString())
     } catch (error) {
-      if (error instanceof CatalogApiError && (error.status === 401 || error.status === 403)) {
+      if (isSessionAuthError(error)) {
         setSessionExpired(true)
         setRenewedNotice(null)
       }

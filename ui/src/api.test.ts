@@ -7,6 +7,7 @@ import {
   createHttpEditorApi,
   createHttpValidationApi,
   isAbortError,
+  isSessionAuthError,
   versionContentPath,
   type FetchLike,
 } from './api'
@@ -324,6 +325,63 @@ describe('createHttpEditorApi', () => {
         status: 409,
       },
     )
+  })
+})
+
+describe('CatalogApiError session classification', () => {
+  test('carries the error code and treats 401 as a session failure', () => {
+    const error = new CatalogApiError('Authentication is required.', 401, 'unauthorized')
+    expect(error.code).toBe('unauthorized')
+    expect(isSessionAuthError(error)).toBe(true)
+  })
+
+  test('treats a 403 csrf_failed as a session failure', () => {
+    const error = new CatalogApiError(
+      'The request is missing or carries an invalid CSRF token; sign in again.',
+      403,
+      'csrf_failed',
+    )
+    expect(error.code).toBe('csrf_failed')
+    expect(isSessionAuthError(error)).toBe(true)
+  })
+
+  test('does not treat an ownership 403 forbidden as a session failure', () => {
+    const error = new CatalogApiError(
+      'The authenticated provider does not own this resource.',
+      403,
+      'forbidden',
+    )
+    expect(error.code).toBe('forbidden')
+    expect(isSessionAuthError(error)).toBe(false)
+  })
+
+  test('reads the envelope code from a rejected write', async () => {
+    const fetchImpl = vi.fn<FetchLike>(() =>
+      Promise.resolve(
+        jsonResponse(
+          {
+            error: {
+              code: 'csrf_failed',
+              message: 'The request is missing or carries an invalid CSRF token; sign in again.',
+            },
+          },
+          403,
+        ),
+      ),
+    )
+    const api = createHttpEditorApi(fetchImpl)
+
+    await expect(
+      api.replaceDraft(
+        'rulebook-1',
+        { name: 'PID', applicableSpec: 'ts11@1.0.1', attestations: [], schemaReferences: [] },
+        'stale-token',
+      ),
+    ).rejects.toMatchObject({
+      name: 'CatalogApiError',
+      status: 403,
+      code: 'csrf_failed',
+    })
   })
 })
 

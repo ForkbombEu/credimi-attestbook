@@ -124,10 +124,24 @@ export class CatalogApiError extends Error {
   constructor(
     message: string,
     readonly status: number,
+    /** Machine-readable `error.code` of the API envelope, when present. */
+    readonly code: string | null = null,
   ) {
     super(message)
     this.name = 'CatalogApiError'
   }
+}
+
+/**
+ * A write rejected because the browser session is missing, expired or lost its
+ * CSRF binding. A `403 forbidden` is an ownership refusal, not a session
+ * problem, so it must surface the server's message instead of a sign-in prompt.
+ */
+export function isSessionAuthError(error: unknown): boolean {
+  return (
+    error instanceof CatalogApiError &&
+    (error.status === 401 || (error.status === 403 && error.code === 'csrf_failed'))
+  )
 }
 
 export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
@@ -135,19 +149,27 @@ export type FetchLike = (input: string, init?: RequestInit) => Promise<Response>
 interface ErrorEnvelope {
   readonly error?: {
     readonly message?: unknown
+    readonly code?: unknown
   }
 }
 
-async function readErrorMessage(response: Response, label = 'catalog'): Promise<string> {
+async function readError(
+  response: Response,
+  label = 'catalog',
+): Promise<{ readonly message: string; readonly code: string | null }> {
   try {
     const body = (await response.json()) as ErrorEnvelope
-    if (typeof body.error?.message === 'string' && body.error.message !== '') {
-      return body.error.message
-    }
+    const message =
+      typeof body.error?.message === 'string' && body.error.message !== ''
+        ? body.error.message
+        : `The ${label} request failed with HTTP ${response.status}.`
+    const code =
+      typeof body.error?.code === 'string' && body.error.code !== '' ? body.error.code : null
+    return { message, code }
   } catch {
     // A non-JSON error body must not replace the request failure.
   }
-  return `The ${label} request failed with HTTP ${response.status}.`
+  return { message: `The ${label} request failed with HTTP ${response.status}.`, code: null }
 }
 
 function singleData<T>(body: unknown, label = 'catalog'): T {
@@ -163,7 +185,8 @@ async function getJson<T>(fetchImpl: FetchLike, path: string, signal?: AbortSign
     ...(signal === undefined ? {} : { signal }),
   })
   if (!response.ok) {
-    throw new CatalogApiError(await readErrorMessage(response), response.status)
+    const failure = await readError(response)
+    throw new CatalogApiError(failure.message, response.status, failure.code)
   }
   return (await response.json()) as T
 }
@@ -236,7 +259,8 @@ export function createHttpValidationApi(
         ...(signal === undefined ? {} : { signal }),
       })
       if (!response.ok) {
-        throw new CatalogApiError(await readErrorMessage(response, 'validation'), response.status)
+        const failure = await readError(response, 'validation')
+        throw new CatalogApiError(failure.message, response.status, failure.code)
       }
       let body: unknown
       try {
@@ -258,7 +282,8 @@ export function createHttpEditorApi(
 ): EditorApi {
   async function readData<T>(response: Response, label: string): Promise<T> {
     if (!response.ok) {
-      throw new CatalogApiError(await readErrorMessage(response, label), response.status)
+      const failure = await readError(response, label)
+      throw new CatalogApiError(failure.message, response.status, failure.code)
     }
     let body: unknown
     try {
@@ -425,7 +450,8 @@ export function createHttpCaptureApi(
 ): CaptureExplorerApi {
   async function readData<T>(response: Response, label: string): Promise<T> {
     if (!response.ok) {
-      throw new CatalogApiError(await readErrorMessage(response, label), response.status)
+      const failure = await readError(response, label)
+      throw new CatalogApiError(failure.message, response.status, failure.code)
     }
     let body: unknown
     try {
@@ -443,7 +469,8 @@ export function createHttpCaptureApi(
         ...(signal === undefined ? {} : { signal }),
       })
       if (!response.ok) {
-        throw new CatalogApiError(await readErrorMessage(response, 'capture'), response.status)
+        const failure = await readError(response, 'capture')
+        throw new CatalogApiError(failure.message, response.status, failure.code)
       }
       return (await response.json()) as CaptureExplorerPage
     },

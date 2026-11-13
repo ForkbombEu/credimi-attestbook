@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 
 import type { CaptureExplorerApi, CatalogApi } from './api'
-import { CatalogApiError, isAbortError } from './api'
+import { CatalogApiError, isAbortError, isSessionAuthError } from './api'
 import { formatDate } from './catalog'
 import {
   CAPTURE_ARTIFACT_TYPE_LABELS,
@@ -769,7 +769,7 @@ export function CaptureDetailPage({
         if (controller.signal.aborted || isAbortError(error)) {
           return
         }
-        if (error instanceof CatalogApiError && (error.status === 401 || error.status === 403)) {
+        if (isSessionAuthError(error)) {
           setSessionExpired(true)
         }
         setRun({ status: 'error', message: errorMessage(error, 'The validation request failed.') })
