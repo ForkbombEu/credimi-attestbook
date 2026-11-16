@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event'
 import { describe, expect, test, vi } from 'vitest'
 
 import { type CatalogApi } from './api'
+import type { AdminSession, AuthApi } from './auth'
 import { RulebookDetailPage } from './RulebookDetailPage'
+import { SessionProvider } from './session'
 import {
   createFakeApi,
   HOSTED_SCHEMA,
@@ -11,6 +13,7 @@ import {
   makeRulebook,
   makeSchemaReference,
   makeVersion,
+  PROVIDERS,
   SAMPLE_DATASET,
 } from './test/fixtures'
 import { expectNoA11yViolations } from './test/a11y'
@@ -19,6 +22,40 @@ function renderDetail(api: CatalogApi = createFakeApi(), rulebookId = 'rulebook-
   const onNavigate = vi.fn()
   const view = render(
     <RulebookDetailPage api={api} rulebookId={rulebookId} onNavigate={onNavigate} />,
+  )
+  return { ...view, onNavigate }
+}
+
+function authApi(session: AdminSession | null): AuthApi {
+  return {
+    getSession: async () => session,
+    login: async () => {
+      throw new Error('The test session is already authenticated.')
+    },
+    logout: async () => undefined,
+  }
+}
+
+/** Renders the detail page inside an authenticated administrator session. */
+function renderDetailAs(
+  providerId: string,
+  api: CatalogApi = createFakeApi(),
+  rulebookId = 'rulebook-pid',
+) {
+  const provider = PROVIDERS.find((candidate) => candidate.id === providerId)
+  if (provider === undefined) {
+    throw new Error(`Unknown test provider ${providerId}.`)
+  }
+  const session: AdminSession = {
+    provider,
+    expiresAt: '2026-01-01T08:00:00.000Z',
+    csrfToken: 'csrf-token-value',
+  }
+  const onNavigate = vi.fn()
+  const view = render(
+    <SessionProvider api={authApi(session)}>
+      <RulebookDetailPage api={api} rulebookId={rulebookId} onNavigate={onNavigate} />
+    </SessionProvider>,
   )
   return { ...view, onNavigate }
 }
@@ -384,6 +421,55 @@ describe('hosted and external schema provenance', () => {
     await user.click(within(alert).getByRole('button', { name: 'Retry' }))
     expect(await screen.findByText('Schema references in version 1.0')).toBeInTheDocument()
     expect(attempts).toBe(2)
+  })
+})
+
+describe('create-new-version action', () => {
+  test('offers the owning administrator a Create new version action on a published rulebook', async () => {
+    renderDetailAs('provider-issuer')
+
+    const action = await screen.findByRole('link', { name: 'Create new version' })
+    expect(action).toHaveAttribute('href', '/rulebooks/rulebook-pid/edit')
+    expect(screen.queryByRole('link', { name: 'Edit draft' })).not.toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Log out' })).toBeVisible())
+  })
+
+  test('keeps Edit draft for a draft rulebook owned by the administrator', async () => {
+    renderDetailAs('provider-lab', createFakeApi(), 'rulebook-age')
+
+    await screen.findByRole('button', { name: 'Log out' })
+    expect(screen.getByRole('link', { name: 'Edit draft' })).toHaveAttribute(
+      'href',
+      '/rulebooks/rulebook-age/edit',
+    )
+    expect(screen.queryByRole('link', { name: 'Create new version' })).not.toBeInTheDocument()
+  })
+
+  test('offers neither action to an anonymous visitor', async () => {
+    renderDetail()
+
+    expect(await screen.findByRole('heading', { name: 'PID Rulebook' })).toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Create new version' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit draft' })).not.toBeInTheDocument()
+  })
+
+  test('offers neither action to an administrator of another provider', async () => {
+    renderDetailAs('provider-lab')
+
+    await screen.findByRole('button', { name: 'Log out' })
+    expect(screen.queryByRole('link', { name: 'Create new version' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit draft' })).not.toBeInTheDocument()
+  })
+
+  test('offers no next-version action for a historical rulebook', async () => {
+    renderDetailAs('provider-issuer', {
+      ...createFakeApi(),
+      getRulebook: async () => makeRulebook({ publicationStatus: 'historical' }),
+    })
+
+    await screen.findByRole('button', { name: 'Log out' })
+    expect(screen.queryByRole('link', { name: 'Create new version' })).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: 'Edit draft' })).not.toBeInTheDocument()
   })
 })
 

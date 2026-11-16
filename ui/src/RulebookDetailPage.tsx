@@ -183,6 +183,15 @@ function DetailContent({
               Edit draft
             </AppLink>
           ) : null}
+          {rulebook.publicationStatus === 'published' && canEditDraft ? (
+            <AppLink
+              className="button button--ghost"
+              href={rulebookEditorPath(rulebook.id)}
+              onNavigate={onNavigate}
+            >
+              Create new version
+            </AppLink>
+          ) : null}
         </div>
       </header>
 
