@@ -13,7 +13,7 @@ import { OPENAPI_COMPONENTS, componentJsonSchema } from './schemas'
 export const OPENAPI_VERSION = '3.1.0'
 
 /** Version of the API contract document itself. */
-export const API_CONTRACT_VERSION = '1.17.0'
+export const API_CONTRACT_VERSION = '1.18.0'
 
 /** URL prefix that carries the product API's major version. */
 export const API_VERSION_PREFIX = '/api/v1'
@@ -88,7 +88,7 @@ const TAG_DESCRIPTIONS: readonly { readonly name: string; readonly description: 
   {
     name: 'subscriptions',
     description:
-      'Anonymous webhook-subscription registration for publicly published rulebooks, management with a per-subscription token and an explicit callback verification handshake. Registration stores a pending subscription only; only the management-token authenticated verification initiation contacts the callback endpoint, and nothing is delivered by this API.',
+      'Anonymous webhook-subscription registration for publicly published rulebooks, management with a per-subscription token, an explicit callback verification handshake, a durable at-least-once publication-delivery outbox and a bounded management-token-protected delivery-status view. Registration stores a pending subscription only; the management-token authenticated verification initiation contacts the callback endpoint, and publication delivery runs asynchronously in the in-process dispatcher after the publication transaction commits.',
   },
 ]
 

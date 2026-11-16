@@ -66,7 +66,12 @@ import type {
 } from '../registry/types'
 import { CREDENTIAL_SCHEMA_KINDS } from '../registry/types'
 import { parseRulebookVersionDocument, type RulebookVersionDocument } from '../registry/versioning'
-import type { SubscriptionService, WebhookDeliveryService } from '../subscriptions'
+import {
+  DEFAULT_WEBHOOK_OUTBOX_STATUS_LIMIT,
+  MAX_WEBHOOK_OUTBOX_STATUS_LIMIT,
+  type SubscriptionService,
+  type WebhookOutboxDispatcher,
+} from '../subscriptions'
 import {
   CREDENTIAL_VALIDATION_PATH,
   hostedSchemaDocumentId,
@@ -106,6 +111,7 @@ import {
   toRulebookVersionResource,
   toRulebookVersionSchemaReferencesResource,
   toSchemaReferenceResource,
+  toSubscriptionDeliveryPageResource,
   toSubscriptionResource,
   toVerifierConstraintsResource,
   toVersionDiffResource,
@@ -170,6 +176,7 @@ export type ApiOperationId =
   | 'getSubscription'
   | 'deleteSubscription'
   | 'verifySubscription'
+  | 'listSubscriptionDeliveries'
 
 export interface ApiParameterSpec {
   readonly name: string
@@ -917,7 +924,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: '/api/v1/rulebooks/:rulebookId/versions/:version/publish',
     summary: 'Publish a draft version',
     description:
-      'Authenticated publication of the owning provider’s draft version after proving its snapshot still matches the current content. Publishing the same already-published version again is an idempotent replay; historical versions cannot be republished. After the publication transaction commits, one signed `rulebook.published` attempt is asynchronously enqueued for each `active`, verified subscription of the rulebook (see docs/api.md §3.15.2); the notification is signed with that subscription’s webhook secret and carries the same stable event ID as the public event feed. Delivery never delays or changes the publication response. A global in-flight cap and a bounded in-memory queue bound the work; excess attempts are dropped and queued work is lost on restart. One attempt is made per event without retries, a durable outbox or delivery status (#120).',
+      'Authenticated publication of the owning provider’s draft version after proving its snapshot still matches the current content. Publishing the same already-published version again is an idempotent replay; historical versions cannot be republished. After the publication transaction commits, one signed `rulebook.published` job is durably enqueued in the bounded outbox for each `active`, verified subscription of the rulebook that existed at the publication instant (see docs/api.md §3.15.2); the notification is signed with that subscription’s webhook secret and carries the same stable event ID as the public event feed. The enqueue is a bounded SQLite write with no network call, so it never delays or changes the publication response and a publication succeeds even when subscribers are unavailable. An in-process dispatcher leases and retries due jobs with bounded exponential backoff and jitter; delivery is at-least-once, revoked or stale-key subscriptions are not contacted, and the subscriber can read a bounded delivery-status view (docs/api.md §3.15.3).',
     tag: 'versions',
     security: true,
     parameters: pathParameters(['rulebookId', 'version']),
@@ -1440,6 +1447,48 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
       ...errorSpecs([401, 404, 500, 503], false),
     ],
   },
+  {
+    operationId: 'listSubscriptionDeliveries',
+    method: 'get',
+    path: '/api/v1/subscriptions/:subscriptionId/deliveries',
+    summary: 'List one subscription’s durable delivery status',
+    description:
+      'Returns a bounded, management-token-protected page of the subscription’s durable publication-delivery jobs, newest first. The route requires the same per-subscription `Authorization: Bearer <managementToken>` credential as the other management routes; a provider bearer token, the administrator session cookie and every other credential have no authority here, and another subscriber’s records are never visible. Each entry carries the immutable event id, the job status (`pending`, `delivered` or `failed`), the number of claimed attempts, the creation, last-attempt and next-attempt timestamps, the delivery timestamps and a sanitized terminal reason. `lastErrorCategory` is one stable typed reason (`timeout`, `network_failure`, `dns_failure`, `unexpected_status`, `redirect_not_followed`, `blocked_target`, `response_too_large` or `subscription_not_eligible`) and never a response body. Callback URLs, tokens, response bodies, client addresses and other subscribers’ rows are never exposed. Delivery is at-least-once with bounded retries; a missed notification can be reconciled through the public publication-event feed, and revoked subscriptions are not readable. A missing, invalid or foreign token and an unknown subscription id answer the same `401`; a revoked subscription answers `404`.',
+    tag: 'subscriptions',
+    security: false,
+    subscriptionAuth: true,
+    parameters: [
+      PATH_SUBSCRIPTION_ID,
+      {
+        name: 'limit',
+        in: 'query',
+        required: false,
+        description:
+          'Page size (default 20, maximum 100). Entries are newest first; the view is bounded.',
+        schema: {
+          type: 'integer',
+          minimum: 1,
+          maximum: MAX_WEBHOOK_OUTBOX_STATUS_LIMIT,
+        },
+      },
+      {
+        name: 'offset',
+        in: 'query',
+        required: false,
+        description: 'Number of delivery records to skip (default 0).',
+        schema: { type: 'integer', minimum: 0 },
+      },
+    ],
+    responses: [
+      {
+        status: 200,
+        description:
+          'A bounded page of sanitized delivery records for exactly this subscription, newest first.',
+        schema: 'SubscriptionDeliveryPageResponse',
+      },
+      ...errorSpecs([400, 401, 404, 500, 503], false),
+    ],
+  },
 ]
 
 /** Narrow import seam so tests can double the pipeline without a network. */
@@ -1460,10 +1509,10 @@ export interface ApiDependencies {
   /** Anonymous webhook-subscription registration and management (#117). */
   readonly subscriptions?: SubscriptionService
   /**
-   * Signed, single-attempt publication webhook delivery (#119). Absent keeps
-   * publication pure and makes no outbound request.
+   * Durable publication-delivery outbox and in-process retry dispatcher
+   * (#120). Absent keeps publication pure and exposes no delivery status.
    */
-  readonly webhookDelivery?: WebhookDeliveryService
+  readonly webhookOutbox?: WebhookOutboxDispatcher
   /** Environment-configured administrator browser login; absent means unavailable. */
   readonly adminAuth?: AdminAuth
   /**
@@ -1507,6 +1556,19 @@ function requireSubscriptions(service: SubscriptionService | undefined): Subscri
     )
   }
   return service
+}
+
+function requireWebhookOutbox(
+  dispatcher: WebhookOutboxDispatcher | undefined,
+): WebhookOutboxDispatcher {
+  if (dispatcher === undefined) {
+    throw apiError(
+      503,
+      'delivery_status_unavailable',
+      'Webhook delivery status is not configured on this server.',
+    )
+  }
+  return dispatcher
 }
 
 function requireCaptures(explorer: CaptureExplorer | undefined): CaptureExplorer {
@@ -2541,20 +2603,19 @@ function publishRulebookVersionHandler(dependencies: ApiDependencies): ApiHandle
 
     const published = registry.publishRulebookVersion(actor, rulebookId, label)
 
-    // The publication transaction has committed. Delivery is enqueued after
-    // it, so no outbound request can hold a transaction lock, roll a
-    // publication back or delay this response. One signed attempt is made to
-    // every active, verified subscriber; excess attempts are dropped when the
-    // in-memory queue is full, and #120 owns durable retries and status.
-    const delivery = dependencies.webhookDelivery
-    if (delivery !== undefined) {
+    // The publication transaction has committed. The durable outbox row is
+    // written after it, so no outbound request can hold a transaction lock,
+    // roll a publication back or delay this response. The bounded SQLite write
+    // is the delivery record; the dispatcher leases and retries it later.
+    const outbox = dependencies.webhookOutbox
+    if (outbox !== undefined) {
       const event = registry.getPublicationEvent(rulebookId, label)
       if (event !== null) {
         try {
-          delivery.dispatchPublicationEvent(event)
+          outbox.enqueuePublicationEvent(event)
         } catch {
-          // Delivery is best effort in this slice. The event stays on the
-          // public feed for reconciliation and #120 will own durable retries.
+          // The event stays on the public feed; the restart-safe reconciliation
+          // scan enqueues the missing outbox rows on the next dispatch cycle.
         }
       }
     }
@@ -2810,6 +2871,31 @@ function deleteSubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
  * bounds and pins the request and returns a typed failure without activating
  * the record when the endpoint cannot prove control.
  */
+function listSubscriptionDeliveriesHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const subscriptions = requireSubscriptions(dependencies.subscriptions)
+    const outbox = requireWebhookOutbox(dependencies.webhookOutbox)
+    // Authenticate before reading any delivery row, so an unknown id, a wrong
+    // token and a foreign subscription all look identical.
+    const subscription = subscriptions.get(
+      context.req.param('subscriptionId') ?? '',
+      subscriptionManagementToken(context),
+    )
+    const limit = parsePositiveInteger(
+      context.req.query('limit'),
+      'limit',
+      DEFAULT_WEBHOOK_OUTBOX_STATUS_LIMIT,
+      1,
+      MAX_WEBHOOK_OUTBOX_STATUS_LIMIT,
+    )
+    const offset = parsePositiveInteger(context.req.query('offset'), 'offset', 0, 0)
+    const page = outbox.listDeliveryStatus(subscription.id, limit, offset)
+    // The response names one subscriber’s callback deliveries; never cache it.
+    context.header('cache-control', 'no-store')
+    return context.json(toSubscriptionDeliveryPageResource(page, limit, offset), 200)
+  }
+}
+
 function verifySubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const subscriptions = requireSubscriptions(dependencies.subscriptions)
@@ -3037,6 +3123,7 @@ export function createApiHandlers(
     getSubscription: getSubscriptionHandler(dependencies),
     deleteSubscription: deleteSubscriptionHandler(dependencies),
     verifySubscription: verifySubscriptionHandler(dependencies),
+    listSubscriptionDeliveries: listSubscriptionDeliveriesHandler(dependencies),
   }
 }
 

@@ -112,6 +112,31 @@ export class SubscriptionStore {
   }
 
   /**
+   * Delivery-eligible subscriptions that existed when one publication event was
+   * recorded (#120). It narrows the #119 eligibility rule to rows registered
+   * and verified no later than the event's publication instant, so a
+   * reconciliation scan cannot send an old event to a subscriber that started
+   * following the rulebook afterwards. A subscription verified after the
+   * publication is not eligible for that earlier event.
+   */
+  listDeliveryEligibleForEvent(
+    rulebookId: string,
+    keyId: string,
+    publishedAt: string,
+  ): readonly SubscriptionRecord[] {
+    return this.database
+      .query<SubscriptionRow, [string, string, string, string]>(
+        `SELECT * FROM subscriptions
+         WHERE rulebook_id = ? AND state = 'active' AND verified_at IS NOT NULL
+           AND webhook_key_id = ?
+           AND created_at <= ? AND verified_at <= ?
+         ORDER BY created_at, id`,
+      )
+      .all(rulebookId, keyId, publishedAt, publishedAt)
+      .map(toRecord)
+  }
+
+  /**
    * Marks a live subscription revoked. Revocation is final, so an already
    * revoked row is left untouched and a repeated delete stays idempotent.
    */

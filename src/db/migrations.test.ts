@@ -57,6 +57,8 @@ describe('registry migrations', () => {
         'schema_migrations',
         'schema_refs',
         'subscriptions',
+        'webhook_delivery_outbox',
+        'webhook_delivery_outbox_state',
       ]) {
         expect(tables).toContain(table)
       }
@@ -493,7 +495,10 @@ describe('registry migrations', () => {
       for (const migration of MIGRATIONS.filter(
         (candidate) =>
           candidate.version !== '0006_credential_schema_documents' &&
-          candidate.version !== '0007_publication_events',
+          candidate.version !== '0007_publication_events' &&
+          // The outbox migration reads publication_events, so it must apply
+          // after 0007 in this reproduction of a pre-feature database.
+          candidate.version !== '0011_webhook_delivery_outbox',
       )) {
         database.exec(migration.sql)
         database
@@ -534,6 +539,7 @@ describe('registry migrations', () => {
       expect(applied.map((migration) => migration.version)).toEqual([
         '0006_credential_schema_documents',
         '0007_publication_events',
+        '0011_webhook_delivery_outbox',
       ])
       expect(listAppliedMigrations(database)).toHaveLength(MIGRATIONS.length)
 

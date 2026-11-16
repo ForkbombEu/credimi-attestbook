@@ -563,142 +563,16 @@ describe('delivery key binding', () => {
   })
 })
 
-interface GateTransport {
-  readonly transport: Http1Transport
-  resolve(): void
-  calls(): number
-  maxInFlight(): number
-}
-
-function gateTransport(): GateTransport {
-  let release: (() => void) | undefined
-  const gate = new Promise<void>((resolve) => {
-    release = resolve
-  })
-  let inFlight = 0
-  let maxInFlight = 0
-  let calls = 0
-  return {
-    transport: async (request) => {
-      calls += 1
-      inFlight += 1
-      maxInFlight = Math.max(maxInFlight, inFlight)
-      await gate
-      inFlight -= 1
-      return {
-        status: 204,
-        headers: {},
-        body: new Uint8Array(),
-        url: request.url,
-      }
-    },
-    resolve: () => {
-      release?.()
-    },
-    calls: () => calls,
-    maxInFlight: () => maxInFlight,
-  }
-}
-
-describe('bounded dispatch', () => {
-  test('caps in-flight attempts globally across publication events', async () => {
+describe('single attempt', () => {
+  test('maps an unexpected transport rejection to a typed network failure', async () => {
     const fixture = createFixture()
-    const other = seedPublishedRulebook(fixture.database, fixture.registry, {
-      authority: 'authority-dispatch',
-      rulebookName: 'Other Dispatch Rulebook',
-    })
-    for (let index = 0; index < 3; index += 1) {
-      await activeSubscription(
-        fixture,
-        fixture.seeded.rulebookId,
-        `203.0.113.${String(60 + index)}`,
-        `https://first-${String(index)}.example.test/hook`,
-      )
-    }
-    for (let index = 0; index < 2; index += 1) {
-      await activeSubscription(
-        fixture,
-        other.rulebookId,
-        `203.0.113.${String(70 + index)}`,
-        `https://second-${String(index)}.example.test/hook`,
-      )
-    }
-    const otherEvent = fixture.registry.getPublicationEvent(other.rulebookId, '1.0')
-    if (otherEvent === null) {
-      throw new Error('the second publication event is missing')
-    }
-    const gate = gateTransport()
-    const results: WebhookDeliveryResult[] = []
-    const service = deliveryService(fixture, {
-      maxConcurrency: 2,
-      transport: gate.transport,
-      onResult: (result) => results.push(result),
-    })
-
-    service.dispatchPublicationEvent(fixture.event)
-    service.dispatchPublicationEvent(otherEvent)
-    await Bun.sleep(0)
-    expect(gate.maxInFlight()).toBe(2)
-    gate.resolve()
-    await service.whenIdle()
-
-    expect(gate.maxInFlight()).toBe(2)
-    expect(gate.calls()).toBe(5)
-    expect(results).toHaveLength(5)
-    expect(results.every((result) => result.delivered)).toBe(true)
-  })
-
-  test('drops attempts beyond the in-memory queue bound', async () => {
-    const fixture = createFixture()
-    for (let index = 0; index < 3; index += 1) {
-      await activeSubscription(
-        fixture,
-        fixture.seeded.rulebookId,
-        `203.0.113.${String(80 + index)}`,
-        `https://bounded-${String(index)}.example.test/hook`,
-      )
-    }
-    const gate = gateTransport()
-    const results: WebhookDeliveryResult[] = []
-    const service = deliveryService(fixture, {
-      maxConcurrency: 1,
-      maxPendingDeliveries: 2,
-      transport: gate.transport,
-      onResult: (result) => results.push(result),
-    })
-    const warnings: string[] = []
-    const originalWarn = console.warn
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.map(String).join(' '))
-    }
-    try {
-      service.dispatchPublicationEvent(fixture.event)
-    } finally {
-      console.warn = originalWarn
-    }
-
-    await Bun.sleep(0)
-    expect(gate.calls()).toBe(1)
-    expect(warnings).toContain('webhook delivery queue full; dropped 1 attempts')
-    gate.resolve()
-    await service.whenIdle()
-    expect(gate.calls()).toBe(2)
-    expect(results).toHaveLength(2)
-  })
-
-  test('maps an unexpected error to a typed network failure and still becomes idle', async () => {
-    const fixture = createFixture()
-    await activeSubscription(fixture)
-    const results: WebhookDeliveryResult[] = []
+    const registered = await activeSubscription(fixture)
     const service = deliveryService(fixture, {
       transport: () => Promise.reject(new Error('unexpected transport failure')),
-      onResult: (result) => results.push(result),
     })
 
-    service.dispatchPublicationEvent(fixture.event)
-    await service.whenIdle()
+    const result: WebhookDeliveryResult = await service.attempt(fixture.event, registered.id)
 
-    expect(results).toHaveLength(1)
-    expect(results[0]).toMatchObject({ delivered: false, reason: 'network_failure' })
+    expect(result).toMatchObject({ delivered: false, reason: 'network_failure' })
   })
 })

@@ -41,7 +41,11 @@ import type {
 import type { RulebookVersionDocument } from '../registry/versioning'
 import { credentialSchemaDocumentUrl, sha256Sri } from '../public-urls'
 import type { CredentialValidationResult } from '../validation'
-import type { RegisteredSubscription, Subscription } from '../subscriptions'
+import type {
+  RegisteredSubscription,
+  Subscription,
+  WebhookDeliveryStatusPage,
+} from '../subscriptions'
 import type { VerifierConstraintsResult } from '../verifier'
 
 import {
@@ -70,6 +74,7 @@ import {
   rulebookVersionSchemaReferencesSchema,
   registeredSubscriptionSchema,
   schemaReferenceSchema,
+  subscriptionDeliveryPageSchema,
   subscriptionSchema,
   verifierConstraintsResultSchema,
   versionDiffSchema,
@@ -156,6 +161,34 @@ export function toRegisteredSubscriptionResource(subscription: RegisteredSubscri
     ...(subscription.webhookSecret === undefined
       ? {}
       : { webhookSecret: subscription.webhookSecret }),
+  })
+}
+
+/**
+ * Sanitized delivery-status page of one authenticated subscription. The store
+ * selects only the event id, status, attempts, timestamps and terminal reason,
+ * so no callback URL, token, response body or address can reach the projection.
+ */
+export function toSubscriptionDeliveryPageResource(
+  page: WebhookDeliveryStatusPage,
+  limit: number,
+  offset: number,
+) {
+  return subscriptionDeliveryPageSchema.parse({
+    data: page.entries.map((entry) => ({
+      eventId: entry.eventId,
+      status: entry.status,
+      attempts: entry.attempts,
+      createdAt: entry.createdAt,
+      updatedAt: entry.updatedAt,
+      nextAttemptAt: entry.nextAttemptAt,
+      lastAttemptAt: entry.lastAttemptAt,
+      lastErrorCategory: entry.lastErrorCategory,
+      terminalReason: entry.terminalReason,
+      deliveredAt: entry.deliveredAt,
+      failedAt: entry.failedAt,
+    })),
+    pagination: { limit, offset, total: page.total },
   })
 }
 

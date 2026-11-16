@@ -12,7 +12,11 @@ import { z } from 'zod'
 import { MAX_ADMIN_PASSWORD_LENGTH, MAX_ADMIN_USERNAME_LENGTH } from '../auth'
 import { ISSUER_FIXTURE_KIND, ISSUER_FIXTURE_NEGATIVE_CATEGORIES } from '../fixtures/types'
 import { CREDENTIAL_SCHEMA_KINDS } from '../registry/types'
-import { SUBSCRIPTION_STATES } from '../subscriptions'
+import {
+  SUBSCRIPTION_STATES,
+  WEBHOOK_DELIVERY_STATUSES,
+  WEBHOOK_DELIVERY_TERMINAL_REASONS,
+} from '../subscriptions'
 import {
   CONFORMANCE_CANONICALIZATION,
   CONFORMANCE_DIGEST_ALGORITHM,
@@ -295,6 +299,36 @@ export const paginationSchema = z.object({
   limit: z.number().int().nonnegative(),
   offset: z.number().int().nonnegative(),
   total: z.number().int().nonnegative(),
+})
+
+export const SUBSCRIPTION_DELIVERY_STATUS_SCHEMA = z.enum(WEBHOOK_DELIVERY_STATUSES)
+export const SUBSCRIPTION_DELIVERY_TERMINAL_REASON_SCHEMA = z.enum(
+  WEBHOOK_DELIVERY_TERMINAL_REASONS,
+)
+
+/**
+ * One sanitized row of the management-token-protected delivery-status view
+ * (#120). It names the immutable event id and delivery bookkeeping only; the
+ * callback URL, tokens, response bodies, addresses and other subscribers'
+ * records remain absent.
+ */
+export const subscriptionDeliverySchema = z.object({
+  eventId: z.string().min(1),
+  status: SUBSCRIPTION_DELIVERY_STATUS_SCHEMA,
+  attempts: z.number().int().nonnegative(),
+  createdAt: timestamp,
+  updatedAt: timestamp,
+  nextAttemptAt: nullableString,
+  lastAttemptAt: nullableString,
+  lastErrorCategory: nullableString,
+  terminalReason: SUBSCRIPTION_DELIVERY_TERMINAL_REASON_SCHEMA.nullable(),
+  deliveredAt: nullableString,
+  failedAt: nullableString,
+})
+
+export const subscriptionDeliveryPageSchema = z.object({
+  data: z.array(subscriptionDeliverySchema),
+  pagination: paginationSchema,
 })
 
 export const rulebookResponseSchema = z.object({ data: rulebookSchema })
@@ -1628,6 +1662,8 @@ export const OPENAPI_COMPONENTS = {
   SubscriptionResponse: subscriptionResponseSchema,
   RegisteredSubscription: registeredSubscriptionSchema,
   RegisteredSubscriptionResponse: registeredSubscriptionResponseSchema,
+  SubscriptionDelivery: subscriptionDeliverySchema,
+  SubscriptionDeliveryPageResponse: subscriptionDeliveryPageSchema,
   Provider: providerSchema,
   ProviderListResponse: providerListResponseSchema,
   Rulebook: rulebookSchema,

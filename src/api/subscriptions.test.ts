@@ -34,13 +34,17 @@ import {
   WEBHOOK_EVENT_ID_HEADER,
   WEBHOOK_SIGNATURE_HEADER,
   WEBHOOK_TIMESTAMP_HEADER,
-  WebhookDeliveryService,
+  WebhookOutboxDispatcher,
   type CallbackHostResolver,
   type SubscriptionServiceOptions,
 } from '../subscriptions'
 import { SubscriptionService } from '../subscriptions'
 
-import { registeredSubscriptionResponseSchema, subscriptionResponseSchema } from './schemas'
+import {
+  registeredSubscriptionResponseSchema,
+  subscriptionDeliveryPageSchema,
+  subscriptionResponseSchema,
+} from './schemas'
 
 interface Fixture {
   readonly directory: string
@@ -50,7 +54,7 @@ interface Fixture {
   service: SubscriptionService
   readonly seeded: SeededRulebook
   readonly options: Partial<SubscriptionServiceOptions>
-  app(webhookDelivery?: WebhookDeliveryService): Hono
+  app(webhookOutbox?: WebhookOutboxDispatcher): Hono
   register(rulebookId?: string, body?: unknown, headers?: Record<string, string>): Promise<Response>
   reopen(): void
   cleanup(): void
@@ -79,11 +83,11 @@ function createFixture(overrides: Partial<SubscriptionServiceOptions> = {}): Fix
     },
     seeded,
     options,
-    app(webhookDelivery?: WebhookDeliveryService) {
+    app(webhookOutbox?: WebhookOutboxDispatcher) {
       return createApp({
         registry,
         subscriptions: service,
-        ...(webhookDelivery === undefined ? {} : { webhookDelivery }),
+        ...(webhookOutbox === undefined ? {} : { webhookOutbox }),
       })
     },
     async register(
@@ -670,10 +674,11 @@ describe('publication webhook delivery over HTTP', () => {
     expect(activated.status).toBe(200)
 
     const deliveries: Http1Request[] = []
-    const delivery = new WebhookDeliveryService({
+    const delivery = new WebhookOutboxDispatcher({
       database: fixture.database,
       signingKey: WEBHOOK_KEY,
       now: () => FIXED_NOW,
+      random: () => 0.5,
       resolveCallbackHostname: fakeResolver(),
       transport: (request) => {
         deliveries.push(request)
@@ -774,10 +779,11 @@ describe('publication webhook delivery over HTTP', () => {
     })
     let transportSettled = false
     const deliveries: Http1Request[] = []
-    const delivery = new WebhookDeliveryService({
+    const delivery = new WebhookOutboxDispatcher({
       database: fixture.database,
       signingKey: WEBHOOK_KEY,
       now: () => FIXED_NOW,
+      random: () => 0.5,
       resolveCallbackHostname: fakeResolver(),
       timeoutMs: 30_000,
       transport: async (request) => {
@@ -818,5 +824,127 @@ describe('publication webhook delivery over HTTP', () => {
     release()
     await delivery.whenIdle()
     expect(transportSettled).toBe(true)
+  })
+})
+
+describe('subscription delivery status over HTTP', () => {
+  const WEBHOOK_KEY = Buffer.from('00112233445566778899aabbccddeeff', 'utf8')
+
+  test('answers 503 when the durable outbox is not configured', async () => {
+    fixture = createFixture()
+    const registered = await register(fixture)
+
+    const response = await fixture.app().request(`${managementPath(registered.id)}/deliveries`, {
+      headers: { authorization: bearer(registered.token) },
+    })
+    expect(response.status).toBe(503)
+    expect((await jsonBody<{ error: { code: string } }>(response)).error.code).toBe(
+      'delivery_status_unavailable',
+    )
+  })
+
+  test('requires the management token and returns only the authenticated subscription’s sanitized rows', async () => {
+    const verification = createVerificationTransport(acknowledgement)
+    fixture = createFixture({
+      webhookSigningKey: WEBHOOK_KEY,
+      resolveCallbackHostname: fakeResolver(),
+      verificationTransport: verification.transport,
+    })
+    const first = await register(fixture)
+    const second = await register(fixture)
+    expect((await verify(fixture, first.id, first.token)).status).toBe(200)
+    expect((await verify(fixture, second.id, second.token)).status).toBe(200)
+
+    const delivery = new WebhookOutboxDispatcher({
+      database: fixture.database,
+      signingKey: WEBHOOK_KEY,
+      now: () => '2026-01-01T00:00:00.000Z',
+      random: () => 0,
+      resolveCallbackHostname: fakeResolver(),
+      transport: (request) =>
+        Promise.resolve({
+          status: 204,
+          headers: {},
+          body: new Uint8Array(),
+          url: request.url,
+        }),
+    })
+    const app = fixture.app(delivery)
+    const authorization = { authorization: bearer(fixture.seeded.token) }
+    await app.request(`/api/v1/rulebooks/${fixture.seeded.rulebookId}/versions`, {
+      method: 'POST',
+      headers: { ...authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ version: '1.1' }),
+    })
+    const published = await app.request(
+      `/api/v1/rulebooks/${fixture.seeded.rulebookId}/versions/1.1/publish`,
+      { method: 'POST', headers: authorization },
+    )
+    expect(published.status).toBe(200)
+    await delivery.whenIdle()
+
+    const event = fixture.registry.getPublicationEvent(fixture.seeded.rulebookId, '1.1')
+    if (event === null) {
+      throw new Error('the published event is missing')
+    }
+
+    const response = await app.request(`${managementPath(first.id)}/deliveries`, {
+      headers: { authorization: bearer(first.token) },
+    })
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const page = subscriptionDeliveryPageSchema.parse(await response.json())
+    expect(page.data).toHaveLength(1)
+    expect(page.data[0]).toMatchObject({
+      eventId: event.id,
+      status: 'delivered',
+      attempts: 1,
+      lastErrorCategory: null,
+      terminalReason: null,
+    })
+    expect(page.data[0]?.deliveredAt).not.toBeNull()
+    expect(page.pagination).toEqual({ limit: 20, offset: 0, total: 1 })
+
+    // The row belongs to exactly one subscription: another token cannot see it.
+    const other = await app.request(`${managementPath(second.id)}/deliveries`, {
+      headers: { authorization: bearer(first.token) },
+    })
+    expect(other.status).toBe(401)
+    const anonymous = await app.request(`${managementPath(first.id)}/deliveries`)
+    expect(anonymous.status).toBe(401)
+    const unknown = await app.request(`${managementPath('missing')}/deliveries`, {
+      headers: { authorization: bearer(first.token) },
+    })
+    expect(unknown.status).toBe(401)
+
+    // No callback URL, management token or other subscriber data is exposed.
+    const serialized = JSON.stringify(page)
+    expect(serialized).not.toContain('example.test')
+    expect(serialized).not.toContain(first.token)
+    expect(serialized).not.toContain('callbackUrl')
+
+    const revoked = await app.request(managementPath(first.id), {
+      method: 'DELETE',
+      headers: { authorization: bearer(first.token) },
+    })
+    expect(revoked.status).toBe(204)
+    const afterRevoke = await app.request(`${managementPath(first.id)}/deliveries`, {
+      headers: { authorization: bearer(first.token) },
+    })
+    expect(afterRevoke.status).toBe(404)
+  })
+
+  test('rejects invalid page bounds and bounds the page size', async () => {
+    fixture = createFixture()
+    const registered = await register(fixture)
+    const app = fixture.app(
+      new WebhookOutboxDispatcher({ database: fixture.database, signingKey: null }),
+    )
+    for (const query of ['?limit=0', '?limit=101', '?offset=-1', '?limit=abc']) {
+      const response = await app.request(`${managementPath(registered.id)}/deliveries${query}`, {
+        headers: { authorization: bearer(registered.token) },
+      })
+      expect(response.status, query).toBe(400)
+    }
   })
 })
