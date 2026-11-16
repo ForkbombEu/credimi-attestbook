@@ -205,6 +205,14 @@ change it. The same flow is the **Freeze as draft version**, **Check readiness**
 **Publish** sequence in the editor's lifecycle panel; readiness is a pre-publication check,
 not a conformance claim.
 
+A published rulebook can be reopened for a next version without re-creating it: the detail
+page's **Create new version** action (owner administrator only) opens the editor's next-version
+panel, where a typed label calls the same `POST .../versions` endpoint. The request reopens the
+working copy for editing in place and leaves the published version's stored bytes and digest
+untouched; a duplicate label is a conflict and nothing is published by creating the version.
+After editing a schema reference, refresh the new draft version, check readiness and publish as
+above. Alternatively, the same sequence is available from the JSON client shown here.
+
 The detail view now shows the hosted and external rows, and the version history's **Inspect
 references** action reads the frozen snapshot:
 

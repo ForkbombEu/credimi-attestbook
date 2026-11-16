@@ -14,7 +14,7 @@
 // (stale snapshot, duplicate label, immutable version) surface the server's
 // safe message and leave every frozen artifact untouched.
 
-import { useCallback, useEffect, useState, type FormEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 
 import type { EditorApi } from '../api'
 import { isAbortError, isSessionAuthError } from '../api'
@@ -36,6 +36,11 @@ interface DraftLifecyclePanelProps {
   /** Live session CSRF token; `null` when the administrator is signed out. */
   readonly csrfToken: string | null
   readonly publicationStatus: PublicationStatus
+  /**
+   * Bumped when a version is created outside this panel (the editor's
+   * next-version flow), so the history reflects the new draft version.
+   */
+  readonly refreshToken?: number
   /** Reports the rulebook status a transition produced, without a reload. */
   readonly onChanged: (publicationStatus: PublicationStatus) => void
   /** Tells the editor to show its inline renewal prompt after a 401/403. */
@@ -63,6 +68,7 @@ export function DraftLifecyclePanel({
   rulebookId,
   csrfToken,
   publicationStatus,
+  refreshToken = 0,
   onChanged,
   onSessionExpired,
 }: DraftLifecyclePanelProps) {
@@ -73,6 +79,7 @@ export function DraftLifecyclePanel({
   const [error, setError] = useState<string | null>(null)
   const [statusMessage, setStatusMessage] = useState<string | null>(null)
   const [readiness, setReadiness] = useState<PublicationReadiness | null>(null)
+  const actionInFlight = useRef(false)
 
   useEffect(() => {
     const controller = new AbortController()
@@ -94,7 +101,7 @@ export function DraftLifecyclePanel({
         })
       })
     return () => controller.abort()
-  }, [api, reloadToken, rulebookId])
+  }, [api, refreshToken, reloadToken, rulebookId])
 
   const reloadVersions = useCallback(() => setReloadToken((value) => value + 1), [])
 
@@ -110,6 +117,12 @@ export function DraftLifecyclePanel({
 
   const runAction = useCallback(
     async (key: string, action: () => Promise<void>) => {
+      // A repeated submit must not create or publish twice before the disabled
+      // state renders.
+      if (actionInFlight.current) {
+        return
+      }
+      actionInFlight.current = true
       setBusy(key)
       setError(null)
       setStatusMessage(null)
@@ -121,6 +134,7 @@ export function DraftLifecyclePanel({
         }
         setError(message(caught, 'The lifecycle action failed.'))
       } finally {
+        actionInFlight.current = false
         setBusy(null)
       }
     },
@@ -197,7 +211,9 @@ export function DraftLifecyclePanel({
   }
 
   const versions = state.status === 'ready' ? versionsNewestFirst(state.versions) : []
-  const canFreeze = publicationStatus !== 'historical'
+  // A published rulebook is reopened by the editor's dedicated next-version
+  // panel, so this panel only freezes working copies that are already drafts.
+  const canFreeze = publicationStatus === 'draft'
 
   return (
     <section className="detail-card" aria-labelledby="draft-lifecycle-heading">
@@ -221,15 +237,19 @@ export function DraftLifecyclePanel({
               spellCheck={false}
             />
             <p className="field-hint">
-              {publicationStatus === 'published'
-                ? 'Creating a version reopens the working copy for the next version; the published version stays immutable.'
-                : 'The working copy is frozen under this label. An existing label is rejected as a conflict.'}
+              The working copy is frozen under this label. An existing label is rejected as a
+              conflict.
             </p>
           </div>
           <button type="submit" className="button button--primary" disabled={busy !== null}>
             {busy === 'create' ? 'Freezing…' : 'Freeze as draft version'}
           </button>
         </form>
+      ) : publicationStatus === 'published' ? (
+        <p className="field-hint">
+          The current working copy is published. Create a new version above to reopen it for
+          editing; published versions stay immutable.
+        </p>
       ) : (
         <p className="notice notice--warning" role="status">
           This rulebook is historical. Its versions cannot be transitioned again.

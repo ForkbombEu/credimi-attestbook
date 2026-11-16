@@ -4,6 +4,7 @@ import type { EditorApi } from './api'
 import { CatalogApiError, isAbortError, isSessionAuthError } from './api'
 import { SeverityBadge } from './components/Badges'
 import { ErrorState, LoadingState } from './components/CatalogStates'
+import { CreateVersionPanel } from './components/CreateVersionPanel'
 import { DraftLifecyclePanel } from './components/DraftLifecyclePanel'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { SchemaReferenceControls } from './components/SchemaReferenceControls'
@@ -28,6 +29,7 @@ import type {
   DraftRulebook,
   DraftValidationReport,
   HostedSchema,
+  RulebookVersion,
 } from './types'
 
 interface RulebookDraftEditorPageProps {
@@ -118,6 +120,8 @@ export function RulebookDraftEditorPage({
   const [sessionExpired, setSessionExpired] = useState(false)
   const [renewedNotice, setRenewedNotice] = useState<string | null>(null)
   const [hostedSchemas, setHostedSchemas] = useState<ReadonlyMap<string, HostedSchema>>(new Map())
+  const [nextVersionNotice, setNextVersionNotice] = useState<string | null>(null)
+  const [versionsRefreshToken, setVersionsRefreshToken] = useState(0)
   const pendingValidation = useRef<AbortController | null>(null)
 
   const loadDraft = useCallback(
@@ -183,7 +187,20 @@ export function RulebookDraftEditorPage({
 
   const draft = state.status === 'ready' ? state.draft : null
   const readOnly = draft !== null && draft.publicationStatus !== 'draft'
-  const title = creating ? 'New rulebook draft' : 'Rulebook draft editor'
+  // Only the administrator bound to the owning provider is offered the
+  // next-version transition; the server independently enforces the same rule.
+  const ownsRulebook =
+    draft !== null &&
+    session.status === 'authenticated' &&
+    session.session !== null &&
+    session.session.provider.id === draft.providerId
+  const creatingNextVersion =
+    draft !== null && draft.publicationStatus === 'published' && ownsRulebook
+  const title = creating
+    ? 'New rulebook draft'
+    : creatingNextVersion
+      ? 'Create a new version'
+      : 'Rulebook draft editor'
   useDocumentTitle(title)
 
   const authenticated = session.status === 'authenticated'
@@ -284,8 +301,30 @@ export function RulebookDraftEditorPage({
           ? { status: 'ready', draft: { ...current.draft, publicationStatus } }
           : current,
       )
+      // A creation notice is only meaningful while the working copy stays
+      // editable; publishing its draft version replaces that state.
+      if (publicationStatus !== 'draft') {
+        setNextVersionNotice(null)
+      }
     },
     [],
+  )
+
+  /**
+   * The next-version flow reopened the working copy: the editor becomes
+   * editable in place, the now-historical published artifact is untouched, and
+   * the lifecycle panel reloads to offer refresh, readiness and publish for the
+   * new draft version.
+   */
+  const handleVersionCreated = useCallback(
+    (created: RulebookVersion) => {
+      handleLifecycleChange('draft')
+      setNextVersionNotice(
+        `Draft version ${created.version} created. The working copy is now editable; the previously published version keeps its bytes and digest.`,
+      )
+      setVersionsRefreshToken((token) => token + 1)
+    },
+    [handleLifecycleChange],
   )
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
@@ -469,25 +508,62 @@ export function RulebookDraftEditorPage({
                 </AppLink>
               </li>
             )}
-            <li aria-current="page">{creating ? 'New rulebook' : 'Edit draft'}</li>
+            <li aria-current="page">
+              {creating ? 'New rulebook' : creatingNextVersion ? 'New version' : 'Edit draft'}
+            </li>
           </ol>
         </nav>
 
         <div className="page-heading">
-          <p className="eyebrow">{creating ? 'Authoring' : 'Draft working copy'}</p>
-          <h1>{creating ? 'New rulebook draft' : `Edit ${nameForHeading} draft`}</h1>
+          <p className="eyebrow">
+            {creating
+              ? 'Authoring'
+              : creatingNextVersion
+                ? 'Published rulebook'
+                : 'Draft working copy'}
+          </p>
+          <h1>
+            {creating
+              ? 'New rulebook draft'
+              : creatingNextVersion
+                ? `Create a new version of ${nameForHeading}`
+                : `Edit ${nameForHeading} draft`}
+          </h1>
           <p className="lede">
-            Edit the rulebook metadata and its attestation JSON. Validation runs as you type; saving
-            a draft never changes a frozen or published version.
+            {creatingNextVersion
+              ? 'This rulebook is published and immutable. Create a new draft version to reopen the working copy for editing; the published artifact is not changed.'
+              : 'Edit the rulebook metadata and its attestation JSON. Validation runs as you type; saving a draft never changes a frozen or published version.'}
           </p>
         </div>
 
         <div id="draft-editor" tabIndex={-1}>
+          {rulebookId === undefined || !creatingNextVersion ? null : (
+            <CreateVersionPanel
+              api={api}
+              rulebookId={rulebookId}
+              csrfToken={csrfToken}
+              onCreated={handleVersionCreated}
+              onSessionExpired={() => {
+                setSessionExpired(true)
+                setRenewedNotice(null)
+              }}
+            />
+          )}
+
+          {nextVersionNotice === null ? null : (
+            <p className="notice editor-saved" role="status">
+              {nextVersionNotice}
+            </p>
+          )}
+
           {readOnly ? (
             <div className="notice notice--warning" role="status">
               <p className="notice-title">This rulebook is {draft?.publicationStatus}.</p>
-              Only its draft working copy can be edited. Create a new draft version from the
-              lifecycle workflow before changing content.
+              {creatingNextVersion
+                ? 'The form below is read-only until you create the new version. The published bytes and digest are not changed by this flow.'
+                : draft?.publicationStatus === 'published'
+                  ? 'Only its draft working copy can be edited; creating a new version needs the administrator of the provider that owns this rulebook.'
+                  : 'Only its draft working copy can be edited. A historical rulebook cannot be transitioned again.'}
             </div>
           ) : null}
 
@@ -718,6 +794,7 @@ export function RulebookDraftEditorPage({
               rulebookId={rulebookId}
               csrfToken={csrfToken}
               publicationStatus={draft.publicationStatus}
+              refreshToken={versionsRefreshToken}
               onChanged={handleLifecycleChange}
               onSessionExpired={() => {
                 setSessionExpired(true)

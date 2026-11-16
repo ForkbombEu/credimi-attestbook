@@ -111,9 +111,9 @@ Implemented by these slices:
   - a read-only state for a published or historical rulebook, which the server also refuses
     to mutate. Editing never changes a frozen version snapshot or its content-addressed
     artifact;
-  - entry actions on the catalog (`New rulebook`) and on the draft detail page
-    (`Edit draft`), shown only for an authenticated session (and, on the detail page, only for
-    the provider that owns the draft);
+  - entry actions on the catalog (`New rulebook`) and on the detail page (`Edit draft` for a
+    draft, `Create new version` for a published rulebook), shown only for an authenticated
+    session bound to the owning provider;
 - a deterministic version comparison panel on `/rulebooks/{id}` (#41):
   - two labelled version selects and an explicit `Compare` action; the public comparison
     endpoint returns JSON Pointer changes sorted by path, and snapshot identity fields are
@@ -145,7 +145,10 @@ Implemented by these slices:
   - the server's safe conflict and immutability messages are surfaced, and a successful
     transition updates the editor's read-only state without re-fetching the working copy;
   - creating a version from a published rulebook reopens the working copy for the next
-    version while the published snapshot stays immutable;
+    version while the published snapshot stays immutable. The published rulebook's detail page
+    offers **Create new version**, and the editor opens in a next-version flow whose
+    **Create new version** action calls the same lifecycle endpoint, reopens the working copy
+    in place without a reload and never publishes anything;
 - an administrator sign-in screen at `/login` (#90):
   - a username/password form with submit, working and error states and no bearer-token field;
   - the auth client restores the session from `GET /api/v1/auth/me` on every load, treats an
@@ -395,8 +398,8 @@ dimensions.
   **Sign in to author rulebooks** panel with a `Sign in` link whose validated `next` value is
   the current editor path. The form is not rendered and no draft is read until
   `GET /api/v1/auth/me` confirms an authenticated session. The catalogue's **New rulebook**
-  action and the detail view's **Edit draft** action appear only when the session is
-  authenticated (and, for a draft, bound to the owning provider);
+  action and the detail view's **Edit draft**/**Create new version** actions appear only when
+  the session is authenticated and bound to the owning provider;
 - draft and lifecycle writes send the HttpOnly session cookie and its in-memory
   `X-CSRF-Token` only; there is no provider-token field to paste and no `Authorization`
   header. A `401` or a `403 csrf_failed` keeps the form mounted, shows an inline **Sign in
@@ -404,6 +407,14 @@ dimensions.
   without losing work. A `403 forbidden` is an ownership refusal, not an expired session, so
   it shows the server's safe message without a re-sign-in prompt; a published rulebook's
   mutation still surfaces its safe error message. Nothing is saved on failure;
+- a published rulebook's editor opens in a next-version flow: the page names the published
+  status, requires a typed label and offers one **Create new version** action for the existing
+  lifecycle endpoint. The server validates the label and rejects a duplicate as a
+  conflict; the error is shown with the typed label kept, and a repeated submit sends at most
+  one request. Creation reopens the working copy in place (no reload), keeps its metadata,
+  attestations and schema references, and leaves the published bytes and digest untouched; the
+  page then becomes the ordinary draft editor, and the lifecycle panel offers refresh,
+  readiness and publish for the new draft version;
 - a published or historical rulebook opens read-only with an explanation, and the server
   independently answers `409 immutable`, so the UI cannot bypass the guarantee. A successful
   save reports that frozen and published versions were not changed; the test suite verifies
@@ -445,9 +456,10 @@ delivered by #88; it is not a provider-bearer-token form:
   open redirect; without a valid target it returns to the catalogue;
 - the catalogue, rulebook detail, playground and capture explorer views remain reachable
   anonymously, and the public API reads keep working without a session. The authoring actions
-  are session-gated as described in §3.4: **New rulebook**, **Edit draft** and the protected
-  capture correlation are hidden or replaced by a sign-in prompt when anonymous, and a direct
-  editor URL renders the sign-in panel with the editor path as its `next` target;
+  are session-gated as described in §3.4: **New rulebook**, **Edit draft**,
+  **Create new version** and the protected capture correlation are hidden or replaced by a
+  sign-in prompt when anonymous, and a direct editor URL renders the sign-in panel with the
+  editor path as its `next` target;
 - an expired session is detected when a write answers `401` (or `403 csrf_failed` after a
   session rotation). The editor and the capture correlation form keep their state and show an
   inline **Sign in again** form backed by the same auth API; a fresh sign-in clears the prompt
@@ -550,6 +562,21 @@ source was changed.
 | Version history: exact version references | [`version-before.png`](ui/schema-provenance/version-before.png) | [`version-after.png`](ui/schema-provenance/version-after.png) |
 | Draft editor: schema rows | [`editor-before.png`](ui/schema-provenance/editor-before.png) | [`editor-after.png`](ui/schema-provenance/editor-after.png) |
 
+The next-version flow slice (issue #112) has before/after captures at 1280 px in the same light
+theme, taken from the seeded end-to-end server with the same published version `1.0` of a
+rulebook owned by the seeded `Example Issuer` and the same signed-in administrator. The
+baseline is `31827ea` (`main` before the slice); the after images are from this PR's head. In
+both revisions the administrator creates version `1.1.0` from the published rulebook (the
+baseline through the lifecycle panel at the bottom of the read-only editor, this slice through
+the detail-page action and the next-version panel), so only the workflow and its discoverability
+differ.
+
+| View | Before (`31827ea`) | After (this slice) |
+| --- | --- | --- |
+| Published rulebook details: next-version action | [`detail-before.png`](ui/new-version/detail-before.png) | [`detail-after.png`](ui/new-version/detail-after.png) |
+| Published rulebook editor: next-version flow | [`editor-before.png`](ui/new-version/editor-before.png) | [`editor-after.png`](ui/new-version/editor-after.png) |
+| Reopened editable working copy after creating `1.1.0` | [`created-before.png`](ui/new-version/created-before.png) | [`created-after.png`](ui/new-version/created-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
@@ -590,7 +617,10 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   inline re-sign-in after a `401` with the unsaved description preserved; create-and-navigate;
   read-only published state; absence of a bearer-token field; the API-derived hosted
   association and download/digest display, including a near-miss URL that stays external;
-  axe-core checks for the editor page;
+  the owner-only published-to-next-version flow with its typed label, duplicate, ownership
+  and session errors, a single request on repeated submit and the in-place reopening of the
+  working copy (`ui/src/RulebookDetailPage.test.tsx`,
+  `ui/src/RulebookDraftEditorPage.test.tsx`); axe-core checks for the editor page;
 - the mock-backed capture explorer: loading, error and retry, empty and truncation states, the
   normalized summary columns and evidence gaps, the redacted projection (never the raw claim
   values), external and non-credential evidence refusals, the correlation form and its
@@ -668,6 +698,12 @@ Chromium):
   draft's editor and persist a `null` source URL; because this spec creates a rulebook in the
   one shared in-memory registry, the Playwright suite runs with one worker and catalog specs
   run before it;
+- the published-to-next-version flow through the real UI: the detail page's owner-only
+  **Create new version** action, the anonymous and other-provider restrictions with the API's
+  `401`/`403`, a schema-reference replacement on the reopened working copy, refresh →
+  readiness → publish, the previous version becoming historical with unchanged bytes and
+  digest, and a duplicate label leaving the published artifact untouched
+  (`ui/e2e/lifecycle.spec.ts`);
 - the administrator login against the real server: sign-in from `/login`, the authenticated
   provider identity and logout control, an empty `localStorage`/`sessionStorage`, session
   restoration after a reload, logout back to anonymous with the seven-rulebook catalogue still

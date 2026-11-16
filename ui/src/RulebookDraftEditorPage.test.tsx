@@ -480,6 +480,12 @@ describe('rulebook draft editor', () => {
     )
     expect(await within(lifecycle).findByText(/is now published and immutable/)).toBeVisible()
     expect(screen.getByText('This rulebook is published.')).toBeVisible()
+    // A published rulebook offers the next-version flow instead of freezing
+    // another version in place.
+    expect(screen.getByRole('region', { name: 'Create a new version' })).toBeVisible()
+    expect(
+      within(lifecycle).queryByRole('button', { name: 'Freeze as draft version' }),
+    ).not.toBeInTheDocument()
   })
 
   test('keeps publish disabled when the readiness rulebook-status check fails', async () => {
@@ -1011,6 +1017,195 @@ describe('rulebook draft editor', () => {
         name: 'Remove schema for Person Identification Data (dc+sd-jwt)',
       }),
     ).toBeDisabled()
+  })
+
+  describe('creating the next version from a published rulebook', () => {
+    const PUBLISHED_DRAFT: DraftRulebook = { ...DRAFT, publicationStatus: 'published' }
+    const PUBLISHED_VERSION = version({
+      id: 'version-published',
+      status: 'published',
+      publishedAt: '2026-01-02T00:00:00.000Z',
+    })
+
+    function publishedApi(overrides: Partial<EditorApi> = {}): EditorApi {
+      let versions: RulebookVersion[] = [PUBLISHED_VERSION]
+      return editor({
+        getDraft: vi.fn(async () => PUBLISHED_DRAFT),
+        listVersions: vi.fn(async () => versions),
+        createVersion: vi.fn(async (_rulebookId, label) => {
+          const created = version({ id: `version-${label}`, version: label, status: 'draft' })
+          versions = [created, ...versions]
+          return created
+        }),
+        ...overrides,
+      })
+    }
+
+    test('opens a published rulebook in the next-version flow and reopens the working copy in place', async () => {
+      const api = publishedApi()
+      const user = userEvent.setup()
+      renderEditor(api, { rulebookId: DRAFT.id })
+
+      expect(
+        await screen.findByRole('heading', { name: 'Create a new version of PID Rulebook' }),
+      ).toBeVisible()
+      expect(screen.getByText('This rulebook is published.')).toBeVisible()
+      expect(screen.getByLabelText('Name')).toBeDisabled()
+
+      const panel = screen.getByRole('region', { name: 'Create a new version' })
+      await user.type(within(panel).getByLabelText('New version label'), '1.1.0')
+      await user.click(within(panel).getByRole('button', { name: 'Create new version' }))
+
+      await waitFor(() =>
+        expect(api.createVersion).toHaveBeenCalledWith(DRAFT.id, '1.1.0', 'csrf-token-value'),
+      )
+      expect(await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })).toBeVisible()
+      expect(screen.getByLabelText('Name')).toBeEnabled()
+      expect(screen.queryByRole('region', { name: 'Create a new version' })).not.toBeInTheDocument()
+      expect(screen.getByText(/Draft version 1\.1\.0 created/)).toBeVisible()
+
+      const lifecycle = await screen.findByRole('region', {
+        name: 'Draft lifecycle and publication',
+      })
+      const createdRow = (await within(lifecycle).findByText('1.1.0')).closest('tr')
+      expect(createdRow).not.toBeNull()
+      expect(within(createdRow as HTMLElement).getByText('Draft')).toBeVisible()
+      expect(
+        within(createdRow as HTMLElement).getByRole('button', { name: 'Check readiness' }),
+      ).toBeVisible()
+      expect(within(lifecycle).getByText('Immutable')).toBeVisible()
+    })
+
+    test('requires a version label before calling the API', async () => {
+      const api = publishedApi()
+      const user = userEvent.setup()
+      renderEditor(api, { rulebookId: DRAFT.id })
+
+      const panel = await screen.findByRole('region', { name: 'Create a new version' })
+      await user.click(within(panel).getByRole('button', { name: 'Create new version' }))
+
+      expect(within(panel).getByText('Enter a version label such as 1.1.0.')).toBeVisible()
+      expect(api.createVersion).not.toHaveBeenCalled()
+      expect(screen.getByLabelText('Name')).toBeDisabled()
+    })
+
+    test('surfaces a duplicate label conflict and keeps the published state', async () => {
+      const api = publishedApi({
+        createVersion: vi.fn(async () => {
+          throw new CatalogApiError(
+            'Version "1.0" already exists for this rulebook.',
+            409,
+            'conflict',
+          )
+        }),
+      })
+      const user = userEvent.setup()
+      renderEditor(api, { rulebookId: DRAFT.id })
+
+      const panel = await screen.findByRole('region', { name: 'Create a new version' })
+      await user.type(within(panel).getByLabelText('New version label'), '1.0')
+      await user.click(within(panel).getByRole('button', { name: 'Create new version' }))
+
+      const alert = await within(panel).findByRole('alert')
+      expect(alert).toHaveTextContent('The new version was not created')
+      expect(alert).toHaveTextContent('already exists')
+      expect(within(panel).getByLabelText('New version label')).toHaveValue('1.0')
+      expect(
+        screen.getByRole('heading', { name: 'Create a new version of PID Rulebook' }),
+      ).toBeVisible()
+      expect(screen.getByLabelText('Name')).toBeDisabled()
+    })
+
+    test('creates at most one version when the form is submitted repeatedly', async () => {
+      const pending = deferred<RulebookVersion>()
+      const api = publishedApi({ createVersion: vi.fn(() => pending.promise) })
+      renderEditor(api, { rulebookId: DRAFT.id })
+
+      const panel = await screen.findByRole('region', { name: 'Create a new version' })
+      fireEvent.change(within(panel).getByLabelText('New version label'), {
+        target: { value: '2.0' },
+      })
+      const form = within(panel).getByRole('button', { name: 'Create new version' }).closest('form')
+      expect(form).not.toBeNull()
+      fireEvent.submit(form as HTMLFormElement)
+      fireEvent.submit(form as HTMLFormElement)
+
+      expect(api.createVersion).toHaveBeenCalledTimes(1)
+      await act(async () => {
+        pending.resolve(version({ id: 'version-2-0', version: '2.0', status: 'draft' }))
+      })
+      expect(await screen.findByText(/Draft version 2\.0 created/)).toBeVisible()
+    })
+
+    test('keeps the typed label when the session expires', async () => {
+      const api = publishedApi({
+        createVersion: vi.fn(async () => {
+          throw new CatalogApiError('Authentication is required.', 401)
+        }),
+      })
+      const user = userEvent.setup()
+      renderEditor(api, { rulebookId: DRAFT.id })
+
+      const panel = await screen.findByRole('region', { name: 'Create a new version' })
+      await user.type(within(panel).getByLabelText('New version label'), '1.1.0')
+      await user.click(within(panel).getByRole('button', { name: 'Create new version' }))
+
+      expect(await screen.findByRole('heading', { name: 'Sign in again' })).toBeVisible()
+      expect(within(panel).getByLabelText('New version label')).toHaveValue('1.1.0')
+      expect(screen.getByLabelText('Name')).toBeDisabled()
+    })
+
+    test('reports an ownership refusal without a sign-in prompt', async () => {
+      const api = publishedApi({
+        createVersion: vi.fn(async () => {
+          throw new CatalogApiError(
+            'The authenticated provider does not own this resource.',
+            403,
+            'forbidden',
+          )
+        }),
+      })
+      const user = userEvent.setup()
+      renderEditor(api, { rulebookId: DRAFT.id })
+
+      const panel = await screen.findByRole('region', { name: 'Create a new version' })
+      await user.type(within(panel).getByLabelText('New version label'), '1.1.0')
+      await user.click(within(panel).getByRole('button', { name: 'Create new version' }))
+
+      expect(
+        await within(panel).findByText('The authenticated provider does not own this resource.'),
+      ).toBeVisible()
+      expect(screen.queryByRole('heading', { name: 'Sign in again' })).not.toBeInTheDocument()
+    })
+
+    test('does not offer the next-version flow to another provider administrator', async () => {
+      const api = publishedApi()
+      renderEditor(api, {
+        rulebookId: DRAFT.id,
+        session: fakeSession({
+          session: {
+            ...TEST_SESSION,
+            provider: { ...TEST_SESSION.provider, id: 'provider-other' },
+          },
+        }),
+      })
+
+      expect(await screen.findByText('This rulebook is published.')).toBeVisible()
+      expect(screen.getByRole('heading', { name: 'Edit PID Rulebook draft' })).toBeVisible()
+      expect(screen.queryByRole('region', { name: 'Create a new version' })).not.toBeInTheDocument()
+      expect(screen.getByLabelText('Name')).toBeDisabled()
+      expect(
+        screen.getByText(/creating a new version needs the administrator of the provider/),
+      ).toBeVisible()
+    })
+
+    test('has no detectable accessibility violations in the next-version flow', async () => {
+      const api = publishedApi()
+      const { container } = renderEditor(api, { rulebookId: DRAFT.id })
+
+      await screen.findByRole('region', { name: 'Create a new version' })
+      await expectNoA11yViolations(container)
+    })
   })
 
   test('has no detectable accessibility violations', async () => {
