@@ -1,18 +1,18 @@
 // Public surface of the anonymous webhook-subscription module (#117, #118,
-// #119).
+// #119, #120).
 //
 // See docs/api.md §3.15 and docs/security.md for the registration, management,
 // callback-URL, verification and delivery rules. Registration and management
 // perform no outbound request; an explicit, management-token authenticated
-// verification initiation performs the handshake, and a publication dispatches
-// one signed delivery attempt to each active, verified subscription.
+// verification initiation performs the handshake, and a publication durably
+// enqueues one signed delivery job per active, verified subscription. An
+// in-process dispatcher leases and retries due jobs with bounded backoff.
 
 export { SubscriptionService, MAX_SUBSCRIPTION_ID_LENGTH } from './service'
 
 export {
   buildWebhookNotificationBody,
   canonicalWebhookSigningInput,
-  DEFAULT_MAX_PENDING_WEBHOOK_DELIVERIES,
   DEFAULT_MAX_WEBHOOK_RESPONSE_BYTES,
   DEFAULT_WEBHOOK_DELIVERY_CONCURRENCY,
   DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS,
@@ -36,6 +36,37 @@ export {
   type WebhookDeliveryOptions,
   type WebhookDeliveryResult,
 } from './delivery'
+
+export {
+  DEFAULT_WEBHOOK_OUTBOX_BASE_BACKOFF_MS,
+  DEFAULT_WEBHOOK_OUTBOX_BATCH_SIZE,
+  DEFAULT_WEBHOOK_OUTBOX_DISPATCH_CONCURRENCY,
+  DEFAULT_WEBHOOK_OUTBOX_LEASE_TTL_MS,
+  DEFAULT_WEBHOOK_OUTBOX_MAX_AGE_MS,
+  DEFAULT_WEBHOOK_OUTBOX_MAX_ATTEMPTS,
+  DEFAULT_WEBHOOK_OUTBOX_MAX_BACKOFF_MS,
+  DEFAULT_WEBHOOK_OUTBOX_MAX_PENDING_ENTRIES,
+  DEFAULT_WEBHOOK_OUTBOX_POLL_INTERVAL_MS,
+  DEFAULT_WEBHOOK_OUTBOX_RETENTION_MS,
+  DEFAULT_WEBHOOK_OUTBOX_STATUS_LIMIT,
+  isRetryableWebhookDelivery,
+  MAX_WEBHOOK_OUTBOX_STATUS_LIMIT,
+  resolveWebhookOutboxLimits,
+  WEBHOOK_DELIVERY_STATUSES,
+  WEBHOOK_DELIVERY_TERMINAL_REASONS,
+  WebhookOutboxStore,
+  type WebhookDeliveryStatus,
+  type WebhookDeliveryStatusEntry,
+  type WebhookDeliveryStatusPage,
+  type WebhookDeliveryTerminalReason,
+  type WebhookOutboxEnqueueResult,
+  type WebhookOutboxFailureOutcome,
+  type WebhookOutboxJob,
+  type WebhookOutboxLimitOverrides,
+  type WebhookOutboxLimits,
+} from './outbox'
+
+export { WebhookOutboxDispatcher, type WebhookOutboxDispatcherOptions } from './dispatcher'
 
 export {
   DEFAULT_CHALLENGE_TTL_MS,

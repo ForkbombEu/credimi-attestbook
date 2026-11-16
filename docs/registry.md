@@ -670,18 +670,28 @@ performed by a build that includes #116 append events.
 
 ### 6.9 Publication webhook delivery
 
-Issue #119 maps a committed `rulebook.published` event to signed subscriber notifications. The
-publication route resolves the event back through `getPublicationEvent(rulebookId, version)` and
-enqueues delivery only after `publishRulebookVersion` returns, so no HTTP request runs inside the
-publication transaction and a subscriber failure cannot roll a publication back or delay the
-publish response. A global in-flight cap and a bounded in-memory queue bound the asynchronous
-work. Each active, verified subscription of that rulebook that was registered under the current
-deployment key receives one `POST` attempt whose body is the stored
-event projection (the same id, type, rulebook, exact frozen version label, artifact digest and
-publication timestamp the public feed serves) and whose signature is HMAC-SHA-256 over the exact
-body plus timestamp and event id. The per-subscription verification secret is derived from the
-deployment key, so it is not part of registry state. The notification never carries the
-rulebook's working copy or any provider-internal data. See [`docs/api.md`](api.md) §3.15.2.
+Issues #119 and #120 map a committed `rulebook.published` event to signed subscriber
+notifications. The publication route resolves the event back through
+`getPublicationEvent(rulebookId, version)` and writes the durable outbox rows only after
+`publishRulebookVersion` returns, so no network request runs inside the publication transaction
+and a subscriber failure cannot roll a publication back or delay the publish response. One
+outbox row is keyed by `(event_id, subscription_id)` for each active, verified subscription of
+that rulebook that was registered under the current deployment key and existed no later than
+the publication instant; the unique key makes a replay or a reconciliation scan idempotent.
+
+The outbox is bounded (10,000 pending jobs by default) and the in-process dispatcher leases due
+jobs, invokes the one-attempt signed deliverer, and records success or a typed failure. A
+transient failure is retried with bounded exponential backoff and jitter; attempts and age are
+capped and the job ends `delivered` or `failed`. A crash is recovered from the durable row: an
+expired lease is reclaimed and a cursor over the immutable event feed catches an event whose
+enqueue did not commit. The body is the stored event projection (the same id, type, rulebook,
+exact frozen version label, artifact digest and publication timestamp the public feed serves)
+and the signature is HMAC-SHA-256 over the exact body plus timestamp and event id. The
+per-subscription verification secret is derived from the deployment key, so it is not part of
+registry state. Delivery is at-least-once, so a subscriber deduplicates by event id; a job for a
+revoked or stale-key subscription is not attempted. The notification never carries the
+rulebook's working copy or any provider-internal data. See [`docs/api.md`](api.md) §3.15.2 and
+§3.15.3.
 
 ## 7. Validation and failure model
 

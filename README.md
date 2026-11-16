@@ -446,6 +446,36 @@ deployments. Without it the server runs but performs no publication delivery and
 webhook secret; after setting or rotating it, subscriptions registered under an earlier key (or
 none) are skipped and must re-register. A malformed value fails startup.
 
+### Publication webhook delivery
+
+Publication notifications are durable and restart-safe without any extra service. After a
+publication transaction commits, the server writes one bounded outbox row per active, verified
+subscription to the same SQLite database and returns; no DNS lookup or socket is opened in the
+publication path. An in-process dispatcher in the server process leases due jobs, makes one
+signed `POST` attempt, and records the outcome. A transient failure (timeout, DNS/network
+failure or a `5xx` answer) is retried with bounded exponential backoff and jitter; a `4xx`
+answer, redirect, blocked target or ineligible subscription is terminal. Delivery is
+at-least-once, so a subscriber must deduplicate by `X-AttestBook-Event-Id`.
+
+The defaults are: 13 attempts, a one-hour age cap, 2 s base backoff with a 15 min cap and
+50–100 % jitter (roughly 31–62 minutes of retry backoff plus attempt time before the cap), a
+30 s attempt lease, at most 10,000 pending jobs, and seven-day status retention. These are code
+constants in `src/subscriptions/outbox.ts`, not environment variables in this slice; a partial
+override whose retry schedule cannot reach the age cap is rejected instead of silently giving
+up early.
+An expired lease and a reconciliation cursor over the immutable event feed recover work after a
+crash or restart; the unique `(event, subscription)` key means recovery never creates a second
+permanent job. Jobs beyond the pending bound are dropped with a count-only warning, and events
+published while a subscription is pending or revoked are not replayed — the subscriber reads the
+public event feed to reconcile.
+
+The dispatcher is one in-process timer on the documented single-writer SQLite deployment
+([`docs/architecture.md`](docs/architecture.md) §10); it needs no Redis, broker, worker service
+or additional port. The subscriber can read its bounded delivery history at
+`GET /api/v1/subscriptions/{subscriptionId}/deliveries` with its management token; the response
+never exposes callback URLs, tokens, response bodies, client addresses or another subscriber's
+records. See [`docs/api.md`](docs/api.md) §3.15.2 and §3.15.3.
+
 Local development binds loopback only. The Docker image and `compose.yaml` set
 `HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup
 instead of silently binding elsewhere.

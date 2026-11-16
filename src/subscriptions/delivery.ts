@@ -1,11 +1,12 @@
 // Signed, single-attempt publication webhook delivery (issue #119).
 //
 // Publishing a rulebook version appends one durable `rulebook.published` event
-// (#116). After that publication transaction has committed, this module maps the
-// stored event to one bounded JSON notification per delivery-eligible
-// subscription (#118: `active` and verified) of the same rulebook, signs the
-// exact body and sends exactly one bounded HTTP request. Retries, a durable
-// outbox and delivery status are deliberately out of scope (issue #120).
+// (#116). This module maps the stored event to one bounded JSON notification per
+// delivery-eligible subscription (#118: `active` and verified) of the same
+// rulebook, signs the exact body and sends exactly one bounded HTTP request.
+// The durable outbox and retry dispatcher (#120) live in `outbox.ts` and
+// `dispatcher.ts`; they call `attempt()` once per claimed job and persist the
+// outcome. This module never retries and never holds a queue.
 //
 // The callback is untrusted. The destination is re-validated and resolved at
 // send time under the same public-address policy as verification, the
@@ -86,11 +87,8 @@ export const DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS = 5_000
 /** Maximum response body read from a callback after a delivery. */
 export const DEFAULT_MAX_WEBHOOK_RESPONSE_BYTES = 8 * 1_024
 
-/** Global in-flight deliveries across every publication event. */
+/** Global in-flight deliveries of one direct multi-subscriber attempt pass. */
 export const DEFAULT_WEBHOOK_DELIVERY_CONCURRENCY = 4
-
-/** Hard bound on queued delivery attempts across every publication event. */
-export const DEFAULT_MAX_PENDING_WEBHOOK_DELIVERIES = 10_000
 
 /** Hard bound on one JSON notification body. */
 export const MAX_WEBHOOK_NOTIFICATION_BYTES = 16 * 1_024
@@ -137,12 +135,8 @@ export interface WebhookDeliveryOptions {
   readonly transport?: Http1Transport
   readonly timeoutMs?: number
   readonly maxResponseBytes?: number
-  /** Global in-flight delivery limit across every event. */
+  /** In-flight limit of one direct multi-subscriber attempt pass. */
   readonly maxConcurrency?: number
-  /** Hard bound on the in-memory dispatch queue; excess attempts are dropped. */
-  readonly maxPendingDeliveries?: number
-  /** Optional observer of each completed attempt, used by tests and #120. */
-  readonly onResult?: (result: WebhookDeliveryResult) => void
 }
 
 /**
@@ -341,18 +335,15 @@ function deliveryFailureFromSubscriptionError(error: unknown): WebhookDeliveryFa
   return null
 }
 
-/** One queued subscription attempt produced by a committed publication. */
-interface DeliveryJob {
-  readonly event: PublicationEvent
-  readonly body: Uint8Array
-  readonly subscriptionId: string
-}
-
-/** One-attempt delivery component shared by the publication route. */
+/**
+ * One-attempt signed delivery component. It makes exactly one HTTP request per
+ * call and returns a typed result; durability, leases and retries belong to the
+ * outbox dispatcher (#120), which invokes {@link WebhookDeliveryService.attempt}.
+ */
 export class WebhookDeliveryService {
   private readonly store: SubscriptionStore
   private readonly signingKey: Buffer | null
-  private readonly keyId: string | null
+  private readonly signingKeyFingerprint: string | null
   private readonly now: () => string
   private readonly allowLoopbackHttp: boolean
   private readonly maxCallbackUrlLength: number
@@ -361,16 +352,12 @@ export class WebhookDeliveryService {
   private readonly timeoutMs: number
   private readonly maxResponseBytes: number
   private readonly maxConcurrency: number
-  private readonly maxPendingDeliveries: number
-  private readonly onResult: ((result: WebhookDeliveryResult) => void) | undefined
-  private readonly queue: DeliveryJob[] = []
-  private readonly idleWaiters: (() => void)[] = []
-  private inFlight = 0
 
   constructor(options: WebhookDeliveryOptions) {
     this.store = new SubscriptionStore(options.database)
     this.signingKey = options.signingKey
-    this.keyId = this.signingKey === null ? null : webhookSigningKeyId(this.signingKey)
+    this.signingKeyFingerprint =
+      this.signingKey === null ? null : webhookSigningKeyId(this.signingKey)
     this.now = options.now ?? (() => new Date().toISOString())
     this.allowLoopbackHttp = options.allowLoopbackHttp ?? false
     this.maxCallbackUrlLength = options.maxCallbackUrlLength ?? DEFAULT_MAX_CALLBACK_URL_LENGTH
@@ -378,15 +365,11 @@ export class WebhookDeliveryService {
     this.timeoutMs = options.timeoutMs ?? DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS
     this.maxResponseBytes = options.maxResponseBytes ?? DEFAULT_MAX_WEBHOOK_RESPONSE_BYTES
     this.maxConcurrency = options.maxConcurrency ?? DEFAULT_WEBHOOK_DELIVERY_CONCURRENCY
-    this.maxPendingDeliveries =
-      options.maxPendingDeliveries ?? DEFAULT_MAX_PENDING_WEBHOOK_DELIVERIES
-    this.onResult = options.onResult
     this.transport = options.transport ?? createHttp1Transport()
     for (const [name, value] of [
       ['timeoutMs', this.timeoutMs],
       ['maxResponseBytes', this.maxResponseBytes],
       ['maxConcurrency', this.maxConcurrency],
-      ['maxPendingDeliveries', this.maxPendingDeliveries],
     ] as const) {
       if (!Number.isSafeInteger(value) || value < 1) {
         throw new RangeError(`webhook delivery ${name} must be a positive integer`)
@@ -399,85 +382,9 @@ export class WebhookDeliveryService {
     return this.signingKey !== null
   }
 
-  /**
-   * Enqueues one attempt per delivery-eligible subscription and returns
-   * immediately, so the publication response never waits on subscriber
-   * callbacks. A global in-flight cap bounds concurrent outbound requests; the
-   * in-memory queue is bounded too, and attempts beyond it are dropped with a
-   * count-only warning. Nothing is persisted, so queued work is lost on a
-   * restart (#120).
-   */
-  dispatchPublicationEvent(event: PublicationEvent): void {
-    const keyId = this.keyId
-    if (this.signingKey === null || keyId === null || event.type !== PUBLICATION_EVENT_TYPE) {
-      return
-    }
-    const body = buildWebhookNotificationBody(event)
-    const subscriptions = this.store.listDeliveryEligibleByRulebook(event.rulebookId, keyId)
-    let dropped = 0
-    for (const subscription of subscriptions) {
-      if (this.queue.length >= this.maxPendingDeliveries) {
-        dropped += 1
-        continue
-      }
-      this.queue.push({ event, body, subscriptionId: subscription.id })
-    }
-    if (dropped > 0) {
-      console.warn(`webhook delivery queue full; dropped ${String(dropped)} attempts`)
-    }
-    this.pump()
-  }
-
-  /** Resolves once no queued attempt remains and no attempt is in flight. */
-  whenIdle(): Promise<void> {
-    if (this.queue.length === 0 && this.inFlight === 0) {
-      return Promise.resolve()
-    }
-    return new Promise<void>((resolve) => {
-      this.idleWaiters.push(resolve)
-    })
-  }
-
-  private pump(): void {
-    while (this.inFlight < this.maxConcurrency && this.queue.length > 0) {
-      const job = this.queue.shift()
-      if (job === undefined) {
-        return
-      }
-      this.inFlight += 1
-      void this.runJob(job).finally(() => {
-        this.inFlight -= 1
-        this.pump()
-        this.resolveIdleWaitersIfIdle()
-      })
-    }
-  }
-
-  private async runJob(job: DeliveryJob): Promise<void> {
-    let result: WebhookDeliveryResult
-    try {
-      result = await this.deliverOne(job.event, job.body, job.subscriptionId)
-    } catch {
-      result = {
-        subscriptionId: job.subscriptionId,
-        delivered: false,
-        reason: 'network_failure',
-      }
-    }
-    try {
-      this.onResult?.(result)
-    } catch {
-      // An observer must not break the dispatcher; results are diagnostics only.
-    }
-  }
-
-  private resolveIdleWaitersIfIdle(): void {
-    if (this.queue.length !== 0 || this.inFlight !== 0) {
-      return
-    }
-    for (const resolve of this.idleWaiters.splice(0)) {
-      resolve()
-    }
+  /** Non-secret fingerprint of the deployment key, or `null` when disabled. */
+  get keyId(): string | null {
+    return this.signingKeyFingerprint
   }
 
   /**
@@ -489,11 +396,10 @@ export class WebhookDeliveryService {
   async deliverPublicationEvent(
     event: PublicationEvent,
   ): Promise<readonly WebhookDeliveryResult[]> {
-    const keyId = this.keyId
+    const keyId = this.signingKeyFingerprint
     if (this.signingKey === null || keyId === null || event.type !== PUBLICATION_EVENT_TYPE) {
       return []
     }
-    const body = buildWebhookNotificationBody(event)
     const subscriptions = this.store.listDeliveryEligibleByRulebook(event.rulebookId, keyId)
     if (subscriptions.length === 0) {
       return []
@@ -519,7 +425,7 @@ export class WebhookDeliveryService {
             if (subscription === undefined) {
               return
             }
-            results[index] = await this.deliverOne(event, body, subscription.id)
+            results[index] = await this.attempt(event, subscription.id)
           }
         })(),
       )
@@ -528,11 +434,13 @@ export class WebhookDeliveryService {
     return results.filter((result): result is WebhookDeliveryResult => result !== undefined)
   }
 
-  private async deliverOne(
-    event: PublicationEvent,
-    body: Uint8Array,
-    subscriptionId: string,
-  ): Promise<WebhookDeliveryResult> {
+  /**
+   * Performs exactly one signed delivery attempt to one stored subscription.
+   * The destination is re-read and re-validated immediately before the socket
+   * is opened; an ineligible, revoked or pending row is never contacted.
+   */
+  async attempt(event: PublicationEvent, subscriptionId: string): Promise<WebhookDeliveryResult> {
+    const body = buildWebhookNotificationBody(event)
     // Re-read immediately before the attempt: a subscription revoked after the
     // listing must not be contacted, and a still-pending row is never eligible.
     const record = this.store.get(subscriptionId)
@@ -541,7 +449,7 @@ export class WebhookDeliveryService {
       record.state !== 'active' ||
       record.verifiedAt === null ||
       record.webhookKeyId === null ||
-      record.webhookKeyId !== this.keyId
+      record.webhookKeyId !== this.signingKeyFingerprint
     ) {
       return { subscriptionId, delivered: false, reason: 'subscription_not_eligible' }
     }

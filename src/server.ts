@@ -8,11 +8,7 @@ import { openDatabase } from './db/database'
 import { applyMigrations } from './db/migrations'
 import { IssuerFixtureGenerator } from './fixtures'
 import { Registry } from './registry'
-import {
-  DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS,
-  SubscriptionService,
-  WebhookDeliveryService,
-} from './subscriptions'
+import { SubscriptionService, WebhookOutboxDispatcher } from './subscriptions'
 import { CredentialValidator, RulebookSnapshotCache } from './validation'
 
 /** Vite writes the built web UI here; `bun run build` produces it. */
@@ -44,11 +40,15 @@ if (config.subscriptionWebhookSigningKey === null) {
     'SUBSCRIPTION_WEBHOOK_SIGNING_KEY is not set: publication webhook delivery is disabled and registrations receive no webhook secret',
   )
 }
-const webhookDelivery = new WebhookDeliveryService({
+// The durable outbox and its in-process dispatcher need no broker or extra
+// service. Enqueue is a bounded SQLite write after the publication transaction
+// commits; retries and restart recovery are durable.
+const webhookOutbox = new WebhookOutboxDispatcher({
   database,
   signingKey: config.subscriptionWebhookSigningKey,
   allowLoopbackHttp: config.subscriptionsAllowLoopbackHttp,
 })
+webhookOutbox.start()
 const subscriptions = new SubscriptionService({
   database,
   source: registry,
@@ -102,7 +102,7 @@ const app = createApp({
   issuerFixtures,
   captures,
   subscriptions,
-  webhookDelivery,
+  webhookOutbox,
   adminAuth,
   publicBaseUrl: config.publicBaseUrl,
   ...(existsSync(UI_DIST_PATH) ? { uiRoot: UI_DIST_PATH } : {}),
@@ -121,13 +121,11 @@ function shutdown(signal: 'SIGINT' | 'SIGTERM'): void {
   server
     .stop()
     .then(async () => {
-      // Give the bounded one-attempt dispatcher a short chance to finish
-      // before closing the database; queued work is in-memory only and is lost
-      // on restart, which the durable outbox issue (#120) will replace.
-      await Promise.race([
-        webhookDelivery.whenIdle(),
-        Bun.sleep(DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS),
-      ])
+      // Let the current dispatch cycle record its outcome before closing the
+      // database. Any job still queued (including its next retry) is durable in
+      // SQLite and resumes when the next process starts, so shutdown never
+      // waits for a full retry schedule.
+      await webhookOutbox.stop()
       database.close()
       process.exit(0)
     })

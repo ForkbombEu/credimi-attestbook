@@ -165,9 +165,11 @@ own management credential, deliberately separate from provider authentication:
   application sends no CORS headers). A body of another content type, or none, answers `400`.
 - **The token is the only key to one subscription.** Registration mints 256 random bits with
   the `ats_` prefix and returns the plaintext exactly once; only its SHA-256 hash is stored
-  (`subscriptions.management_token_hash`). `GET`, `DELETE` and `POST …/verify` on
-  `/api/v1/subscriptions/{id}` require `Authorization: Bearer <managementToken>` through their
-  own handler check, not the central provider middleware. A provider bearer token,
+  (`subscriptions.management_token_hash`). `GET`, `DELETE`, `POST …/verify` and
+  `GET …/deliveries` on `/api/v1/subscriptions/{id}` require
+  `Authorization: Bearer <managementToken>` through their own handler check, not the central
+  provider middleware. The delivery-status route is scoped to that one subscription and
+  returns only sanitized bookkeeping. A provider bearer token,
   administrator session cookie or CSRF token has no authority there, and a management token
   has no authority on any registry route.
 - **No valid subscription oracle.** A missing, malformed, invalid or foreign token and an
@@ -182,16 +184,20 @@ own management credential, deliberately separate from provider authentication:
   default); exceeding it answers `429` with `Retry-After`. A concurrent handshake for the same
   subscription answers `409 conflict` instead of minting a second challenge. A challenge and an
   attempt are consumed by any outcome other than success.
-- **Publication delivery is derived, signed and asynchronous.** A new publication enqueues one
-  signed `POST` attempt for each active, verified subscription of its rulebook that was
+- **Publication delivery is derived, signed and asynchronous.** A new publication durably
+  enqueues one signed `POST` job for each active, verified subscription of its rulebook that was
   registered under the current deployment key (§2.4), and the publish response returns without
-  waiting on a callback. A global in-flight cap and a bounded in-memory queue bound the work;
-  attempts beyond the queue are dropped with a count-only warning and queued work is lost on
-  restart. Each subscription's verification secret is derived with HMAC-SHA-256 from the
-  deployment-configured `SUBSCRIPTION_WEBHOOK_SIGNING_KEY` and its id, so it is stable across
-  restarts, independent per subscription and never stored; only the derived secret is returned,
-  once, by registration, and the row keeps a truncated non-secret key fingerprint. The exact
-  body plus timestamp and event id are signed with HMAC-SHA-256 under that secret
+  waiting on a callback. The bounded SQLite outbox is the delivery record; an in-process
+  dispatcher leases due jobs and retries transient failures with bounded exponential backoff and
+  jitter, capped attempts/age and a terminal status. A crash recovers an expired lease and a
+  reconciliation cursor over the immutable event feed, never a second permanent job. Delivery
+  is at-least-once: the event id, body fields and subscriber secret are identical across
+  attempts, so the subscriber deduplicates by event id. Each subscription's verification secret
+  is derived with HMAC-SHA-256 from the deployment-configured
+  `SUBSCRIPTION_WEBHOOK_SIGNING_KEY` and its id, so it is stable across restarts, independent
+  per subscription and never stored; only the derived secret is returned, once, by registration,
+  and the row keeps a truncated non-secret key fingerprint. The exact body plus timestamp and
+  event id are signed with HMAC-SHA-256 under that secret
   (`X-AttestBook-Signature: v1=<hex>`), so a callback can verify authenticity and integrity. A
   missing key disables delivery and issues no secret instead of falling back to a generated or
   committed one; a malformed key fails at startup. Rotating the key invalidates every issued
@@ -234,8 +240,9 @@ enforce:
   redirect and applies the same five-second deadline and 8 KiB response cap. A delivery failure
   is typed (`blocked_target`, `dns_failure`, `network_failure`, `timeout`, `redirect_not_followed`,
   `response_too_large`, `unexpected_status`) and never a success. Delivery is asynchronous and
-  one attempt in this slice, bounded by a global in-flight cap and a bounded in-memory queue;
-  there is no persisted queue, retry loop or delivery-status endpoint yet.
+  durable: an in-process dispatcher leases and retries jobs from a bounded SQLite outbox, and
+  each attempt repeats the destination checks before connecting. A revoked or stale-key
+  subscription is re-read immediately before the attempt and is never contacted.
 
 ### 2.4 Publication webhook signing
 
@@ -262,10 +269,13 @@ was not altered. The delivery contract is defined in [`docs/api.md`](api.md) §3
   16 KiB: id, format, type, rulebook id, exact immutable version label, content digest and
   publication timestamp. It never contains draft content, provider identity, credentials,
   personal data or audit metadata.
-- **One attempt, no false success.** A `2xx` answer is success; a `3xx`, another status, a
-  timeout, an unreachable endpoint or an oversized response is a typed failure. Subscriber
-  failures never change the publication response, and the event stays on the public feed for
-  reconciliation. Retry, outbox and delivery status are a separate issue.
+- **Durable at-least-once, no false success.** A `2xx` answer is success; a `3xx`, a `4xx`, an
+  otherwise unexpected status, a timeout, an unreachable endpoint or an oversized response is a
+  typed failure. A transient failure (`timeout`, `dns_failure`, `network_failure` or `5xx`) is
+  retried with bounded exponential backoff and jitter until the attempt or age cap makes it
+  terminal; a non-retryable answer is terminal immediately. A signed event id remains the
+  subscriber's deduplication key across attempts. Subscriber failures never change the
+  publication response, and the event stays on the public feed for reconciliation.
 
 ## 3. Authorization and provider ownership
 
@@ -512,12 +522,14 @@ trail is not exposed over HTTP; it is read by operators from the database.
   attempt window are time-bounded. The per-subscription attempt window is a service-level
   read-then-update, so a multi-process deployment could race it; the activation transition
   itself is guarded by a conditional update on the stored challenge hash.
-- **Delivery is asynchronous, one attempt and not yet durable.** A publication enqueues one
-  signed POST per eligible subscription after the transaction commits, but there is no
-  persisted outbox, retry, backoff or delivery-status endpoint in this slice, and queued or
-  still-running attempts are not recovered after a restart. A global in-flight cap and a
-  bounded in-memory queue limit the work, and attempts beyond the queue are dropped. A failed
-  attempt is not retried; the subscriber reconciles through the public event feed. Delivery
+- **Delivery is durable but at-least-once, not exactly-once.** A publication enqueues one signed
+  POST per eligible subscription in a bounded SQLite outbox after the transaction commits; an
+  in-process dispatcher leases, retries and records the outcome. A subscriber can therefore
+  receive a retry after a response was lost and must deduplicate by event id. Enqueues beyond
+  the outbox bound are dropped with a count-only warning and terminal rows are pruned after the
+  retention window. The dispatcher is one process on the documented single-writer SQLite
+  deployment, not a broker or multi-node scheduler; an expired lease and the reconciliation
+  cursor make a restart safe, and the lease makes an accidental concurrent claim safe. Delivery
   reuses the verification resolver and pinned transport at send time rather than trusting the
   registration-time check. Deleting a subscription ends eligibility immediately, and the
   delivery component re-reads the row before contacting it, so a revocation between listing and
@@ -691,3 +703,5 @@ trail is not exposed over HTTP; it is read by operators from the database.
   verification, activation and callback network-safety validation
 - [Issue #119](https://github.com/ForkbombEu/credimi-attestbook/issues/119) for signed,
   single-attempt publication webhook delivery
+- [Issue #120](https://github.com/ForkbombEu/credimi-attestbook/issues/120) for the durable
+  delivery outbox, bounded retries and the management-token-protected delivery-status view

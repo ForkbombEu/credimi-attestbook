@@ -39,6 +39,7 @@ export const API_ERROR_CODES = [
   'capture_fetch_failed',
   'capture_unavailable',
   'subscription_unavailable',
+  'delivery_status_unavailable',
   'verification_failed',
   'callback_unreachable',
   'rate_limited',
