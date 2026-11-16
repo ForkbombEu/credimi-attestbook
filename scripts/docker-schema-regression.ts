@@ -256,7 +256,30 @@ async function run(): Promise<void> {
       console.error(logsResult.stderr)
     }
     docker(['rm', '--force', CONTAINER], true)
-    rmSync(directory, { recursive: true, force: true })
+    // The container user owns the private 0700 sandbox directory it created, so
+    // the CI runner cannot delete it through the bind mount. Empty the volume as
+    // root first; cleanup must never mask the regression's own result.
+    try {
+      docker(
+        [
+          'run',
+          '--rm',
+          '--user',
+          'root',
+          '--volume',
+          `${directory}:/cleanup`,
+          '--entrypoint',
+          'sh',
+          IMAGE,
+          '-c',
+          'rm -rf /cleanup/* /cleanup/.[!.]* 2>/dev/null || true',
+        ],
+        true,
+      )
+      rmSync(directory, { recursive: true, force: true })
+    } catch (error) {
+      console.error(`could not remove the temporary data directory: ${String(error)}`)
+    }
   }
 }
 
