@@ -32,7 +32,12 @@ import {
   WEBHOOK_SIGNATURE_HEADER,
   WEBHOOK_TIMESTAMP_HEADER,
 } from './delivery'
-import { resolveWebhookOutboxLimits, WebhookOutboxStore } from './outbox'
+import {
+  DEFAULT_WEBHOOK_OUTBOX_MAX_AGE_MS,
+  DEFAULT_WEBHOOK_OUTBOX_MAX_ATTEMPTS,
+  resolveWebhookOutboxLimits,
+  WebhookOutboxStore,
+} from './outbox'
 import { SubscriptionService } from './service'
 import type { CallbackHostResolver } from './verification'
 
@@ -193,7 +198,7 @@ function limits(overrides: Parameters<typeof resolveWebhookOutboxLimits>[0] = {}
   return resolveWebhookOutboxLimits({
     baseBackoffMs: 1_000,
     maxBackoffMs: 8_000,
-    maxAttempts: 4,
+    maxAttempts: 7,
     maxAgeMs: 60_000,
     leaseTtlMs: 5_000,
     retentionMs: 24 * 60 * 60 * 1_000,
@@ -218,6 +223,17 @@ function dispatcher(
     resolveCallbackHostname: PUBLIC_RESOLVER,
     transport,
     limits: limits(overrides),
+  })
+}
+
+function defaultDispatcher(fixture: Fixture, transport: Http1Transport): WebhookOutboxDispatcher {
+  return new WebhookOutboxDispatcher({
+    database: fixture.database,
+    signingKey: SIGNING_KEY,
+    now: () => fixture.now(),
+    random: () => 0,
+    resolveCallbackHostname: PUBLIC_RESOLVER,
+    transport,
   })
 }
 
@@ -461,12 +477,15 @@ describe('durable webhook outbox', () => {
     const registered = await activeSubscription(fixture)
     const event = fixture.publish('1.1')
     const recording = recordingTransport((request) => response(500, request))
-    const outbox = dispatcher(fixture, recording.transport, { maxAttempts: 3 })
+    const outbox = dispatcher(fixture, recording.transport, {
+      maxAttempts: 3,
+      maxAgeMs: 5_000,
+    })
 
     outbox.enqueuePublicationEvent(event)
     await outbox.whenIdle()
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      fixture.advance(10_000)
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      fixture.advance(500)
       await outbox.tick()
     }
 
@@ -475,6 +494,110 @@ describe('durable webhook outbox', () => {
     expect(status.entries[0]).toMatchObject({
       status: 'failed',
       attempts: 3,
+      terminalReason: 'max_attempts',
+    })
+  })
+
+  test('default limits retry a subscriber that is down for twenty minutes', async () => {
+    const fixture = createFixture()
+    const registered = await activeSubscription(fixture)
+    const event = fixture.publish('1.1')
+    let down = true
+    const recording = recordingTransport((request) => response(down ? 503 : 204, request))
+    const outbox = defaultDispatcher(fixture, recording.transport)
+    const outageEndsAt = Date.parse(fixture.now()) + 20 * 60 * 1_000
+    const deadline = Date.parse(fixture.now()) + 2 * 60 * 60 * 1_000
+
+    outbox.enqueuePublicationEvent(event)
+    await outbox.whenIdle()
+    while (
+      outbox.listDeliveryStatus(registered.id, 1, 0).entries[0]?.status === 'pending' &&
+      Date.parse(fixture.now()) < deadline
+    ) {
+      fixture.advance(30_000)
+      down = Date.parse(fixture.now()) < outageEndsAt
+      await outbox.tick()
+    }
+
+    const status = outbox.listDeliveryStatus(registered.id, 10, 0)
+    expect(status.entries[0]).toMatchObject({ status: 'delivered' })
+    expect(status.entries[0]?.attempts).toBeGreaterThan(1)
+    expect(status.entries[0]?.attempts).toBeLessThanOrEqual(DEFAULT_WEBHOOK_OUTBOX_MAX_ATTEMPTS)
+    const eventIds = new Set(
+      recording.requests.map((entry) => entry.request.headers?.[WEBHOOK_EVENT_ID_HEADER]),
+    )
+    expect(eventIds).toEqual(new Set([event.id]))
+  })
+
+  test('the default retry schedule is bounded by the attempt and age caps', async () => {
+    const fixture = createFixture()
+    const registered = await activeSubscription(fixture)
+    const event = fixture.publish('1.1')
+    const recording = recordingTransport((request) => response(503, request))
+    const outbox = defaultDispatcher(fixture, recording.transport)
+    const finishBy = Date.parse(fixture.now()) + DEFAULT_WEBHOOK_OUTBOX_MAX_AGE_MS + 15 * 60 * 1_000
+
+    outbox.enqueuePublicationEvent(event)
+    await outbox.whenIdle()
+    while (
+      outbox.listDeliveryStatus(registered.id, 1, 0).entries[0]?.status === 'pending' &&
+      Date.parse(fixture.now()) < finishBy
+    ) {
+      fixture.advance(60_000)
+      await outbox.tick()
+    }
+
+    const status = outbox.listDeliveryStatus(registered.id, 10, 0)
+    expect(status.entries[0]?.status).toBe('failed')
+    expect(['max_attempts', 'max_age']).toContain(status.entries[0]?.terminalReason ?? '')
+    expect(Date.parse(fixture.now())).toBeLessThan(finishBy)
+    const requestsAtTerminal = recording.requests.length
+    for (let tick = 0; tick < 10; tick += 1) {
+      fixture.advance(60_000)
+      await outbox.tick()
+    }
+    expect(recording.requests).toHaveLength(requestsAtTerminal)
+  })
+
+  test('rejects a retry schedule that cannot reach the configured age cap', () => {
+    expect(() =>
+      resolveWebhookOutboxLimits({
+        maxAttempts: 2,
+        baseBackoffMs: 1,
+        maxBackoffMs: 1,
+        maxAgeMs: 60 * 60 * 1_000,
+      }),
+    ).toThrow(RangeError)
+  })
+
+  test('fails a job whose crashed claims already used every attempt', async () => {
+    const fixture = createFixture()
+    const registered = await activeSubscription(fixture)
+    const event = fixture.publish('1.1')
+    const outboxStore = store(fixture)
+    outboxStore.enqueueForEvent(
+      event,
+      webhookSigningKeyId(SIGNING_KEY),
+      fixture.now(),
+      limits({ maxAttempts: 1 }),
+    )
+    const crashed = outboxStore.claimDue(
+      fixture.now(),
+      limits({ maxAttempts: 1 }),
+      'crashed-last-attempt',
+    )
+    expect(crashed).toHaveLength(1)
+
+    const recording = recordingTransport((request) => response(204, request))
+    const outbox = dispatcher(fixture, recording.transport, { maxAttempts: 1 })
+    fixture.advance(30_001)
+    await outbox.tick()
+
+    expect(recording.requests).toHaveLength(0)
+    const status = outbox.listDeliveryStatus(registered.id, 10, 0)
+    expect(status.entries[0]).toMatchObject({
+      status: 'failed',
+      attempts: 1,
       terminalReason: 'max_attempts',
     })
   })

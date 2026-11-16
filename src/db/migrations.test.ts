@@ -479,6 +479,88 @@ describe('registry migrations', () => {
     }
   })
 
+  test('starts the delivery cursor at the newest event that existed before the outbox migration', () => {
+    const database = createDatabase()
+    try {
+      database.exec(`
+        CREATE TABLE schema_migrations (
+          version TEXT PRIMARY KEY,
+          checksum TEXT NOT NULL CHECK (length(checksum) = 64),
+          applied_at TEXT NOT NULL
+        )
+      `)
+      for (const migration of MIGRATIONS.filter(
+        (candidate) => candidate.version !== '0011_webhook_delivery_outbox',
+      )) {
+        database.exec(migration.sql)
+        database
+          .query('INSERT INTO schema_migrations (version, checksum, applied_at) VALUES (?, ?, ?)')
+          .run(migration.version, migrationChecksum(migration.sql), FIXED_NOW)
+      }
+      database
+        .query(
+          `INSERT INTO providers (id, name, publication_authority, metadata_json, created_at)
+           VALUES ('provider-cursor', 'Provider', 'account-cursor', '{}', ?)`,
+        )
+        .run(FIXED_NOW)
+      database
+        .query(
+          `INSERT INTO rulebooks (id, provider_id, name, applicable_spec, created_at, updated_at)
+           VALUES ('rulebook-cursor', 'provider-cursor', 'Cursor', 'ts11@1.0.1', ?, ?)`,
+        )
+        .run(FIXED_NOW, FIXED_NOW)
+      const digest = 'b'.repeat(64)
+      database
+        .query(
+          `INSERT INTO artifacts (digest, media_type, bytes, created_at)
+           VALUES (?, 'application/vnd.attestbook.rulebook-version+json', X'7b7d', ?)`,
+        )
+        .run(digest, FIXED_NOW)
+      database
+        .query(
+          `INSERT INTO rulebook_versions (
+             id, rulebook_id, version, status, content_digest, spec_version,
+             provenance_json, created_at, published_at
+           ) VALUES ('version-cursor', 'rulebook-cursor', '1.0', 'published', ?,
+             'ts11@1.0.1', '{}', ?, ?)`,
+        )
+        .run(digest, FIXED_NOW, FIXED_NOW)
+      database
+        .query(
+          `INSERT INTO publication_events (
+             id, format, event_type, rulebook_id, version_id, version,
+             content_digest, published_at
+           ) VALUES ('event-cursor', 'attestbook.rulebook-publication-event@1',
+             'rulebook.published', 'rulebook-cursor', 'version-cursor', '1.0', ?, ?)`,
+        )
+        .run(digest, FIXED_NOW)
+
+      const applied = applyMigrations(database, { now: () => FIXED_NOW })
+      expect(applied.map((migration) => migration.version)).toEqual([
+        '0011_webhook_delivery_outbox',
+      ])
+      const eventSequence = database
+        .query<{ sequence: number }, []>(
+          "SELECT sequence FROM publication_events WHERE id = 'event-cursor'",
+        )
+        .get()?.sequence
+      expect(eventSequence).toBeDefined()
+      const state = database
+        .query<{ last_event_sequence: number }, []>(
+          'SELECT last_event_sequence FROM webhook_delivery_outbox_state WHERE id = 1',
+        )
+        .get()
+      expect(state?.last_event_sequence).toBe(eventSequence)
+      // Existing history is not backfilled into notifications.
+      const jobs = database
+        .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM webhook_delivery_outbox')
+        .get()
+      expect(jobs?.count).toBe(0)
+    } finally {
+      database.close()
+    }
+  })
+
   test('adds credential schema documents and publication events to a populated pre-feature database', () => {
     const database = createDatabase()
     try {

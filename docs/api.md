@@ -1178,12 +1178,17 @@ Retries are bounded and deterministic in policy, not in timing:
 
 | Bound | Default | Behaviour |
 | --- | --- | --- |
-| Backoff | 1 s base, 60 s cap | Exponential per claimed attempt with 50–100 % jitter; the next attempt is never earlier than half the exponential delay |
-| Attempts | 8 | A failed job becomes `failed` with `terminalReason: "max_attempts"` |
+| Backoff | 2 s base, 15 min cap | Exponential per claimed attempt with 50–100 % jitter; the next attempt is never earlier than half the exponential delay |
+| Attempts | 13 | A failed job becomes `failed` with `terminalReason: "max_attempts"` |
 | Age | 1 h from enqueue | No job is claimed after the age cap; it becomes `failed` with `terminalReason: "max_age"` |
-| Lease | 15 s | A claimed job is recovered after its lease expires, so a crashed process does not strand it |
+| Lease | 30 s | A claimed job is recovered after its lease expires, so a crashed process does not strand it |
 | Pending outbox | 10,000 jobs | New eligible jobs beyond the bound are dropped with a count-only server warning; subscribers reconcile through the event feed |
 | Status retention | 7 days | Delivered/failed rows are pruned after this window |
+
+With the defaults the retry backoff spans roughly 31–62 minutes (depending on jitter) plus
+attempt time, so a temporary subscriber outage of several minutes is retried while the one-hour
+age cap still bounds the total. A deployment that overrides the retry bounds with a schedule
+that cannot reach the age cap is rejected at construction instead of silently giving up early.
 
 A transport failure (`timeout`, `dns_failure`, `network_failure`) and a `5xx` answer are
 retried. A `2xx` answer is success regardless of its body. A `4xx` answer, a `3xx` redirect, a

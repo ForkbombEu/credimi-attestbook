@@ -457,9 +457,12 @@ failure or a `5xx` answer) is retried with bounded exponential backoff and jitte
 answer, redirect, blocked target or ineligible subscription is terminal. Delivery is
 at-least-once, so a subscriber must deduplicate by `X-AttestBook-Event-Id`.
 
-The defaults are: 8 attempts, a one-hour age cap, 1 s base backoff with a 60 s cap and 50–100 %
-jitter, a 15 s attempt lease, at most 10,000 pending jobs, and seven-day status retention. These
-are code constants in `src/subscriptions/outbox.ts`, not environment variables in this slice.
+The defaults are: 13 attempts, a one-hour age cap, 2 s base backoff with a 15 min cap and
+50–100 % jitter (roughly 31–62 minutes of retry backoff plus attempt time before the cap), a
+30 s attempt lease, at most 10,000 pending jobs, and seven-day status retention. These are code
+constants in `src/subscriptions/outbox.ts`, not environment variables in this slice; a partial
+override whose retry schedule cannot reach the age cap is rejected instead of silently giving
+up early.
 An expired lease and a reconciliation cursor over the immutable event feed recover work after a
 crash or restart; the unique `(event, subscription)` key means recovery never creates a second
 permanent job. Jobs beyond the pending bound are dropped with a count-only warning, and events

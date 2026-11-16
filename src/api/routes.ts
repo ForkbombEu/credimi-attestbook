@@ -2866,10 +2866,8 @@ function deleteSubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
 }
 
 /**
- * Explicit, management-token authenticated callback verification. It is the
- * only subscription operation that contacts the callback endpoint; the service
- * bounds and pins the request and returns a typed failure without activating
- * the record when the endpoint cannot prove control.
+ * Bounded delivery history of one management-token-authenticated subscription.
+ * It never contacts a callback; it only reads the sanitized outbox projection.
  */
 function listSubscriptionDeliveriesHandler(dependencies: ApiDependencies): ApiHandler {
   return (context) => {
@@ -2896,6 +2894,12 @@ function listSubscriptionDeliveriesHandler(dependencies: ApiDependencies): ApiHa
   }
 }
 
+/**
+ * Explicit, management-token authenticated callback verification. It is the
+ * only subscription operation that contacts the callback endpoint; the service
+ * bounds and pins the request and returns a typed failure without activating
+ * the record when the endpoint cannot prove control.
+ */
 function verifySubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const subscriptions = requireSubscriptions(dependencies.subscriptions)

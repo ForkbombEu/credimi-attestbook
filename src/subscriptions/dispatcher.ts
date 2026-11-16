@@ -62,14 +62,22 @@ export interface WebhookOutboxDispatcherOptions {
   readonly limits?: WebhookOutboxLimitOverrides
 }
 
+/**
+ * Exponential-backoff ceiling for one claim number, before the 50–100 % jitter.
+ * It is exported so the default retry window can be tested without a timer.
+ */
+export function webhookBackoffCeilingMs(attempts: number, limits: WebhookOutboxLimits): number {
+  const exponent = Math.max(0, attempts - 1)
+  return Math.min(limits.maxBackoffMs, limits.baseBackoffMs * 2 ** exponent)
+}
+
 /** Exponential delay with 50–100 % jitter; `attempts` is the claim number. */
 function jitteredBackoffMs(
   attempts: number,
   limits: WebhookOutboxLimits,
   random: () => number,
 ): number {
-  const exponent = Math.max(0, attempts - 1)
-  const ceiling = Math.min(limits.maxBackoffMs, limits.baseBackoffMs * 2 ** exponent)
+  const ceiling = webhookBackoffCeilingMs(attempts, limits)
   const randomValue = Math.min(Math.max(random(), 0), 1 - Number.EPSILON)
   const factor = 0.5 + randomValue * 0.5
   return Math.max(1, Math.round(ceiling * factor))
@@ -279,6 +287,12 @@ export class WebhookOutboxDispatcher {
             const job = claimed[index]
             if (job === undefined) {
               return
+            }
+            if (this.disposed) {
+              // Shutdown: do not start another attempt, and make the remaining
+              // claims immediately available to the next process.
+              this.store.releaseLease(job.sequence, this.owner, this.now())
+              continue
             }
             await this.processOne(job)
           }

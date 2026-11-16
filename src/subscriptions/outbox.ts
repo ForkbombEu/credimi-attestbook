@@ -59,11 +59,11 @@ export interface WebhookOutboxLimits {
 
 export type WebhookOutboxLimitOverrides = Partial<WebhookOutboxLimits>
 
-export const DEFAULT_WEBHOOK_OUTBOX_MAX_ATTEMPTS = 8
+export const DEFAULT_WEBHOOK_OUTBOX_MAX_ATTEMPTS = 13
 export const DEFAULT_WEBHOOK_OUTBOX_MAX_AGE_MS = 60 * 60 * 1_000
-export const DEFAULT_WEBHOOK_OUTBOX_BASE_BACKOFF_MS = 1_000
-export const DEFAULT_WEBHOOK_OUTBOX_MAX_BACKOFF_MS = 60 * 1_000
-export const DEFAULT_WEBHOOK_OUTBOX_LEASE_TTL_MS = 15 * 1_000
+export const DEFAULT_WEBHOOK_OUTBOX_BASE_BACKOFF_MS = 2_000
+export const DEFAULT_WEBHOOK_OUTBOX_MAX_BACKOFF_MS = 15 * 60 * 1_000
+export const DEFAULT_WEBHOOK_OUTBOX_LEASE_TTL_MS = 30 * 1_000
 export const DEFAULT_WEBHOOK_OUTBOX_MAX_PENDING_ENTRIES = 10_000
 export const DEFAULT_WEBHOOK_OUTBOX_RETENTION_MS = 7 * 24 * 60 * 60 * 1_000
 export const DEFAULT_WEBHOOK_OUTBOX_POLL_INTERVAL_MS = 500
@@ -96,6 +96,19 @@ export function resolveWebhookOutboxLimits(
   }
   if (limits.maxBackoffMs < limits.baseBackoffMs) {
     throw new RangeError('webhook outbox maxBackoffMs must not be below baseBackoffMs')
+  }
+  // A schedule that spends all its attempts before the age cap would make the
+  // documented age bound unreachable and lose a notification after a short
+  // outage. Require the minimum-jitter retry window to cover at least a quarter
+  // of the age cap. A single-attempt schedule has no window to validate.
+  if (limits.maxAttempts > 1) {
+    let minimumBackoffMs = 0
+    for (let attempt = 1; attempt < limits.maxAttempts; attempt += 1) {
+      minimumBackoffMs += Math.min(limits.maxBackoffMs, limits.baseBackoffMs * 2 ** (attempt - 1))
+    }
+    if (minimumBackoffMs / 2 < limits.maxAgeMs / 4) {
+      throw new RangeError('webhook outbox retry schedule cannot reach the configured age cap')
+    }
   }
   return limits
 }
@@ -483,6 +496,19 @@ export class WebhookOutboxStore {
     return row !== null
   }
 
+  /** Releases one claimed lease without recording an outcome (shutdown). */
+  releaseLease(sequence: number, owner: string, now: string): boolean {
+    return (
+      this.database
+        .query(
+          `UPDATE webhook_delivery_outbox
+           SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+           WHERE sequence = ? AND status = 'pending' AND lease_owner = ?`,
+        )
+        .run(now, sequence, owner).changes > 0
+    )
+  }
+
   /** Clears a lease whose holder did not record an outcome in time. */
   recoverExpiredLeases(now: string): number {
     return this.database
@@ -494,10 +520,24 @@ export class WebhookOutboxStore {
       .run(now, now).changes
   }
 
-  /** Marks pending jobs older than the age bound terminally failed. */
+  /**
+   * Marks pending jobs terminally failed when they cannot make progress: all
+   * attempts were already spent by crashed claims, or the age bound is
+   * exhausted. A live lease is left alone until it expires.
+   */
   expireAged(now: string, limits: WebhookOutboxLimits): number {
+    const attemptsExhausted = this.database
+      .query(
+        `UPDATE webhook_delivery_outbox
+         SET status = 'failed', terminal_at = ?, terminal_reason = 'max_attempts',
+             updated_at = ?, lease_owner = NULL, lease_expires_at = NULL
+         WHERE status = 'pending'
+           AND attempts >= ?
+           AND (lease_owner IS NULL OR lease_expires_at <= ?)`,
+      )
+      .run(now, now, limits.maxAttempts, now).changes
     const cutoff = new Date(toMillis(now, 'now') - limits.maxAgeMs).toISOString()
-    return this.database
+    const ageExhausted = this.database
       .query(
         `UPDATE webhook_delivery_outbox
          SET status = 'failed', terminal_at = ?, terminal_reason = 'max_age',
@@ -507,6 +547,7 @@ export class WebhookOutboxStore {
            AND (lease_owner IS NULL OR lease_expires_at <= ?)`,
       )
       .run(now, now, cutoff, now).changes
+    return attemptsExhausted + ageExhausted
   }
 
   /** Records a successful attempt, only while the caller still holds the lease. */
