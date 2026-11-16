@@ -18,7 +18,15 @@ const config = loadConfig()
 const database = openDatabase(config.databasePath)
 applyMigrations(database)
 
-const registry = new Registry({ database })
+// Schema registration and every other sandbox consumer share these bounds and
+// the one private writable base directory for the sandbox child.
+const schemaSandbox = {
+  timeoutMs: config.schemaSandboxTimeoutMs,
+  maxRssBytes: config.schemaSandboxMaxRssMb * 1024 * 1024,
+  maxConcurrent: config.schemaSandboxConcurrency,
+  tempDir: config.schemaSandboxTempDir,
+}
+const registry = new Registry({ database, schemaSandboxLimits: schemaSandbox })
 // Anonymous webhook subscriptions stay inert until the subscriber explicitly
 // verifies its callback. Production keeps the test-only loopback HTTP opt-in
 // off, so only public HTTPS callback URLs are accepted and contacted; the local
@@ -38,11 +46,6 @@ if (adminLoginConfig.status !== 'configured') {
   console.warn(
     'administrator browser login is unavailable: ADMIN_PROVIDER_ID does not identify an existing provider',
   )
-}
-const schemaSandbox = {
-  timeoutMs: config.schemaSandboxTimeoutMs,
-  maxRssBytes: config.schemaSandboxMaxRssMb * 1024 * 1024,
-  maxConcurrent: config.schemaSandboxConcurrency,
 }
 const validation = new CredentialValidator({
   source: registry,

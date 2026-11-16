@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -563,6 +563,73 @@ describe('credential schema documents', () => {
     expect(documentCount(database)).toBe(0)
     expect(artifactCount(database)).toBe(0)
     expect(registry.listCredentialSchemaDocuments()).toHaveLength(0)
+  })
+
+  test('registers a JSON Schema through the configured sandbox temporary directory', async () => {
+    const { database } = setup()
+    const provider = provision('one')
+    const directory = mkdtempSync(join(tmpdir(), 'attestbook-schema-temp-'))
+    try {
+      const registry = new Registry({
+        database,
+        now: () => FIXED_NOW,
+        schemaSandboxLimits: { tempDir: join(directory, 'sandbox') },
+      })
+
+      const document = await registry.registerCredentialSchemaDocument(provider.actor, {
+        kind: 'json_schema_2020_12',
+        bytes: encodeJson(JSON_SCHEMA),
+      })
+
+      expect(document.kind).toBe('json_schema_2020_12')
+      expect(documentCount(database)).toBe(1)
+      expect(statSync(join(directory, 'sandbox')).mode & 0o777).toBe(0o700)
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
+    }
+  })
+
+  test('fails closed and logs no schema content when the sandbox directory is unusable', async () => {
+    const { registry, database } = setup()
+    const provider = provision('one')
+    const directory = mkdtempSync(join(tmpdir(), 'attestbook-schema-blocked-'))
+    const blocked = join(directory, 'blocked')
+    writeFileSync(blocked, 'not a directory')
+    const secretName = 'ATTESTBOOK_SCHEMA_REGISTRATION_TEST_SECRET'
+    process.env[secretName] = 'must-not-be-logged'
+    const logs: unknown[][] = []
+    const original = console.error
+    console.error = (...args: unknown[]) => {
+      logs.push(args)
+    }
+    try {
+      const unusable = new Registry({
+        database,
+        now: () => FIXED_NOW,
+        schemaSandboxLimits: { tempDir: join(blocked, 'sandbox') },
+      })
+
+      const caught = await captureError(() =>
+        unusable.registerCredentialSchemaDocument(provider.actor, {
+          kind: 'json_schema_2020_12',
+          bytes: encodeJson(JSON_SCHEMA),
+        }),
+      )
+      expect(caught).toBeInstanceOf(Error)
+      expect(isRegistryError(caught)).toBe(false)
+      expect(documentCount(database)).toBe(0)
+      expect(artifactCount(database)).toBe(0)
+      expect(registry.listCredentialSchemaDocuments()).toHaveLength(0)
+
+      const serialized = JSON.stringify(logs)
+      expect(serialized).toContain('temp_dir_unavailable')
+      expect(serialized).not.toContain('family_name')
+      expect(serialized).not.toContain('must-not-be-logged')
+    } finally {
+      console.error = original
+      delete process.env[secretName]
+      rmSync(directory, { recursive: true, force: true })
+    }
   })
 
   test('returns the existing document when concurrent registrations race', async () => {
