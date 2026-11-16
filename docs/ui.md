@@ -33,6 +33,13 @@ actions are gated on the session, and an anonymous deep link or an expired write
 sign-in prompt that keeps unsaved editor state. Provider bearer authentication stays in the
 API for headless clients.
 
+The API-reference slice of
+[issue #126](https://github.com/ForkbombEu/credimi-attestbook/issues/126) adds a public
+`/docs` page. It is a separate Vite entry document, not a route in the catalog SPA router: it
+renders Scalar from assets bundled with the application and reads the generated same-origin
+`/openapi.json`, so it needs no session and no third-party CDN. It documents the product API
+only, not the TS11 catalogue API.
+
 **Authoritative spec:** [`docs/specification.md`](specification.md) §14
 (UI-001/UI-002/UI-005/UI-006), §15 (authentication and authorization), §11 (FR-019) and §2.2
 (independent standalone UI).
@@ -164,6 +171,12 @@ Implemented by these slices:
   - catalogue, rulebook detail, playground, capture-explorer reads and the public API stay
     usable anonymously; the editor, lifecycle and capture-correlation writes are the
     session-gated actions.
+- a public interactive API reference at `/docs` (#126):
+  - the page is a separate static Vite entry served anonymously at `/docs` and `/docs/`,
+    with its JS and CSS bundled into `dist/ui/assets` and Scalar's remote fonts disabled;
+  - it renders the canonical same-origin `/openapi.json` with Scalar and lists the generated
+    operations, request/response schemas and declared authentication schemes;
+  - no cookie, CSRF token, bearer token or provisioning secret is embedded in the page.
 
 Deliberately **not** in these slices:
 
@@ -253,10 +266,11 @@ stores or sends a provider bearer token; headless API clients keep using the bea
 documented in [`docs/security.md`](security.md) §2.
 
 The client router uses real paths with the History API. The Bun server serves the built
-entry document for `/`, `/rulebooks/*`, `/playground`, `/captures/*` and `/login`; `/api/*`
-stays separate and unknown non-UI paths keep the JSON not-found envelope. A deep link or a
-browser reload therefore reaches the same view, including a reload of an authenticated
-`/login` page. Browser back/forward is handled with a `popstate` listener; in-page links push
+entry document for `/`, `/rulebooks/*`, `/playground`, `/captures/*` and `/login`, and the
+separate built `docs.html` for `/docs` and `/docs/`; `/api/*` stays separate and unknown
+non-UI paths keep the JSON not-found envelope. A deep link or a browser reload therefore
+reaches the same view, including a reload of an authenticated `/login` page and of the API
+reference. Browser back/forward is handled with a `popstate` listener; in-page links push
 a history entry, and the router parses the pathname while preserving the login page's `next`
 query string. Modified clicks (new tab, copy address) keep the native anchor behaviour.
 
@@ -482,8 +496,9 @@ bun run test:e2e     # Playwright against the real API with seeded data
 
 `src/server.ts` serves `dist/ui/index.html` at `/`, Vite's content-addressed
 files under `/assets/*`, the installed Credimi brand directory under `/brand/*`,
-and the same entry document for `/rulebooks/*`, `/playground`, `/captures/*` and
-`/login` deep links. When `dist/ui` is absent (a source checkout without a
+the same entry document for `/rulebooks/*`, `/playground`, `/captures/*` and
+`/login` deep links, and the separate `dist/ui/docs.html` for `/docs` and
+`/docs/`. When `dist/ui` is absent (a source checkout without a
 UI build), the UI routes are not registered, so those paths keep the
 JSON 404 instead of serving a broken page. The Dockerfile copies the `ui/`
 sources before building, so the container serves the built UI from the same

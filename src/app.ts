@@ -154,6 +154,11 @@ export function createApp(options: AppOptions = {}): Hono {
     app.get('/captures/*', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/login', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/login/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
+    // The API reference is a separate Vite entry document. Serving it at both
+    // the public path and its trailing-slash form keeps direct navigation and
+    // reload on the reference instead of the SPA entry document or a 404.
+    app.get('/docs', staticFileHandler(resolve(uiRoot, 'docs.html'), 'no-cache'))
+    app.get('/docs/', staticFileHandler(resolve(uiRoot, 'docs.html'), 'no-cache'))
     app.use(
       '/assets/*',
       uiDirectoryHandler(

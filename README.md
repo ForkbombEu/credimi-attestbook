@@ -40,8 +40,8 @@ bun run dev
 ```
 
 `bun run dev` rebuilds on change and listens on `http://localhost:3000`, serving the built
-UI at `/`, `/rulebooks/<id>`, `/rulebooks/new`, `/rulebooks/<id>/edit`, `/playground` and
-`/captures`, with
+UI at `/`, `/rulebooks/<id>`, `/rulebooks/new`, `/rulebooks/<id>/edit`, `/playground`,
+`/captures` and the interactive API reference at `/docs`, with
 the versioned API under `/api/v1`. Run
 `bun run build:ui` after UI changes, or use `bun run dev:ui` for Vite hot reload on port 5173
 with `/api` proxied to the Bun server. The health check is:
@@ -61,7 +61,7 @@ bun run typecheck     # server tsc --noEmit only
 bun run typecheck:ui  # UI, Vitest and Playwright config typecheck only
 bun run test          # Bun server test runner only
 bun run test:ui       # Vitest UI unit, component and axe-core tests
-bun run test:e2e      # Playwright catalog, detail, playground and capture tests against the real API
+bun run test:e2e      # Playwright catalog, detail, playground, capture and API-reference tests
 bun run acceptance    # Phase 1 end-to-end workflow; writes dimension-aware evidence
 bun run openapi:check # generated OpenAPI 3.1 document validation
 bun run docs:check    # documentation consistency, plain Node
@@ -185,6 +185,9 @@ The same generated document is served publicly and without authentication at
 `GET /openapi.json`, so clients and documentation tools can discover the implemented product
 API without checking out the repository; it is unversioned and describes only the `/api/v1`
 product API, not the TS11 catalogue API.
+`GET /docs` serves a public, login-free Scalar reference built from that same-origin document,
+with Scalar and its assets bundled into the application build rather than loaded from a CDN.
+The reference documents the product API only; the TS11 catalogue API is not part of it.
 Versioning, idempotency, error mapping, resource paths and limitations are documented in
 [`docs/api.md`](docs/api.md).
 
@@ -654,17 +657,17 @@ Application code still uses `strict`, `exactOptionalPropertyTypes` and
 
 `.github/workflows/ci.yml` runs on every pull request and on pushes to `main`:
 
-| Job                 | Checks                                                               |
-| ------------------- | -------------------------------------------------------------------- |
-| `quality`           | Prettier, ESLint, strict TypeScript typecheck                        |
-| `test`              | Bun tests, including the real OWF package and SQLite smoke           |
-| `openapi`           | Generated OpenAPI 3.1 document validation                            |
-| `build`             | Production bundle and bundle presence                                |
-| `docker smoke`      | Image build, container startup, health, catalogue and 404 round-trip |
-| `ui`                | UI typecheck, component/axe tests and Playwright browser flows       |
-| `acceptance`        | Phase 1 end-to-end workflow and dimension-aware evidence export      |
-| `docs`              | Documentation consistency and the checker's own tests                |
-| `owf compatibility` | Phase 0 OWF probe on Node.js 22.23.4 and Bun 1.3.1 from `mise.toml`  |
+| Job                 | Checks                                                                 |
+| ------------------- | ---------------------------------------------------------------------- |
+| `quality`           | Prettier, ESLint, strict TypeScript typecheck                          |
+| `test`              | Bun tests, including the real OWF package and SQLite smoke             |
+| `openapi`           | Generated OpenAPI 3.1 document validation                              |
+| `build`             | Production bundle and bundle presence                                  |
+| `docker smoke`      | Image build, startup, health, catalogue, `/docs`, `/openapi.json`, 404 |
+| `ui`                | UI typecheck, component/axe tests and Playwright browser flows         |
+| `acceptance`        | Phase 1 end-to-end workflow and dimension-aware evidence export        |
+| `docs`              | Documentation consistency and the checker's own tests                  |
+| `owf compatibility` | Phase 0 OWF probe on Node.js 22.23.4 and Bun 1.3.1 from `mise.toml`    |
 
 No job deploys, publishes an image or needs a secret or a live external service. Every job
 installs Bun and Node from the committed `mise.toml` with `jdx/mise-action`, so CI runs the
