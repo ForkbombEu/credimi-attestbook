@@ -494,6 +494,8 @@ export const errorEnvelopeSchema = z.object({
       'payload_too_large',
       'import_fetch_failed',
       'import_rejected',
+      'verification_failed',
+      'callback_unreachable',
       'registry_unavailable',
       'validation_unavailable',
       'fixture_unavailable',

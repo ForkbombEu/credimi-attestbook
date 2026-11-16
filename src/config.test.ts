@@ -22,6 +22,7 @@ const DEFAULTS = {
   schemaSandboxConcurrency: DEFAULT_SCHEMA_SANDBOX_CONCURRENCY,
   validationCacheMaxEntries: DEFAULT_VALIDATION_CACHE_MAX_ENTRIES,
   validationCacheMaxMb: DEFAULT_VALIDATION_CACHE_MAX_MB,
+  subscriptionsAllowLoopbackHttp: false,
 }
 
 describe('loadConfig', () => {
@@ -52,7 +53,24 @@ describe('loadConfig', () => {
       schemaSandboxConcurrency: 1,
       validationCacheMaxEntries: 8,
       validationCacheMaxMb: 4,
+      subscriptionsAllowLoopbackHttp: false,
     })
+  })
+
+  test('enables the test-only subscription loopback opt-in only when asked', () => {
+    for (const value of ['1', 'true', 'TRUE', ' true ']) {
+      expect(
+        loadConfig({ SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP: value }).subscriptionsAllowLoopbackHttp,
+      ).toBe(true)
+    }
+    for (const value of ['', '0', 'false', '  ']) {
+      expect(
+        loadConfig({ SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP: value }).subscriptionsAllowLoopbackHttp,
+      ).toBe(false)
+    }
+    expect(() => loadConfig({ SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP: 'yes' })).toThrow(
+      'invalid SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP',
+    )
   })
 
   test('falls back to the default hostname for a blank HOST', () => {

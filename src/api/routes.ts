@@ -169,6 +169,7 @@ export type ApiOperationId =
   | 'registerRulebookSubscription'
   | 'getSubscription'
   | 'deleteSubscription'
+  | 'verifySubscription'
 
 export interface ApiParameterSpec {
   readonly name: string
@@ -1398,6 +1399,45 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         description: 'The subscription is revoked; there is no response body.',
       },
       ...errorSpecs([401, 500, 503], false),
+    ],
+  },
+  {
+    operationId: 'verifySubscription',
+    method: 'post',
+    path: '/api/v1/subscriptions/:subscriptionId/verify',
+    summary: 'Verify the callback and activate one subscription',
+    description:
+      'Proves that the subscriber controls the registered callback endpoint, then marks the subscription active. The route requires the per-subscription management token as `Authorization: Bearer <managementToken>`; no provider credential, session cookie or request body is needed. It mints a fresh single-use, expiring challenge and sends it to the stored callback URL as one `POST` with `Content-Type: application/json` and body `{"type":"attestbook.subscription.verification@1","challenge":"<challenge>","expiresAt":"<ISO timestamp>"}`. The callback must answer `200` with `Content-Type: application/json` and a JSON object whose `challenge` member is exactly that challenge. The target is re-validated and resolved at verification time under the same public-address rules as registration; every resolved answer must be public, the request connects to the pinned address and redirects are never followed. DNS, connect and the whole request share a five-second bound, and the response body is capped at 8 KiB. A wrong challenge, a redirect, another status, an invalid or oversized body, an expired challenge, a non-public destination, a timeout or an unreachable endpoint leaves the subscription pending and answers a typed failure; it never becomes delivery eligible. An already-active subscription is returned without contacting the callback again. Initiations are bounded per subscription per window and answer 429 with Retry-After. Challenges and management secrets are never returned in errors or logs. This route verifies and activates only; it delivers no event.',
+    tag: 'subscriptions',
+    security: false,
+    subscriptionAuth: true,
+    parameters: [PATH_SUBSCRIPTION_ID],
+    responses: [
+      {
+        status: 200,
+        description:
+          'The subscription is active after the callback answered the exact challenge, or was already active (no further callback request).',
+        schema: 'SubscriptionResponse',
+      },
+      {
+        status: 409,
+        description:
+          'The callback did not prove control (challenge mismatch, expiry, redirect, non-200 status, invalid or oversized response, or a non-public target), or another attempt is already in progress. Body: ErrorEnvelope with code verification_failed or conflict; the subscription stays pending.',
+        schema: 'ErrorEnvelope',
+      },
+      {
+        status: 429,
+        description:
+          'The per-subscription verification attempt bound was exceeded; Retry-After is set and the subscription stays pending.',
+        schema: 'ErrorEnvelope',
+      },
+      {
+        status: 502,
+        description:
+          'The callback endpoint could not be reached (DNS failure, connection failure or timeout); the subscription stays pending. Body: ErrorEnvelope with code callback_unreachable.',
+        schema: 'ErrorEnvelope',
+      },
+      ...errorSpecs([401, 404, 500, 503], false),
     ],
   },
 ]
@@ -2740,6 +2780,26 @@ function deleteSubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
   }
 }
 
+/**
+ * Explicit, management-token authenticated callback verification. It is the
+ * only subscription operation that contacts the callback endpoint; the service
+ * bounds and pins the request and returns a typed failure without activating
+ * the record when the endpoint cannot prove control.
+ */
+function verifySubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
+  return async (context) => {
+    const subscriptions = requireSubscriptions(dependencies.subscriptions)
+    const subscription = await subscriptions.verify(
+      context.req.param('subscriptionId') ?? '',
+      subscriptionManagementToken(context),
+    )
+    // The response carries the subscriber's callback URL and lifecycle state,
+    // so it must not be cached.
+    context.header('cache-control', 'no-store')
+    return context.json({ data: toSubscriptionResource(subscription) }, 200)
+  }
+}
+
 function validateCredentialHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const validation = requireValidation(dependencies)
@@ -2952,6 +3012,7 @@ export function createApiHandlers(
     registerRulebookSubscription: registerRulebookSubscriptionHandler(dependencies),
     getSubscription: getSubscriptionHandler(dependencies),
     deleteSubscription: deleteSubscriptionHandler(dependencies),
+    verifySubscription: verifySubscriptionHandler(dependencies),
   }
 }
 

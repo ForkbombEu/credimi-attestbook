@@ -1,6 +1,9 @@
 # `start` runs `scripts/uat-start.sh`, which supervises the application and
 # exposes a test-only restart control at `POST http://127.0.0.1:3001/restart`
 # so a scenario can observe restart persistence against the same database.
+# It also sets SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP=1, so a webhook subscription
+# may use a disposable `http://127.0.0.1:<port>/...` callback for the
+# verification handshake documented in docs/api.md §3.15.1.
 version: 1
 default_environment: local
 environments:

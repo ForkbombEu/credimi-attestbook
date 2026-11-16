@@ -17,6 +17,7 @@ import adminSessionCsrf from '../../migrations/0005_admin_session_csrf.sql' with
 import credentialSchemaDocuments from '../../migrations/0006_credential_schema_documents.sql' with { type: 'text' }
 import publicationEvents from '../../migrations/0007_publication_events.sql' with { type: 'text' }
 import subscriptions from '../../migrations/0008_subscriptions.sql' with { type: 'text' }
+import subscriptionVerification from '../../migrations/0009_subscription_verification.sql' with { type: 'text' }
 
 export interface Migration {
   /** Stable, ordered version such as `0001_registry`. */
@@ -46,6 +47,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: '0006_credential_schema_documents', sql: credentialSchemaDocuments },
   { version: '0007_publication_events', sql: publicationEvents },
   { version: '0008_subscriptions', sql: subscriptions },
+  { version: '0009_subscription_verification', sql: subscriptionVerification },
 ]
 
 export function migrationChecksum(sql: string): string {

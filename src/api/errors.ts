@@ -39,6 +39,8 @@ export const API_ERROR_CODES = [
   'capture_fetch_failed',
   'capture_unavailable',
   'subscription_unavailable',
+  'verification_failed',
+  'callback_unreachable',
   'rate_limited',
   'auth_unavailable',
   'registry_unavailable',
@@ -223,6 +225,26 @@ export function toApiError(error: unknown): {
         return { status: 404, body: errorEnvelope('not_found', error.message) }
       case 'conflict':
         return { status: 409, body: errorEnvelope('conflict', error.message) }
+      case 'verification_failed':
+        // The callback did not prove control. The stable `reason` says why and
+        // never contains the challenge or another secret.
+        return {
+          status: 409,
+          body: errorEnvelope(
+            'verification_failed',
+            error.message,
+            error.reason === undefined ? undefined : { reason: error.reason },
+          ),
+        }
+      case 'callback_unreachable':
+        return {
+          status: 502,
+          body: errorEnvelope(
+            'callback_unreachable',
+            error.message,
+            error.reason === undefined ? undefined : { reason: error.reason },
+          ),
+        }
       case 'rate_limited':
         return {
           status: 429,

@@ -7,7 +7,10 @@
 
 import type { Database } from 'bun:sqlite'
 
+import type { Http1Transport } from '../net/http1'
+
 import type { SubscriptionRegistrationLimiter } from './rate-limit'
+import type { CallbackHostResolver } from './verification'
 
 /** Lifecycle states a subscription can be stored in. */
 export const SUBSCRIPTION_STATES = ['pending', 'active', 'revoked'] as const
@@ -35,6 +38,15 @@ export interface SubscriptionRecord extends Subscription {
   /** SHA-256 hash of the management token; the plaintext is never stored. */
   readonly managementTokenHash: string
   readonly revokedAt: string | null
+  /** SHA-256 of the single in-flight verification challenge, or `null`. */
+  readonly verificationChallengeHash: string | null
+  readonly verificationChallengeExpiresAt: string | null
+  /** Start of the current verification-attempt window, or `null`. */
+  readonly verificationWindowStartedAt: string | null
+  /** Callback verification initiations charged in the current window. */
+  readonly verificationAttempts: number
+  /** Instant the callback proved control, or `null` while unverified. */
+  readonly verifiedAt: string | null
 }
 
 /** The bounded rulebook facts the subscription service needs. */
@@ -69,6 +81,16 @@ export interface SubscriptionLimits {
   readonly registrationWindowMs: number
   /** Maximum number of client keys the in-process quota tracks. */
   readonly maxRateLimitKeys: number
+  /** Time a verification challenge remains valid, in milliseconds. */
+  readonly challengeTtlMs: number
+  /** Bound on the DNS lookup plus the callback request, in milliseconds. */
+  readonly verificationTimeoutMs: number
+  /** Maximum callback response body inspected for the challenge acknowledgement. */
+  readonly maxVerificationResponseBytes: number
+  /** Verification initiations one subscription may trigger per window. */
+  readonly verificationsPerSubscription: number
+  /** Sliding window of the per-subscription verification attempts, in milliseconds. */
+  readonly verificationWindowMs: number
 }
 
 export type SubscriptionLimitOverrides = Partial<SubscriptionLimits>
@@ -90,12 +112,18 @@ export interface SubscriptionServiceOptions {
   readonly generateId?: () => string
   /** Management-token generator; injectable for deterministic tests. */
   readonly generateManagementToken?: () => string
+  /** Verification-challenge generator; injectable for deterministic tests. */
+  readonly generateChallenge?: () => string
   /**
    * Test-only opt-in for plain `http` callback URLs on a literal loopback
    * address. It is off by default and is never enabled by the production
-   * server wiring.
+   * server wiring; the local UAT start script enables it explicitly.
    */
   readonly allowLoopbackHttp?: boolean
+  /** Injectable DNS resolver for callback verification; tests use a fake. */
+  readonly resolveCallbackHostname?: CallbackHostResolver
+  /** Injectable callback transport; tests use an offline fake. */
+  readonly verificationTransport?: Http1Transport
   readonly limits?: SubscriptionLimitOverrides
   readonly rateLimiter?: SubscriptionRegistrationLimiter
 }

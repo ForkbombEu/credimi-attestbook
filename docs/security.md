@@ -22,15 +22,15 @@ authentication).
 provisioning), `src/registry/tokens.ts` (token primitives), `src/auth/` (environment
 administrator login, sessions, rate limiting and origin checks),
 `migrations/0004_admin_sessions.sql` (hashed session rows) and `src/subscriptions/`
-(anonymous pending registrations, hashed per-subscription management tokens and their
-registration quota).
+(anonymous pending registrations, hashed per-subscription management tokens and challenge
+hashes, callback verification and their abuse bounds).
 
 ## 1. Trust boundaries and actors
 
 | Actor | Credentials | Authority |
 | --- | --- | --- |
 | Anonymous reader | none | Public catalogue, attestation, schema-reference, version, snapshot, stored credential-schema metadata/content and health reads; structural credential validation. |
-| Anonymous subscriber | none to register; a per-subscription management token (`Authorization: Bearer ats_…`) to manage that one subscription | Register one **pending** webhook subscription for a publicly published rulebook and read or revoke only that subscription through its own management token (issue #117). Registration and management grant no provider or publication authority, never expose another subscriber's callback URL and never trigger an outbound request or delivery. |
+| Anonymous subscriber | none to register; a per-subscription management token (`Authorization: Bearer ats_…`) to manage and verify that one subscription | Register one **pending** webhook subscription for a publicly published rulebook, read or revoke it, and explicitly verify its callback before it becomes active, all through its own management token (issues #117 and #118). Registration, management and verification grant no provider or publication authority, never expose another subscriber's callback URL, and never trigger an outbound request except the explicit verification handshake. |
 | Provider account | Provider bearer token (`Authorization: Bearer att_…`) | Create and mutate only the rulebooks owned by that provider; import drafts owned by that provider; preview imports; discover issuer metadata. |
 | Administrator (browser) | Environment-configured username and Argon2id password hash; opaque session cookie plus its session-bound CSRF token | Authorize the same protected provider write routes a bearer token authorizes, as the bound **existing** provider (issue #89). The session resolves to the same trusted actor as a token; every state-changing cookie request must echo `X-CSRF-Token`. It does not create a provider or mint or expose a bearer token. |
 | Operator | Out-of-band deployment access | Provision a provider and its first token, configure the optional administrator login, audit inspection and deployment configuration. Nothing in the HTTP API performs provider administration. |
@@ -165,21 +165,59 @@ own management credential, deliberately separate from provider authentication:
   application sends no CORS headers). A body of another content type, or none, answers `400`.
 - **The token is the only key to one subscription.** Registration mints 256 random bits with
   the `ats_` prefix and returns the plaintext exactly once; only its SHA-256 hash is stored
-  (`subscriptions.management_token_hash`). `GET` and `DELETE /api/v1/subscriptions/{id}`
-  require `Authorization: Bearer <managementToken>` through their own handler check, not the
-  central provider middleware. A provider bearer token, administrator session cookie or CSRF
-  token has no authority there, and a management token has no authority on any registry route.
+  (`subscriptions.management_token_hash`). `GET`, `DELETE` and `POST …/verify` on
+  `/api/v1/subscriptions/{id}` require `Authorization: Bearer <managementToken>` through their
+  own handler check, not the central provider middleware. A provider bearer token,
+  administrator session cookie or CSRF token has no authority there, and a management token
+  has no authority on any registry route.
 - **No valid subscription oracle.** A missing, malformed, invalid or foreign token and an
   unknown subscription id all answer the same `401 unauthorized` without a provider bearer
   challenge; the comparison is constant-time and an unknown id performs the same hash work. A
   revoked subscription answers `404` only to its own token holder.
+- **Verification is explicit and bounded.** Registration and management never resolve or
+  contact the callback host. `POST /api/v1/subscriptions/{id}/verify` is the only outbound
+  subscription request, and only the management-token holder can initiate it. Each initiation
+  mints a fresh single-use challenge (stored only as its SHA-256 hash) and charges a durable
+  per-subscription attempt window (five initiations per ten minutes by default); exceeding it
+  answers `429` with `Retry-After`. A concurrent handshake for the same subscription answers
+  `409 conflict` instead of minting a second challenge. A challenge and an attempt are consumed
+  by any outcome other than success.
 - **Deletion is a revocation, not a hard delete.** The row and its token binding are retained,
   so a repeated authenticated delete is an idempotent `204`, while the state change removes
   delivery eligibility immediately. A revoked row can never return to `pending` or `active`
   (a SQLite trigger enforces this).
-- **No token is readable later.** Neither management response returns the token or its hash,
-  and the registration response is `Cache-Control: no-store`. Tokens and callback URLs are
-  never logged or included in an error message.
+- **No token or challenge is readable later.** No management response returns the token or its
+  hash, no response or error returns the verification challenge, and the registration and
+  verification responses are `Cache-Control: no-store`. Tokens, challenge values and callback
+  URLs are never logged or included in an error message.
+
+### 2.3 Webhook callback network safety
+
+A callback URL is untrusted even after the subscriber registered it. Registration applies a
+static policy (public `https`, no credentials, no fragment, no loopback/private literal); the
+verification handshake repeats the policy and adds the checks that only a connection can
+enforce:
+
+- **One resolution, pinned connection.** The callback hostname is resolved once, every answer
+  must be public, and the transport connects to that validated address. HTTPS presents the
+  original hostname only as SNI and `Host`, so a second DNS answer cannot redirect the
+  connection. A mixed public/private answer is refused rather than choosing the first record.
+- **Redirects are never followed.** A `3xx` answer fails the handshake, so there is no second
+  hop that could escape the address checks and no redirect chain to bound.
+- **Every non-public form is refused.** Loopback, private, link-local, carrier-grade NAT,
+  multicast, documentation, reserved, cloud-metadata, IPv4-mapped, IPv4-compatible and NAT64
+  forms are blocked through the same `isBlockedAddress` classifier the import pipeline uses.
+  Request headers (`X-Forwarded-For`, `Host`, forwarding metadata) are never consulted.
+- **Bounded transfer.** The DNS lookup, connection and request share a five-second budget, the
+  response body is capped at 8 KiB, and only a `200` JSON object with the exact challenge is
+  accepted.
+- **Test-loopback is a separate configuration.** A literal `127.0.0.1`/`::1` `http` target is
+  accepted only when `SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP=1`, which the production wiring leaves
+  unset and the local UAT start script sets for a disposable callback server. Even then a DNS
+  name may not resolve to loopback, so the flag cannot turn a hostname into an SSRF primitive.
+- **No delivery yet.** Activation makes the record delivery eligible in the data model, but no
+  delivery worker exists. A future worker must reuse this resolver and transport unchanged at
+  delivery time instead of trusting the registration-time check.
 
 ## 3. Authorization and provider ownership
 
@@ -241,6 +279,7 @@ The following rules implement that model:
 | `POST /api/v1/rulebooks/{id}/subscriptions` | no | Anonymous pending registration for an existing rulebook with a published/historical version; stores only a normalized callback URL, a random id and a hashed management token; no outbound request | `400` for an unsafe/malformed URL; `404` for an unknown rulebook; `409` for an unpublished rulebook or the per-rulebook bound; `413`/`429` |
 | `GET /api/v1/subscriptions/{id}` | subscription token | Returns that one subscription's callback URL and state; never a token/hash or another subscriber's data | `401` uniformly for a missing/invalid/foreign token or unknown id; `404` for a revoked one |
 | `DELETE /api/v1/subscriptions/{id}` | subscription token | Revokes that one subscription immediately and idempotently; writes no registry data | `401` uniformly for a missing/invalid/foreign token or unknown id |
+| `POST /api/v1/subscriptions/{id}/verify` | subscription token | Explicitly proves control of that one callback and activates the subscription; the only outbound subscription request, bounded and pinned | `401` uniformly for a missing/invalid/foreign token or unknown id; `404` for a revoked record; `409`/`502`/`429` for a failed, unreachable or over-bound handshake |
 
 Every row marked `bearer or session+CSRF` accepts exactly one of the two credentials; the
 session path adds the CSRF header but not a wider authority, so the ownership rule and the
@@ -265,9 +304,10 @@ token because it records server state that every reader sees.
   handler with one central check that resolves the trusted actor (bearer token or session
   cookie) before the handler can read a request body or start an outbound fetch. The declared
   HTTP method decides whether a cookie request also needs its CSRF token, so there is no second
-  list of secured endpoints that could drift. The two subscription-management routes are not
-  provider-protected: they carry the `subscriptionAuth` declaration and verify the
-  subscription's own token in their handler, so a provider credential cannot authorize them.
+  list of secured endpoints that could drift. The subscription registration, management and
+  verification routes are not provider-protected: they carry the `subscriptionAuth`
+  declaration and verify the subscription's own token in their handler, so a provider
+  credential cannot authorize them.
 - The resolved actor is stored on the request context and read by handlers; no handler parses
   a credential, takes a provider id from input or constructs an actor. The registry service
   exposes `authenticateBearer` for the transport and accepts the already-verified actor
@@ -323,17 +363,21 @@ relevant mapping is:
 | Missing, malformed, invalid or foreign subscription management token, or unknown subscription id | `401` | `unauthorized` | no provider bearer challenge; the same body for every failure |
 | Rulebook without a published version, or per-rulebook subscription bound | `409` | `conflict` | none |
 | Registration over the per-client quota | `429` | `rate_limited` | `Retry-After` and `details.retryAfterSeconds` |
+| Callback verification: wrong/expired challenge, redirect, non-`200` status, invalid or oversized acknowledgement, or a refused non-public target | `409` | `verification_failed` | the subscription stays `pending`; `details.reason` names the safe cause, never the challenge |
+| Callback verification: another handshake already in progress | `409` | `conflict` | none; the record stays `pending` |
+| Callback verification: DNS, connection or timeout failure | `502` | `callback_unreachable` | the subscription stays `pending`; `details.reason` names the safe cause |
+| Callback verification over the per-subscription attempt bound | `429` | `rate_limited` | `Retry-After` and `details.retryAfterSeconds`; no request is made |
 | Duplicate label, stale draft, immutable state | `409` | `conflict` / `immutable` | none |
 | Body over the limit | `413` | `payload_too_large` | none |
 | Unexpected failure | `500` | `internal_error` | none; no internal detail is returned |
 
 Messages are safe to display and never contain bearer tokens, token hashes, subscription
-management tokens, credential material, personal attributes or remote document bytes. The
-challenge header is documented in the OpenAPI responses of every protected operation. A
-protected route answers `401` with the same body and challenge whether the attempted
-credential was a bearer token or a cookie, so the response cannot be used to learn which
-credential path failed; the session-only `/auth/me` route and the subscription-management
-routes answer `401` without the provider bearer challenge.
+management tokens, verification challenges, credential material, personal attributes or remote
+document bytes. The challenge header is documented in the OpenAPI responses of every protected
+operation. A protected route answers `401` with the same body and challenge whether the
+attempted credential was a bearer token or a cookie, so the response cannot be used to learn
+which credential path failed; the session-only `/auth/me` route and the subscription-management
+and verification routes answer `401` without the provider bearer challenge.
 
 ## 6. Secret and sensitive-data handling
 
@@ -392,8 +436,9 @@ trail is not exposed over HTTP; it is read by operators from the database.
 
 ## 8. Limitations and non-goals
 
-- **No general HTTP rate limiting.** Login failures are rate limited (§2.1) and anonymous
-  subscription registrations have their own per-client quota (§2.2), but an authenticated
+- **No general HTTP rate limiting.** Login failures are rate limited (§2.1), anonymous
+  subscription registrations have their own per-client quota (§2.2) and verification
+  initiations have a durable per-subscription window (§2.2, §2.3), but an authenticated
   provider can repeat a bounded import fetch or a write at the network level. The import
   pipeline still applies its own timeout, size, redirect and fan-out limits. Rate limiting for
   the remaining routes remains future hardening work.
@@ -408,14 +453,17 @@ trail is not exposed over HTTP; it is read by operators from the database.
   per-rulebook bound is durable, but it is a service-level count-and-insert, not a database
   constraint, so a multi-process deployment sharing one SQLite file could race it. Pending
   subscriptions do not expire and there is no operator cleanup, so a full per-rulebook bound
-  stays full until subscribers revoke rows; expiry belongs to the later verification/delivery
-  slice.
-- **Subscriptions do not verify their callback and deliver nothing.** A registration stays
-  `pending`; this slice never resolves or contacts the callback host, never activates a
-  subscription and never sends an event. The callback URL is validated statically at
-  registration, but DNS and address safety must be re-checked at activation and delivery time
-  by the later slices. Deleting a subscription revokes it immediately, but no delivery path
-  exists yet to observe that.
+  stays full until subscribers revoke rows; only the challenge lifetime and the verification
+  attempt window are time-bounded. The per-subscription attempt window is a service-level
+  read-then-update, so a multi-process deployment could race it; the activation transition
+  itself is guarded by a conditional update on the stored challenge hash.
+- **Subscriptions verify and activate but deliver nothing.** Registration stays `pending` until
+  an explicit, management-token authenticated `POST …/verify` proves control of the callback;
+  activation is final apart from revocation. No route delivers a publication event, retries a
+  delivery or exposes delivery history, so "active" only means delivery eligible in the data
+  model. Deleting a subscription revokes it immediately, but no delivery path exists yet to
+  observe that. A future delivery worker must reuse the verification-time resolver and pinned
+  transport, not trust the registration-time check.
 - **No token expiry or rotation policy.** Tokens are revoked explicitly and provider-scoped.
 - **No fine-grained scopes or roles.** Every token of a provider has the provider's full write
   authority; there are no read-only or per-rulebook tokens.
@@ -541,8 +589,16 @@ trail is not exposed over HTTP; it is read by operators from the database.
   management-token-only reads and idempotent revocation, cross-subscriber refusal, the
   per-rulebook and per-client bounds, IPv6 /64 quota aggregation, invalid-attempt quota
   behaviour, restart persistence and the absence of a stored client address; a patched `fetch`
-  proves registration performs no network request. `src/api/subscriptions.test.ts` covers the
-  same boundary through the real Hono application, including UAT-1, UAT-2, `401` uniformity
+  proves registration performs no network request. `src/subscriptions/verification.test.ts`
+  injects a fake resolver and transport and covers successful activation, a wrong, expired,
+  malformed, non-JSON, oversized, redirected and non-`200` answer, a concurrent handshake, the
+  attempt bound, a DNS failure and timeout, private/mixed/mapped resolved answers, DNS
+  rebinding (one resolution, pinned address), token-only access, revocation, activation
+  finality at the schema level and the loopback test opt-in. `src/subscriptions/verification-http.test.ts`
+  exercises the real transport against a disposable loopback server for the successful
+  handshake, a wrong challenge, a redirect, a timeout and the response cap.
+  `src/api/subscriptions.test.ts` covers the same boundary through the real Hono application,
+  including UAT-1, UAT-2, verification activation and typed failures, `401` uniformity
   without a provider bearer challenge, `404` after revocation, the JSON content-type refusal,
   `429` with `Retry-After`, `409` at the rulebook bound and `503` when the service is not
   wired.
@@ -569,4 +625,6 @@ trail is not exposed over HTTP; it is read by operators from the database.
 - [Issue #88](https://github.com/ForkbombEu/credimi-attestbook/issues/88) for the
   environment-configured administrator login and server-side browser session
 - [Issue #117](https://github.com/ForkbombEu/credimi-attestbook/issues/117) for anonymous
-  webhook subscription registration and management (storage only; no verification or delivery)
+  webhook subscription registration and management
+- [Issue #118](https://github.com/ForkbombEu/credimi-attestbook/issues/118) for callback
+  verification, activation and callback network-safety validation (no event delivery)
