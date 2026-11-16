@@ -181,6 +181,10 @@ envelope. Writes and the import preview require a provider bearer token, or the 
 `bun run openapi:check` validates the generated OpenAPI 3.1 document against the official
 OpenAPI 3.1 schema, and the contract tests compare the documented operations with the routes
 Hono actually registered. The `openapi` CI job runs that check on every pull request.
+The same generated document is served publicly and without authentication at
+`GET /openapi.json`, so clients and documentation tools can discover the implemented product
+API without checking out the repository; it is unversioned and describes only the `/api/v1`
+product API, not the TS11 catalogue API.
 Versioning, idempotency, error mapping, resource paths and limitations are documented in
 [`docs/api.md`](docs/api.md).
 

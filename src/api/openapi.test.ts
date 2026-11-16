@@ -4,7 +4,7 @@ import Ajv2020 from 'ajv/dist/2020'
 import { createApp } from '../app'
 
 import { loadOpenApi31Schema } from './oas-schema'
-import { buildOpenApiDocument } from './openapi'
+import { OPENAPI_DOCUMENT_PATH, buildOpenApiDocument } from './openapi'
 import { API_ROUTES } from './routes'
 import { OPENAPI_COMPONENTS } from './schemas'
 
@@ -52,6 +52,9 @@ describe('generated OpenAPI document', () => {
           route.method === 'PUT' ||
           route.method === 'DELETE',
       )
+      // The unversioned documentation endpoint serves this document; it is not
+      // an operation of the versioned product API, so it has no operation here.
+      .filter((route) => !(route.method === 'GET' && route.path === OPENAPI_DOCUMENT_PATH))
       .map((route) => `${route.method} ${route.path}`)
       .sort()
     const documented = API_ROUTES.map(
