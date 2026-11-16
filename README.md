@@ -430,9 +430,10 @@ also exercises the schema sandbox's private temporary directory.
 | `ADMIN_PASSWORD_HASH`                                                                  | unset               | Argon2id PHC hash of the administrator password, never plaintext                                      |
 | `ADMIN_PROVIDER_ID`                                                                    | unset               | Identifier of an existing provider the administrator is bound to                                      |
 | `SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP`                                                    | unset               | Test-only: allow a literal loopback `http` webhook callback for local UAT; never enable in production |
-| Local development binds loopback only. The Docker image and `compose.yaml` set         |
-| `HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup |
-| instead of silently binding elsewhere.                                                 |
+
+Local development binds loopback only. The Docker image and `compose.yaml` set
+`HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup
+instead of silently binding elsewhere.
 
 The schema and fixture sandboxes run in separate Bun processes. Each child receives one
 private, writable directory (mode `0700`) and an environment allowlist that points
