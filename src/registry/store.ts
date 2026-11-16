@@ -20,6 +20,9 @@ import type {
   CredentialSchemaMediaType,
   JsonObject,
   Provider,
+  PublicationEvent,
+  PublicationEventFormat,
+  PublicationEventType,
   PublicationStatus,
   Rulebook,
   RulebookVersion,
@@ -116,6 +119,36 @@ interface CredentialSchemaDocumentRow {
   readonly media_type: string
   readonly provenance_json: string
   readonly created_at: string
+}
+
+interface PublicationEventRow {
+  readonly sequence: number
+  readonly id: string
+  readonly format: string
+  readonly event_type: string
+  readonly rulebook_id: string
+  readonly version_id: string
+  readonly version: string
+  readonly content_digest: string
+  readonly published_at: string
+}
+
+/** New append-only publication-feed entry to persist (#116). */
+export interface PublicationEventInput {
+  readonly id: string
+  readonly format: PublicationEventFormat
+  readonly type: PublicationEventType
+  readonly rulebookId: string
+  readonly versionId: string
+  readonly version: string
+  readonly contentDigest: string
+  readonly publishedAt: string
+}
+
+/** One stored feed entry plus the internal position used as the cursor. */
+export interface StoredPublicationEvent {
+  readonly sequence: number
+  readonly event: PublicationEvent
 }
 
 /** Exact bytes to register in the content-addressed artifact store. */
@@ -709,6 +742,66 @@ export class RegistryStore {
       )
       .get(rulebookId)
     return row?.count ?? 0
+  }
+
+  // ------------------------------------------------------ publication events
+
+  /**
+   * Appends one publication event. The caller owns the surrounding transaction,
+   * which is the publication transaction itself: a failure here rolls the
+   * status change back, and the database triggers reject a duplicate, mutable
+   * or non-published reference.
+   */
+  insertPublicationEvent(event: PublicationEventInput): void {
+    this.database
+      .query(
+        `INSERT INTO publication_events (
+          id, format, event_type, rulebook_id, version_id, version, content_digest, published_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      )
+      .run(
+        event.id,
+        event.format,
+        event.type,
+        event.rulebookId,
+        event.versionId,
+        event.version,
+        event.contentDigest,
+        event.publishedAt,
+      )
+  }
+
+  /**
+   * Reads one rulebook's events in ascending feed order after a position. One
+   * extra row is requested by the caller to decide whether another page exists.
+   */
+  listPublicationEvents(
+    rulebookId: string,
+    afterSequence: number,
+    limit: number,
+  ): readonly StoredPublicationEvent[] {
+    return this.database
+      .query<PublicationEventRow, [string, number, number]>(
+        `SELECT sequence, id, format, event_type, rulebook_id, version_id, version,
+                content_digest, published_at
+         FROM publication_events
+         WHERE rulebook_id = ? AND sequence > ?
+         ORDER BY sequence ASC
+         LIMIT ?`,
+      )
+      .all(rulebookId, afterSequence, limit)
+      .map((row) => ({
+        sequence: row.sequence,
+        event: {
+          id: row.id,
+          format: row.format as PublicationEventFormat,
+          type: row.event_type as PublicationEventType,
+          rulebookId: row.rulebook_id,
+          version: row.version,
+          contentDigest: row.content_digest,
+          publishedAt: row.published_at,
+        },
+      }))
   }
 
   // -------------------------------------------------- credential schema documents

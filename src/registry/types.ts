@@ -167,6 +167,52 @@ export interface VersionDigestVerification {
   readonly verified: boolean
 }
 
+/** Product event type of a durable publication-feed entry (#116). */
+export const PUBLICATION_EVENT_TYPE = 'rulebook.published' as const
+export type PublicationEventType = typeof PUBLICATION_EVENT_TYPE
+
+/** Versioned product shape of a durable publication-feed entry (#116). */
+export const PUBLICATION_EVENT_FORMAT = 'attestbook.rulebook-publication-event@1' as const
+export type PublicationEventFormat = typeof PUBLICATION_EVENT_FORMAT
+
+/**
+ * One durable publication-feed entry (#116). It pins the exact immutable
+ * version a provider published: the stable event id, the rulebook id, the
+ * frozen version label, the snapshot digest and the publication timestamp.
+ * Provider identity, working-copy content, credentials and audit metadata are
+ * deliberately absent from this public projection.
+ */
+export interface PublicationEvent {
+  /** Stable, server-generated opaque event identifier. */
+  readonly id: string
+  /** Product shape version, independent of the API path version. */
+  readonly format: PublicationEventFormat
+  readonly type: PublicationEventType
+  readonly rulebookId: string
+  /** Exact frozen version label. */
+  readonly version: string
+  /** Lowercase hex SHA-256 of the published snapshot bytes. */
+  readonly contentDigest: string
+  /** The frozen version's publication timestamp. */
+  readonly publishedAt: string
+}
+
+/** One ascending cursor page of a rulebook's publication events. */
+export interface PublicationEventPage {
+  readonly events: readonly PublicationEvent[]
+  readonly limit: number
+  /** Opaque cursor of the next page; `null` when this page is the last. */
+  readonly nextCursor: string | null
+  readonly hasMore: boolean
+}
+
+export interface ListPublicationEventsOptions {
+  /** Page size; validated by the service and bounded by its maximum. */
+  readonly limit?: number
+  /** Opaque cursor returned by a previous page. */
+  readonly cursor?: string
+}
+
 /**
  * Supported profiles for a provider-owned credential schema document (#97):
  * a JSON Schema 2020-12 document or an SD-JWT VC Type Metadata document.

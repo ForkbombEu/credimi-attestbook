@@ -274,6 +274,35 @@ export const rulebookVersionListResponseSchema = z.object({
   data: z.array(rulebookVersionSchema),
 })
 
+// ------------------------------------------------ publication events (#116)
+
+/**
+ * One durable publication-feed entry. It pins the exact immutable version that
+ * was published and deliberately carries no provider identity, working-copy
+ * content, credential or audit metadata.
+ */
+export const publicationEventSchema = z.object({
+  id: z.string(),
+  format: z.literal('attestbook.rulebook-publication-event@1'),
+  type: z.literal('rulebook.published'),
+  rulebookId: z.string(),
+  version: z.string(),
+  contentDigest: z.string().regex(/^[0-9a-f]{64}$/),
+  publishedAt: timestamp,
+})
+
+/** Ascending cursor pagination; `nextCursor` is opaque and `null` on the last page. */
+export const publicationEventPaginationSchema = z.object({
+  limit: z.number().int().positive(),
+  nextCursor: nullableString,
+  hasMore: z.boolean(),
+})
+
+export const publicationEventPageSchema = z.object({
+  data: z.array(publicationEventSchema),
+  pagination: publicationEventPaginationSchema,
+})
+
 // ------------------------------------------- hosted credential schema documents
 
 /**
@@ -1573,6 +1602,8 @@ export const OPENAPI_COMPONENTS = {
   RulebookVersionSchemaReferences: rulebookVersionSchemaReferencesSchema,
   RulebookVersionSchemaReferencesResponse: rulebookVersionSchemaReferencesResponseSchema,
   VersionSchemaReference: versionSchemaReferenceSchema,
+  PublicationEvent: publicationEventSchema,
+  PublicationEventPageResponse: publicationEventPageSchema,
   CredentialSchemaDocument: credentialSchemaDocumentSchema,
   CredentialSchemaDocumentResponse: credentialSchemaDocumentResponseSchema,
   CredentialSchemaDocumentPageResponse: credentialSchemaDocumentPageSchema,
@@ -1671,6 +1702,8 @@ export type RulebookVersionSchemaReferencesResource = z.infer<
   typeof rulebookVersionSchemaReferencesSchema
 >
 export type VersionSchemaReferenceResource = z.infer<typeof versionSchemaReferenceSchema>
+export type PublicationEventResource = z.infer<typeof publicationEventSchema>
+export type PublicationEventPageResource = z.infer<typeof publicationEventPageSchema>
 export type CredentialSchemaDocumentResource = z.infer<typeof credentialSchemaDocumentSchema>
 export type VersionDiffResource = z.infer<typeof versionDiffSchema>
 export type VersionDiffChangeResource = z.infer<typeof versionDiffChangeSchema>
