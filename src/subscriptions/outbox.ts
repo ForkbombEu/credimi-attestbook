@@ -72,6 +72,18 @@ export const DEFAULT_WEBHOOK_OUTBOX_DISPATCH_CONCURRENCY = 4
 export const DEFAULT_WEBHOOK_OUTBOX_STATUS_LIMIT = 20
 export const MAX_WEBHOOK_OUTBOX_STATUS_LIMIT = 100
 
+/**
+ * Exponential-backoff ceiling for one claim number, before the 50–100 % jitter.
+ * The outbox bound validation and the dispatcher share this one formula.
+ */
+export function webhookBackoffCeilingMs(
+  attempts: number,
+  limits: Pick<WebhookOutboxLimits, 'baseBackoffMs' | 'maxBackoffMs'>,
+): number {
+  const exponent = Math.max(0, attempts - 1)
+  return Math.min(limits.maxBackoffMs, limits.baseBackoffMs * 2 ** exponent)
+}
+
 /** Resolves and validates the outbox bounds; every value is a positive integer. */
 export function resolveWebhookOutboxLimits(
   overrides: WebhookOutboxLimitOverrides = {},
@@ -122,6 +134,8 @@ export interface WebhookOutboxJob {
   readonly attempts: number
   readonly createdAt: string
   readonly nextAttemptAt: string
+  /** Attempt start before this claim, restored when an unattempted claim is released. */
+  readonly lastAttemptAt: string | null
 }
 
 /** Counts of one idempotent enqueue pass. */
@@ -189,6 +203,7 @@ function toJob(row: OutboxRow): WebhookOutboxJob {
     attempts: row.attempts,
     createdAt: row.created_at,
     nextAttemptAt: row.next_attempt_at,
+    lastAttemptAt: row.last_attempt_at,
   }
 }
 
@@ -441,41 +456,72 @@ export class WebhookOutboxStore {
     const nowMs = toMillis(now, 'now')
     const ageCutoff = new Date(nowMs - limits.maxAgeMs).toISOString()
     const leaseExpiresAt = new Date(nowMs + limits.leaseTtlMs).toISOString()
+    // The previous attempt start is not available from RETURNING (SQLite returns
+    // the new row), so read the candidates and update them under one immediate
+    // transaction. A released claim can then restore the exact prior value.
     return this.database
-      .query<
-        OutboxRow,
-        [string, string, string, string, string, string, string, number, number, string]
-      >(
-        `UPDATE webhook_delivery_outbox
-         SET lease_owner = ?, lease_expires_at = ?, attempts = attempts + 1,
-             last_attempt_at = ?, updated_at = ?
-         WHERE sequence IN (
-           SELECT sequence FROM webhook_delivery_outbox
-           WHERE status = 'pending'
-             AND next_attempt_at <= ?
-             AND created_at > ?
-             AND (lease_owner IS NULL OR lease_expires_at <= ?)
-             AND attempts < ?
-           ORDER BY next_attempt_at, sequence
-           LIMIT ?
-         )
-           AND status = 'pending'
-           AND (lease_owner IS NULL OR lease_expires_at <= ?)
-         RETURNING *`,
-      )
-      .all(
-        owner,
-        leaseExpiresAt,
-        now,
-        now,
-        now,
-        ageCutoff,
-        now,
-        limits.maxAttempts,
-        limits.batchSize,
-        now,
-      )
-      .map(toJob)
+      .transaction(() => {
+        const candidates = this.database
+          .query<
+            { sequence: number; last_attempt_at: string | null },
+            [string, string, string, number, number]
+          >(
+            `SELECT sequence, last_attempt_at FROM webhook_delivery_outbox
+             WHERE status = 'pending'
+               AND next_attempt_at <= ?
+               AND created_at > ?
+               AND (lease_owner IS NULL OR lease_expires_at <= ?)
+               AND attempts < ?
+             ORDER BY next_attempt_at, sequence
+             LIMIT ?`,
+          )
+          .all(now, ageCutoff, now, limits.maxAttempts, limits.batchSize)
+        if (candidates.length === 0) {
+          return []
+        }
+        const previousAttempt = new Map(
+          candidates.map((candidate) => [candidate.sequence, candidate.last_attempt_at]),
+        )
+        return this.database
+          .query<
+            OutboxRow,
+            [string, string, string, string, string, string, string, number, number, string]
+          >(
+            `UPDATE webhook_delivery_outbox
+             SET lease_owner = ?, lease_expires_at = ?, attempts = attempts + 1,
+                 last_attempt_at = ?, updated_at = ?
+             WHERE sequence IN (
+               SELECT sequence FROM webhook_delivery_outbox
+               WHERE status = 'pending'
+                 AND next_attempt_at <= ?
+                 AND created_at > ?
+                 AND (lease_owner IS NULL OR lease_expires_at <= ?)
+                 AND attempts < ?
+               ORDER BY next_attempt_at, sequence
+               LIMIT ?
+             )
+               AND status = 'pending'
+               AND (lease_owner IS NULL OR lease_expires_at <= ?)
+             RETURNING *`,
+          )
+          .all(
+            owner,
+            leaseExpiresAt,
+            now,
+            now,
+            now,
+            ageCutoff,
+            now,
+            limits.maxAttempts,
+            limits.batchSize,
+            now,
+          )
+          .map((row) => ({
+            ...toJob(row),
+            lastAttemptAt: previousAttempt.get(row.sequence) ?? null,
+          }))
+      })
+      .immediate()
   }
 
   /** True when a pending job is currently claimable, used to drain tests. */
@@ -496,16 +542,22 @@ export class WebhookOutboxStore {
     return row !== null
   }
 
-  /** Releases one claimed lease without recording an outcome (shutdown). */
-  releaseLease(sequence: number, owner: string, now: string): boolean {
+  /**
+   * Releases one claimed lease that was never attempted (shutdown): it clears
+   * the lease, gives back the attempt `claimDue` counted and restores the
+   * previous attempt instant, so a restart cannot spend an unsent attempt.
+   */
+  releaseLease(job: WebhookOutboxJob, owner: string, now: string): boolean {
     return (
       this.database
         .query(
           `UPDATE webhook_delivery_outbox
-           SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
+           SET lease_owner = NULL, lease_expires_at = NULL,
+               attempts = CASE WHEN attempts > 0 THEN attempts - 1 ELSE 0 END,
+               last_attempt_at = ?, updated_at = ?
            WHERE sequence = ? AND status = 'pending' AND lease_owner = ?`,
         )
-        .run(now, sequence, owner).changes > 0
+        .run(job.lastAttemptAt, now, job.sequence, owner).changes > 0
     )
   }
 

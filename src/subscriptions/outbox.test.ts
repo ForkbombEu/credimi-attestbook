@@ -241,6 +241,30 @@ function store(fixture: Fixture): WebhookOutboxStore {
   return new WebhookOutboxStore(fixture.database)
 }
 
+function outboxRows(fixture: Fixture): readonly {
+  readonly subscription_id: string
+  readonly status: string
+  readonly attempts: number
+  readonly lease_owner: string | null
+  readonly last_attempt_at: string | null
+}[] {
+  return fixture.database
+    .query<
+      {
+        subscription_id: string
+        status: string
+        attempts: number
+        lease_owner: string | null
+        last_attempt_at: string | null
+      },
+      []
+    >(
+      `SELECT subscription_id, status, attempts, lease_owner, last_attempt_at
+       FROM webhook_delivery_outbox ORDER BY sequence`,
+    )
+    .all()
+}
+
 describe('durable webhook outbox', () => {
   test('retries a transient 503 after the backoff and then retains the same event and subscriber', async () => {
     const fixture = createFixture()
@@ -667,6 +691,110 @@ describe('durable webhook outbox', () => {
     const status = outbox.listDeliveryStatus(registered.id, 10, 0)
     expect(status.total).toBe(1)
     expect(status.entries[0]).toMatchObject({ eventId: event.id, status: 'delivered' })
+  })
+
+  test('releasing an unattempted claim returns its attempt', async () => {
+    const fixture = createFixture()
+    const registered = await activeSubscription(fixture)
+    const event = fixture.publish('1.1')
+    const outboxStore = store(fixture)
+    const oneAttempt = limits({ maxAttempts: 1 })
+    outboxStore.enqueueForEvent(event, webhookSigningKeyId(SIGNING_KEY), fixture.now(), oneAttempt)
+
+    const claimed = outboxStore.claimDue(fixture.now(), oneAttempt, 'shutdown')
+    expect(claimed).toHaveLength(1)
+    const job = claimed[0]
+    if (job === undefined) {
+      throw new Error('the shutdown claim was not recorded')
+    }
+    expect(job.attempts).toBe(1)
+    expect(job.lastAttemptAt).toBeNull()
+    expect(outboxStore.releaseLease(job, 'shutdown', fixture.now())).toBe(true)
+
+    const pending = outboxStore.listStatusForSubscription(registered.id, 10, 0)
+    expect(pending.entries[0]).toMatchObject({
+      status: 'pending',
+      attempts: 0,
+      lastAttemptAt: null,
+    })
+    expect(pending.entries[0]?.nextAttemptAt).not.toBeNull()
+
+    // The attempt is claimable again and a single-attempt budget still delivers.
+    const recording = recordingTransport((request) => response(204, request))
+    const outbox = dispatcher(fixture, recording.transport, { maxAttempts: 1 })
+    await outbox.tick()
+    expect(recording.requests).toHaveLength(1)
+    const delivered = outbox.listDeliveryStatus(registered.id, 10, 0)
+    expect(delivered.entries[0]).toMatchObject({ status: 'delivered', attempts: 1 })
+  })
+
+  test('stop releases unstarted claims without spending attempts', async () => {
+    const fixture = createFixture()
+    for (let index = 0; index < 5; index += 1) {
+      await activeSubscription(
+        fixture,
+        `https://stop-${String(index)}.example.test/hook`,
+        `203.0.113.${String(40 + index)}`,
+      )
+    }
+    fixture.publish('1.1')
+    let releaseFirst = (): void => {}
+    const gate = new Promise<void>((resolve) => {
+      releaseFirst = resolve
+    })
+    let firstStartedResolve = (): void => {}
+    const firstStarted = new Promise<void>((resolve) => {
+      firstStartedResolve = resolve
+    })
+    let calls = 0
+    const gatedTransport: Http1Transport = async (request) => {
+      calls += 1
+      if (calls === 1) {
+        firstStartedResolve()
+      }
+      await gate
+      return response(204, request)
+    }
+
+    const outbox = dispatcher(fixture, gatedTransport, {
+      batchSize: 5,
+      dispatchConcurrency: 1,
+      maxAttempts: 1,
+    })
+    const tick = outbox.tick()
+    await firstStarted
+    const stop = outbox.stop()
+    releaseFirst()
+    await stop
+    await tick
+
+    expect(calls).toBe(1)
+    const blocked = outboxRows(fixture)
+    expect(blocked).toHaveLength(5)
+    expect(blocked.filter((row) => row.status === 'delivered')).toHaveLength(1)
+    const released = blocked.filter((row) => row.status === 'pending')
+    expect(released).toHaveLength(4)
+    for (const row of released) {
+      expect(row.attempts).toBe(0)
+      expect(row.lease_owner).toBeNull()
+      expect(row.last_attempt_at).toBeNull()
+    }
+
+    // A new process picks the released jobs up with their full attempt budget.
+    const restarted = dispatcher(
+      fixture,
+      recordingTransport((request) => response(204, request)).transport,
+      {
+        batchSize: 5,
+        dispatchConcurrency: 1,
+        maxAttempts: 1,
+      },
+    )
+    await restarted.tick()
+    const finished = outboxRows(fixture)
+    expect(finished.every((row) => row.status === 'delivered')).toBe(true)
+    expect(finished.every((row) => row.attempts === 1)).toBe(true)
+    expect(finished.some((row) => row.status === 'failed')).toBe(false)
   })
 
   test('bounds the outbox and exposes only sanitized delivery records', async () => {
