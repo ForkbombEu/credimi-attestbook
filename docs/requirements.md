@@ -35,7 +35,7 @@ split from the closed duplicates #15–#19.
 | FR-005 | Catalog synchronization: conditional fetch, idempotency, change detection, conflict reporting, availability | Phase 1 partial: #31; full sync later | Scheduled sync and source diagnostics are not an MVP dependency |
 | FR-006 | Issuer metadata discovery (OpenID4VCI) | Phase 3: #43 (discovery, association, ambiguity reporting) | Implemented in #43; manual mapping and persistence remain later slices; never authoritative for rulebooks |
 | FR-007 | Rulebook editor and authoring workflow | Phase 2: #40 (working-copy editor and live validation), #41 (lifecycle/diff), #91 (session-authenticated browser writes), #100 (hosted/external schema controls) | UI-003; not Phase 1; publication remains #42 |
-| FR-008 | Publication of validated, versioned, reproducible artifacts with provenance/integrity | Phase 1 subset: #29; full workflow Phase 2: #42; public discovery feed: #116; subscription follow and callback verification: #117, #118 | Where signing applies, use OWF behind the JOSE policy. #116 records exactly one public `rulebook.published` event per new publication, atomically with the publication transaction, and exposes it through an unauthenticated cursor-paginated feed that carries no provider, working-copy or audit data. #117 adds anonymous storage and private management of pending webhook subscriptions for already-published rulebooks. #118 verifies the callback through a bounded, SSRF-checked, redirect-free challenge handshake and activates the subscription only on the exact answer; it still delivers no event |
+| FR-008 | Publication of validated, versioned, reproducible artifacts with provenance/integrity | Phase 1 subset: #29; full workflow Phase 2: #42; public discovery feed: #116; subscription follow and callback verification: #117, #118 | Where signing applies, use OWF behind the JOSE policy. #116 records exactly one public `rulebook.published` event per new publication, atomically with the publication transaction, and exposes it through an unauthenticated cursor-paginated feed that carries no provider, working-copy or audit data. #117 adds anonymous storage and private management of pending webhook subscriptions for already-published rulebooks. #118 verifies the callback through a bounded, SSRF-checked, redirect-free challenge handshake and activates the subscription only on the exact answer. #119 dispatches one signed `rulebook.published` notification to each active, verified subscription after the publication transaction commits: the stored event id/type/rulebook/version/digest/timestamp are the body, the exact body plus timestamp and event id are signed with a per-subscription HMAC-SHA-256 secret derived from the deployment key, and the destination is re-resolved and pinned with redirects blocked, a five-second deadline and an 8 KiB response cap. A non-2xx answer, redirect, timeout or transport failure is a typed failure, never a success; retries/outbox/delivery status remain a separate issue (#120) |
 | FR-009 | Reusable validation API with structured results and evidence | Phase 1: #32, #33 | SD-JWT VC structural scope; per-dimension evidence and limitations added in #33 |
 | FR-010 | Eight independent validation dimensions | Phase 1: #33 | No dimension PASS without execution; applicability table in `docs/validation.md` §2 |
 | FR-011 | Credential format support, SD-JWT VC first, extensible interfaces | Phase 1: #32 (SD-JWT VC); later formats | mdoc explicitly `NOT_TESTED`, not mocked |
@@ -95,10 +95,11 @@ AttestBook is not, and Phase 1 does not claim to be:
 - an implementation of TS11 conformance, ETSI EN 319 482-3 conformance or interoperability
   without executed tests;
 - a home for proprietary fields inside standards-defined documents;
-- a webhook delivery service in Phase 1: #117 stores and manages pending subscription records,
-  and #118 verifies a callback and activates the subscription, but neither delivers an event.
-  No route retries a delivery or exposes delivery history, and no delivery guarantee is
-  claimed;
+- a durable or retrying webhook delivery service in Phase 1: #117 stores and manages pending
+  subscription records, #118 verifies a callback and activates the subscription, and #119
+  dispatches one signed publication notification per active, verified subscription. There is no
+  persisted outbox, retry, backoff or delivery-status endpoint yet, no route exposes delivery
+  history, and no delivery guarantee is claimed;
 - a production deployment or a high-availability/multi-region service in Phase 1.
 
 ## 2. Detailed requirements — catalog discovery and import

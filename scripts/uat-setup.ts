@@ -20,7 +20,7 @@
 // the production server and no production configuration reads it.
 
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { join, resolve } from 'node:path'
 
 import { openDatabase } from '../src/db/database'
@@ -55,6 +55,15 @@ const UAT_WRITER_TOKEN_LABEL = 'uat-writer-fixed-test-token'
  * public HTTPS origin. No request header can override it.
  */
 const UAT_PUBLIC_BASE_URL = 'http://127.0.0.1:3000'
+
+/**
+ * Disposable deployment key for publication webhook signing (#119). It is
+ * generated per sandbox setup, written only to the ignored `dist/uat/admin.env`
+ * with mode 0600 and reused by the supervisor across a restart, so derived
+ * per-subscription secrets stay stable. It is never a committed or production
+ * credential and is never returned by an API listing or log.
+ */
+const UAT_WEBHOOK_SIGNING_KEY = randomBytes(32).toString('base64url')
 
 /**
  * Test-only JSON Schema document seeded so the UAT can retrieve a registered
@@ -165,6 +174,7 @@ try {
     ['ADMIN_USERNAME', UAT_ADMIN_USERNAME],
     ['ADMIN_PASSWORD_HASH', passwordHash],
     ['ADMIN_PROVIDER_ID', administrator.provider.id],
+    ['SUBSCRIPTION_WEBHOOK_SIGNING_KEY', UAT_WEBHOOK_SIGNING_KEY],
   ]
 
   writeFileSync(

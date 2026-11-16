@@ -668,6 +668,21 @@ feature existed: an event records that this build observed a publication, so a f
 historical event would claim provenance the system never emitted. Only publications
 performed by a build that includes #116 append events.
 
+### 6.9 Publication webhook delivery
+
+Issue #119 maps a committed `rulebook.published` event to signed subscriber notifications. The
+publication route resolves the event back through `getPublicationEvent(rulebookId, version)` and
+enqueues delivery only after `publishRulebookVersion` returns, so no HTTP request runs inside the
+publication transaction and a subscriber failure cannot roll a publication back or delay the
+publish response. A global in-flight cap and a bounded in-memory queue bound the asynchronous
+work. Each active, verified subscription of that rulebook that was registered under the current
+deployment key receives one `POST` attempt whose body is the stored
+event projection (the same id, type, rulebook, exact frozen version label, artifact digest and
+publication timestamp the public feed serves) and whose signature is HMAC-SHA-256 over the exact
+body plus timestamp and event id. The per-subscription verification secret is derived from the
+deployment key, so it is not part of registry state. The notification never carries the
+rulebook's working copy or any provider-internal data. See [`docs/api.md`](api.md) §3.15.2.
+
 ## 7. Validation and failure model
 
 Inputs are validated and bounded before SQL: non-empty trimmed text, maximum lengths, JSON

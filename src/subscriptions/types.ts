@@ -28,9 +28,15 @@ export interface Subscription {
   readonly updatedAt: string
 }
 
-/** Registration result: the plaintext management token is returned exactly once. */
+/**
+ * Registration result: the plaintext management token is returned exactly
+ * once. When the deployment configured a webhook signing key, the derived
+ * webhook verification secret is returned exactly once as well; it is never
+ * part of a readable subscription projection.
+ */
 export interface RegisteredSubscription extends Subscription {
   readonly managementToken: string
+  readonly webhookSecret?: string
 }
 
 /** Stored subscription, including the secret material the service needs. */
@@ -47,6 +53,13 @@ export interface SubscriptionRecord extends Subscription {
   readonly verificationAttempts: number
   /** Instant the callback proved control, or `null` while unverified. */
   readonly verifiedAt: string | null
+  /**
+   * Non-secret fingerprint of the deployment key this subscription was
+   * registered under (#119), or `null` when delivery was disabled at
+   * registration. A row is delivery-eligible only while this matches the
+   * current deployment key; the derived secret itself is never stored.
+   */
+  readonly webhookKeyId: string | null
 }
 
 /** The bounded rulebook facts the subscription service needs. */
@@ -120,6 +133,12 @@ export interface SubscriptionServiceOptions {
    * server wiring; the local UAT start script enables it explicitly.
    */
   readonly allowLoopbackHttp?: boolean
+  /**
+   * Deployment key used to derive the subscriber's webhook verification secret
+   * (#119). When absent, registration issues no webhook secret and delivery is
+   * disabled; the service never invents a fallback key.
+   */
+  readonly webhookSigningKey?: Buffer | null
   /** Injectable DNS resolver for callback verification; tests use a fake. */
   readonly resolveCallbackHostname?: CallbackHostResolver
   /** Injectable callback transport; tests use an offline fake. */

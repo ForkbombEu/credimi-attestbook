@@ -2,6 +2,7 @@ import { dirname, join, resolve } from 'node:path'
 
 import { parsePublicBaseUrl } from './public-urls'
 import { SANDBOX_TEMP_DIRECTORY_NAME, defaultSandboxTempBase } from './sandbox-temp'
+import { parseWebhookSigningKey } from './subscriptions/delivery'
 
 export interface AppConfig {
   readonly hostname: string
@@ -39,6 +40,12 @@ export interface AppConfig {
    * permits a DNS name to resolve to a non-public address.
    */
   readonly subscriptionsAllowLoopbackHttp: boolean
+  /**
+   * Deployment key used to derive per-subscription webhook verification secrets
+   * and sign publication notifications (#119), or `null` when delivery is not
+   * configured. It is never generated at runtime and never returned by the API.
+   */
+  readonly subscriptionWebhookSigningKey: Buffer | null
 }
 
 export const DEFAULT_HOSTNAME = '127.0.0.1'
@@ -159,5 +166,6 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): A
       DEFAULT_VALIDATION_CACHE_MAX_MB,
     ),
     subscriptionsAllowLoopbackHttp: booleanFlag(env, 'SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP'),
+    subscriptionWebhookSigningKey: parseWebhookSigningKey(env.SUBSCRIPTION_WEBHOOK_SIGNING_KEY),
   }
 }

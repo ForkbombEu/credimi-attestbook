@@ -175,13 +175,27 @@ own management credential, deliberately separate from provider authentication:
   challenge; the comparison is constant-time and an unknown id performs the same hash work. A
   revoked subscription answers `404` only to its own token holder.
 - **Verification is explicit and bounded.** Registration and management never resolve or
-  contact the callback host. `POST /api/v1/subscriptions/{id}/verify` is the only outbound
-  subscription request, and only the management-token holder can initiate it. Each initiation
-  mints a fresh single-use challenge (stored only as its SHA-256 hash) and charges a durable
-  per-subscription attempt window (five initiations per ten minutes by default); exceeding it
-  answers `429` with `Retry-After`. A concurrent handshake for the same subscription answers
-  `409 conflict` instead of minting a second challenge. A challenge and an attempt are consumed
-  by any outcome other than success.
+  contact the callback host. `POST /api/v1/subscriptions/{id}/verify` is the only
+  subscriber-initiated outbound request, and only the management-token holder can initiate it.
+  Each initiation mints a fresh single-use challenge (stored only as its SHA-256 hash) and
+  charges a durable per-subscription attempt window (five initiations per ten minutes by
+  default); exceeding it answers `429` with `Retry-After`. A concurrent handshake for the same
+  subscription answers `409 conflict` instead of minting a second challenge. A challenge and an
+  attempt are consumed by any outcome other than success.
+- **Publication delivery is derived, signed and asynchronous.** A new publication enqueues one
+  signed `POST` attempt for each active, verified subscription of its rulebook that was
+  registered under the current deployment key (§2.4), and the publish response returns without
+  waiting on a callback. A global in-flight cap and a bounded in-memory queue bound the work;
+  attempts beyond the queue are dropped with a count-only warning and queued work is lost on
+  restart. Each subscription's verification secret is derived with HMAC-SHA-256 from the
+  deployment-configured `SUBSCRIPTION_WEBHOOK_SIGNING_KEY` and its id, so it is stable across
+  restarts, independent per subscription and never stored; only the derived secret is returned,
+  once, by registration, and the row keeps a truncated non-secret key fingerprint. The exact
+  body plus timestamp and event id are signed with HMAC-SHA-256 under that secret
+  (`X-AttestBook-Signature: v1=<hex>`), so a callback can verify authenticity and integrity. A
+  missing key disables delivery and issues no secret instead of falling back to a generated or
+  committed one; a malformed key fails at startup. Rotating the key invalidates every issued
+  secret, so it is a deployment-stable secret.
 - **Deletion is a revocation, not a hard delete.** The row and its token binding are retained,
   so a repeated authenticated delete is an idempotent `204`, while the state change removes
   delivery eligibility immediately. A revoked row can never return to `pending` or `active`
@@ -215,9 +229,43 @@ enforce:
   accepted only when `SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP=1`, which the production wiring leaves
   unset and the local UAT start script sets for a disposable callback server. Even then a DNS
   name may not resolve to loopback, so the flag cannot turn a hostname into an SSRF primitive.
-- **No delivery yet.** Activation makes the record delivery eligible in the data model, but no
-  delivery worker exists. A future worker must reuse this resolver and transport unchanged at
-  delivery time instead of trusting the registration-time check.
+- **Delivery repeats every check.** A publication notification resolves and validates the stored
+  callback again at send time, refuses a non-public answer, pins the connection, never follows a
+  redirect and applies the same five-second deadline and 8 KiB response cap. A delivery failure
+  is typed (`blocked_target`, `dns_failure`, `network_failure`, `timeout`, `redirect_not_followed`,
+  `response_too_large`, `unexpected_status`) and never a success. Delivery is asynchronous and
+  one attempt in this slice, bounded by a global in-flight cap and a bounded in-memory queue;
+  there is no persisted queue, retry loop or delivery-status endpoint yet.
+
+### 2.4 Publication webhook signing
+
+A subscriber must be able to prove that a notification came from AttestBook and that its body
+was not altered. The delivery contract is defined in [`docs/api.md`](api.md) §3.15.2:
+
+- **One derived secret per subscription.** `SUBSCRIPTION_WEBHOOK_SIGNING_KEY` is the deployment
+  key; the secret is `HMAC-SHA-256(key, "attestbook.subscription.webhook-secret@1\n" + id)`
+  rendered as `atw_` + base64url. It is a 256-bit key per subscription, stable across restarts
+  and independent across subscriptions. Nothing is stored, so the database contains no
+  plaintext secret and a dump cannot forge a notification. Each row stores only a truncated
+  HMAC fingerprint of the deployment key (`webhook_key_id`), which is neither the key nor the
+  secret and cannot be reversed; delivery selects only rows whose fingerprint matches the
+  current key, so subscriptions registered without a key or under a rotated key are never sent
+  a notification they cannot verify. A missing key disables delivery and issues no secret, never
+  a generated fallback; a malformed key fails at startup.
+- **Exact-body signature.** The canonical input is the versioned context line, the delivery
+  timestamp, the event id and the lowercase hex SHA-256 of the exact request body, joined by a
+  single LF. `HMAC-SHA-256` of that input is sent as `X-AttestBook-Signature: v1=<hex>` together
+  with `X-AttestBook-Event-Id`, `X-AttestBook-Event-Type` and `X-AttestBook-Timestamp`.
+  `verifyWebhookSignature` compares in constant time; the fixed vector in `docs/api.md` pins the
+  contract. A subscriber should also apply a small clock tolerance to the timestamp.
+- **Bounded, public event data only.** The body is the stored event projection bounded to
+  16 KiB: id, format, type, rulebook id, exact immutable version label, content digest and
+  publication timestamp. It never contains draft content, provider identity, credentials,
+  personal data or audit metadata.
+- **One attempt, no false success.** A `2xx` answer is success; a `3xx`, another status, a
+  timeout, an unreachable endpoint or an oversized response is a typed failure. Subscriber
+  failures never change the publication response, and the event stays on the public feed for
+  reconciliation. Retry, outbox and delivery status are a separate issue.
 
 ## 3. Authorization and provider ownership
 
@@ -270,7 +318,7 @@ The following rules implement that model:
 | `PUT /api/v1/rulebooks/{id}/draft` | bearer or session+CSRF | Actor must own the stored rulebook and its working copy must be `draft` | `401`; `403` when foreign; `409 immutable` for published/historical; `400` for invalid input |
 | `POST /api/v1/rulebooks/validate-draft` | no | Read-only, pure validation; writes nothing | `400` for a non-JSON body; `413` over the body limit |
 | `POST …/versions` | bearer or session+CSRF | Actor must own the stored rulebook | `401`; `403` when foreign; `409` for a duplicate label or immutable state |
-| `POST …/versions/{version}/publish` | bearer or session+CSRF | Actor must own the stored rulebook; ownership is checked before replay and version lookup | `401`; `403` when foreign; `404` only for the owner; `409` for stale or immutable state |
+| `POST …/versions/{version}/publish` | bearer or session+CSRF | Actor must own the stored rulebook; ownership is checked before replay and version lookup. After the transaction commits, one signed notification is sent to each active, verified subscription of the rulebook | `401`; `403` when foreign; `404` only for the owner; `409` for stale or immutable state; delivery failures never change the response |
 | `POST /api/v1/imports/preview` | bearer or session+CSRF | No write; the token gates the outbound fetch | `401`; `400`/`422`/`502` for the source |
 | `POST /api/v1/imports` | bearer or session+CSRF | Import identity and created drafts are scoped to the actor's provider | `401`; `422` for a refused source |
 | `POST /api/v1/issuers/discover` | bearer or session+CSRF | No write and no stored issuer state; the token gates the bounded outbound fetch | `401`; `400`/`422`/`502` for the URL or metadata |
@@ -280,7 +328,7 @@ The following rules implement that model:
 | `POST /api/v1/rulebooks/{id}/subscriptions` | no | Anonymous pending registration for an existing rulebook with a published/historical version; stores only a normalized callback URL, a random id and a hashed management token; no outbound request | `400` for an unsafe/malformed URL; `404` for an unknown rulebook; `409` for an unpublished rulebook or the per-rulebook bound; `413`/`429` |
 | `GET /api/v1/subscriptions/{id}` | subscription token | Returns that one subscription's callback URL and state; never a token/hash or another subscriber's data | `401` uniformly for a missing/invalid/foreign token or unknown id; `404` for a revoked one |
 | `DELETE /api/v1/subscriptions/{id}` | subscription token | Revokes that one subscription immediately and idempotently; writes no registry data | `401` uniformly for a missing/invalid/foreign token or unknown id |
-| `POST /api/v1/subscriptions/{id}/verify` | subscription token | Explicitly proves control of that one callback and activates the subscription; the only outbound subscription request, bounded and pinned | `401` uniformly for a missing/invalid/foreign token or unknown id; `404` for a revoked record; `409`/`502`/`429` for a failed, unreachable or over-bound handshake |
+| `POST /api/v1/subscriptions/{id}/verify` | subscription token | Explicitly proves control of that one callback and activates the subscription; the only subscriber-initiated outbound request, bounded and pinned | `401` uniformly for a missing/invalid/foreign token or unknown id; `404` for a revoked record; `409`/`502`/`429` for a failed, unreachable or over-bound handshake |
 
 Every row marked `bearer or session+CSRF` accepts exactly one of the two credentials; the
 session path adds the CSRF header but not a wider authority, so the ownership rule and the
@@ -392,6 +440,12 @@ and verification routes answer `401` without the provider bearer challenge.
   it is returned only to the holder of that subscription's token and is never logged. No IP
   address, forwarding header or provider identity is stored with a subscription; the
   per-client registration quota keeps only a bounded in-memory socket-address key.
+- Webhook verification secrets follow the derived-secret rule (§2.4): they are computed from
+  `SUBSCRIPTION_WEBHOOK_SIGNING_KEY` and the subscription id, returned exactly once by
+  registration, never stored, never returned by a readable projection, and never logged or
+  echoed in an error. The deployment key itself is supplied only through the environment, never
+  committed, and is never part of an API response. Delivery signatures are sent only in the
+  `X-AttestBook-Signature` request header to the subscriber's callback.
 - Request headers, bodies and URLs are not logged by the HTTP pipeline. The only request-scoped
   server log is the unhandled-error record in `src/app.ts`, which contains the method, path and
   error class name — never headers, payloads, exception messages or stacks.
@@ -458,14 +512,20 @@ trail is not exposed over HTTP; it is read by operators from the database.
   attempt window are time-bounded. The per-subscription attempt window is a service-level
   read-then-update, so a multi-process deployment could race it; the activation transition
   itself is guarded by a conditional update on the stored challenge hash.
-- **Subscriptions verify and activate but deliver nothing.** Registration stays `pending` until
-  an explicit, management-token authenticated `POST …/verify` proves control of the callback;
-  activation is final apart from revocation. No route delivers a publication event, retries a
-  delivery or exposes delivery history, so "active" only means delivery eligible in the data
-  model. Deleting a subscription revokes it immediately, but no delivery path exists yet to
-  observe that. A future delivery worker must reuse the verification-time resolver and pinned
-  transport, not trust the registration-time check.
-- **No token expiry or rotation policy.** Tokens are revoked explicitly and provider-scoped.
+- **Delivery is asynchronous, one attempt and not yet durable.** A publication enqueues one
+  signed POST per eligible subscription after the transaction commits, but there is no
+  persisted outbox, retry, backoff or delivery-status endpoint in this slice, and queued or
+  still-running attempts are not recovered after a restart. A global in-flight cap and a
+  bounded in-memory queue limit the work, and attempts beyond the queue are dropped. A failed
+  attempt is not retried; the subscriber reconciles through the public event feed. Delivery
+  reuses the verification resolver and pinned transport at send time rather than trusting the
+  registration-time check. Deleting a subscription ends eligibility immediately, and the
+  delivery component re-reads the row before contacting it, so a revocation between listing and
+  sending is not delivered. A subscription registered without the key, or under a key that has
+  since been rotated, is never contacted; it must re-register under the current key.
+- **No token expiry or rotation policy.** Tokens and the deployment webhook signing key are
+  rotated only by changing configuration; a key rotation invalidates previously issued webhook
+  secrets.
 - **No fine-grained scopes or roles.** Every token of a provider has the provider's full write
   authority; there are no read-only or per-rulebook tokens.
 - **Single administrator, no MFA or password change endpoint.** The administrator is one
@@ -628,4 +688,6 @@ trail is not exposed over HTTP; it is read by operators from the database.
 - [Issue #117](https://github.com/ForkbombEu/credimi-attestbook/issues/117) for anonymous
   webhook subscription registration and management
 - [Issue #118](https://github.com/ForkbombEu/credimi-attestbook/issues/118) for callback
-  verification, activation and callback network-safety validation (no event delivery)
+  verification, activation and callback network-safety validation
+- [Issue #119](https://github.com/ForkbombEu/credimi-attestbook/issues/119) for signed,
+  single-attempt publication webhook delivery

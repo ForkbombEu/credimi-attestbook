@@ -26,6 +26,7 @@ import {
   isSubscriptionError,
 } from './errors'
 import { resolveSubscriptionLimits } from './limits'
+import { deriveSubscriptionWebhookSecret, webhookSigningKeyId } from './delivery'
 import {
   SubscriptionRegistrationLimiter,
   normalizeSubscriptionClientKey,
@@ -98,6 +99,8 @@ export class SubscriptionService {
   private readonly generateManagementToken: () => string
   private readonly generateChallenge: () => string
   private readonly allowLoopbackHttp: boolean
+  private readonly webhookSigningKey: Buffer | null
+  private readonly webhookKeyId: string | null
   private readonly resolveCallbackHostname: CallbackHostResolver | undefined
   private readonly verificationTransport: Http1Transport
   private readonly limits: SubscriptionLimits
@@ -112,6 +115,9 @@ export class SubscriptionService {
       options.generateManagementToken ?? generateSubscriptionManagementToken
     this.generateChallenge = options.generateChallenge ?? generateSubscriptionChallenge
     this.allowLoopbackHttp = options.allowLoopbackHttp ?? false
+    this.webhookSigningKey = options.webhookSigningKey ?? null
+    this.webhookKeyId =
+      this.webhookSigningKey === null ? null : webhookSigningKeyId(this.webhookSigningKey)
     this.resolveCallbackHostname = options.resolveCallbackHostname
     this.verificationTransport =
       options.verificationTransport ?? createSubscriptionVerificationTransport()
@@ -168,9 +174,22 @@ export class SubscriptionService {
         verificationWindowStartedAt: null,
         verificationAttempts: 0,
         verifiedAt: null,
+        webhookKeyId: this.webhookKeyId,
       }
       this.store.insert(record)
-      return { ...publicProjection(record), managementToken }
+      // The derived secret is a function of the deployment key and the
+      // subscription id, so it is stable across restarts and never stored. It
+      // is returned once here, exactly like the management token; no readable
+      // subscription projection ever carries it.
+      return {
+        ...publicProjection(record),
+        managementToken,
+        ...(this.webhookSigningKey === null
+          ? {}
+          : {
+              webhookSecret: deriveSubscriptionWebhookSecret(this.webhookSigningKey, record.id),
+            }),
+      }
     } catch (error) {
       // The registration was not stored, so its quota slot must not be spent.
       this.limiter.release(clientKey, reservation.token)

@@ -956,8 +956,9 @@ add a `hostedSchema` member to every reference (issue #103):
 a rulebook's publications without an AttestBook account, provider bearer token, browser
 session or CSRF token. Publishing and editing rulebooks remain authenticated exactly as before.
 Registration only stores a `pending` subscription and **never contacts the callback host**;
-an explicit verification request (§3.15.1) is the only operation that contacts it, and nothing
-delivers an event yet.
+an explicit verification request (§3.15.1) activates it, and publishing a new version then
+dispatches one signed `rulebook.published` notification to each active, verified subscriber
+(§3.15.2).
 
 Request body (unknown members are ignored):
 
@@ -1014,7 +1015,8 @@ Success is `201` with a `Location` header and one `RegisteredSubscription`:
     "state": "pending",
     "createdAt": "2026-01-01T00:00:00.000Z",
     "updatedAt": "2026-01-01T00:00:00.000Z",
-    "managementToken": "ats_<opaque token>"
+    "managementToken": "ats_<opaque token>",
+    "webhookSecret": "atw_<derived secret>"
   }
 }
 ```
@@ -1025,12 +1027,25 @@ a usable management credential. The registered state is `pending` and therefore 
 eligible; `POST /api/v1/subscriptions/{subscriptionId}/verify` proves control of the callback
 and activates it.
 
+`webhookSecret` is present only when the deployment configured
+`SUBSCRIPTION_WEBHOOK_SIGNING_KEY`. It is derived with HMAC-SHA-256 from that deployment key and
+the subscription id, so it is stable across restarts and independent per subscription, and it is
+never stored in the database. It is returned once here, exactly like the management token, and
+never appears in a readable subscription projection, an error or a log. The subscription row
+stores only a truncated, non-secret fingerprint of the deployment key it was registered under,
+so delivery can tell whether the subscriber was ever given the current secret. A deployment
+without the key performs no publication delivery and issues no secret instead of falling back to
+a generated or committed key; the server logs a warning at startup. A subscription registered
+without a key, or under a key that has since changed, is never contacted and cannot be made
+verifiable retroactively; the subscriber re-registers under the current key.
+
 `GET /api/v1/subscriptions/{subscriptionId}` and
 `DELETE /api/v1/subscriptions/{subscriptionId}` require the per-subscription management token
 as `Authorization: Bearer <managementToken>`. A provider bearer token, the administrator
 session cookie and every other credential have no authority on these routes:
 
-- `GET` returns the same public fields without `managementToken` (and without the stored hash).
+- `GET` returns the same public fields without `managementToken` or `webhookSecret` (and without
+  the stored token hash).
   It is the only way to read the subscriber's own normalized callback URL. Any missing,
   malformed, invalid or foreign token and any unknown subscription id answer the same `401`
   `unauthorized`, so the response does not disclose whether another subscriber's id exists. A
@@ -1040,10 +1055,11 @@ session cookie and every other credential have no authority on these routes:
   delete with the same valid token answers `204` again (idempotent). An unknown id or an
   invalid token still answers `401`, and no other credential can revoke the record.
 
-Neither route returns a token, a token hash, a client address or provider ownership data.
-Both set `Cache-Control: no-store`, as does the registration response because it carries a
-one-time secret. Raw management tokens are never logged or written to an error message. See
-[`docs/security.md`](security.md) §3.1, §6 and §8 for the credential and residual-risk model.
+Neither route returns a token, a token hash, a webhook secret, a client address or provider
+ownership data. Both set `Cache-Control: no-store`, as does the registration response because it
+carries one-time secrets. Raw management tokens and webhook secrets are never logged or written
+to an error message. See [`docs/security.md`](security.md) §2.2, §2.4, §6 and §8 for the
+credential and residual-risk model.
 
 ### 3.15.1 Callback verification and activation
 
@@ -1113,14 +1129,107 @@ Failures keep the subscription `pending` and carry a stable reason:
 No error message contains the challenge, the management token or its hash. Activation is
 final apart from revocation: the database requires `verified_at` for an `active` row and
 forbids it on a `pending` one, and an activated row can only become `revoked`. Activation
-makes the subscription delivery eligible in the data model, but this API still delivers no
-event.
+makes the subscription eligible for publication notifications (§3.15.2).
 
 The local UAT environment enables the test-loopback opt-in through
 `SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP=1` in `scripts/uat-start.sh`, so a scenario can run a
 disposable callback server on `127.0.0.1` over plain `http`. A subscriber can register such a
 URL there, then call the verification route with its management token. Production does not set
 the flag, so only public HTTPS callbacks are accepted and contacted.
+
+### 3.15.2 Signed publication notifications
+
+When a provider publishes a new rulebook version, the durable `rulebook.published` event
+(§3.4.1) is mapped to exactly one JSON notification attempt per **active, verified** subscription
+of the same rulebook that was registered under the current deployment key. Pending, revoked,
+unrelated-rulebook and stale-key rows are never contacted, and nothing is delivered for drafts,
+refreshes, failed publications or an idempotent re-publish of an already-published version. The
+dispatch happens only after the publication transaction commits; no outbound request runs inside
+it.
+
+Delivery is asynchronous: the publish response returns as soon as the attempts are enqueued,
+and it never waits for, or changes because of, a subscriber callback. A global in-flight cap
+(four by default) bounds concurrent outbound requests across all events, and the in-memory queue
+is bounded (10,000 attempts by default); attempts beyond the queue are dropped with a count-only
+server warning that contains no URL or secret. Queued work is lost on restart. This slice makes
+one attempt per event and subscription, with no retry, durable outbox or persisted delivery
+status (a separate issue owns those, #120), so a missed notification is reconciled through the
+public event feed.
+
+The notification body is the stored event projection, so its `id` is the same stable event id
+`GET /api/v1/rulebooks/{rulebookId}/events` serves:
+
+```json
+{
+  "id": "<stored event id>",
+  "format": "attestbook.rulebook-publication-event@1",
+  "type": "rulebook.published",
+  "rulebookId": "<rulebook id>",
+  "version": "1.0.1",
+  "contentDigest": "<64 lowercase hex characters>",
+  "publishedAt": "2026-01-01T00:00:00.000Z"
+}
+```
+
+The body is bounded to 16 KiB and carries no draft content, provider identity, credential or
+audit metadata. A delivery POST uses these headers:
+
+| Header | Value |
+| --- | --- |
+| `Content-Type` | `application/json` |
+| `X-AttestBook-Event-Id` | the stored event id |
+| `X-AttestBook-Event-Type` | `rulebook.published` |
+| `X-AttestBook-Timestamp` | the delivery timestamp, ISO 8601 |
+| `X-AttestBook-Signature` | `v1=<lowercase hex HMAC-SHA-256>` |
+
+The signature commits to the exact body plus the timestamp and event id. The canonical signing
+input is UTF-8 with a single LF between four lines and no trailing newline:
+
+```text
+attestbook.webhook-signing-input@1
+<X-AttestBook-Timestamp>
+<X-AttestBook-Event-Id>
+<lowercase hex SHA-256 of the exact request body bytes>
+```
+
+`X-AttestBook-Signature` is `v1=` followed by `HMAC-SHA-256(webhookSecret, canonicalInput)` in
+lowercase hex. A verifier must compare it in constant time and should reject a timestamp outside
+a small tolerance window; the event id duplicates the body id so it can be used as a
+deduplication key even before parsing. `verifyWebhookSignature` in
+`src/subscriptions/delivery.ts` is the reference implementation.
+
+Fixed test vector (not a production secret):
+
+```text
+deployment key (UTF-8, 32 bytes): 0123456789abcdef0123456789abcdef
+subscription id:                  subscription-vector-1
+webhook secret:                   atw_vIq7G8hzcwa9GKj68f2X2oYNzSGoDb1D_14l3zDjyT4
+event id:                         event-vector-1
+timestamp:                        2026-01-01T00:00:00.000Z
+body:                             {"id":"event-vector-1","format":"attestbook.rulebook-publication-event@1","type":"rulebook.published","rulebookId":"rulebook-vector","version":"1.0.1","contentDigest":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","publishedAt":"2026-01-01T00:00:00.000Z"}
+canonical signing input:          attestbook.webhook-signing-input@1
+                                  2026-01-01T00:00:00.000Z
+                                  event-vector-1
+                                  bbbdcc887cc99b8977e2475dd4c01f4a300726175dfda68011b9affa6e33b6a6
+signature header:                 v1=380592345e511699613ac27b3c6caf870fea8948c21e676652945021de963ed0
+```
+
+A callback that answers any `2xx` status is a successful delivery regardless of its body. A
+`3xx` answer is a `redirect_not_followed` failure and is never followed; another status is an
+`unexpected_status` failure; an unreachable destination, timeout or oversized response is a
+typed `dns_failure`, `network_failure`, `timeout`, `blocked_target` or `response_too_large`
+failure. A failure is never reported as success and never delays or changes the publication response.
+The destination is re-validated and resolved at send time exactly like verification (§3.15.1):
+every resolved answer must be public, the connection is pinned to the validated address,
+redirects are never followed, and the lookup, connection and request share a five-second
+deadline with an 8 KiB response cap. Deliveries the subscriber misses can be reconciled through
+the public event feed.
+
+`SUBSCRIPTION_WEBHOOK_SIGNING_KEY` is an unpadded base64url string of at least 32 bytes. It must
+stay stable for the deployment, because a changed or rotated key changes every derived webhook
+secret and invalidates previously issued ones; subscriptions bound to an earlier key are skipped
+rather than sent notifications they cannot verify. The key is never returned by the API or
+logged.
 
 ## 4. Errors
 
@@ -1365,16 +1474,18 @@ in [`docs/ui.md`](ui.md).
   redirect and fan-out limits still apply to every call. General rate limiting,
   token expiry/rotation and provider-administration routes remain future hardening work
   documented in [`docs/security.md`](security.md) §8.
-- Webhook subscriptions verify and activate but do not deliver. The verification handshake
-  activates a subscription only after the callback answers the exact challenge, but no route
-  delivers a publication event, retries a delivery or exposes delivery history. Delivery-time
-  network safety lives in the same verified target/transport helpers and must be reused
-  unchanged by the eventual delivery worker; activation is the delivery-eligibility state.
-  The registration quota is in-process, resets on restart and is keyed per IPv4 address or
-  IPv6 /64; behind a reverse proxy all clients share the proxy socket address because
-  forwarding headers are deliberately not trusted. The verification attempt window and the
-  challenge expiry are durable, but subscriptions themselves never expire and there is no
-  operator cleanup, so a full per-rulebook bound stays full until subscribers revoke rows.
+- Webhook deliveries are one attempt per event and subscription, with no retry, durable outbox,
+  exponential backoff or delivery-status endpoint yet. Delivery is enqueued after the
+  publication transaction commits, is bounded by a global in-flight cap and a bounded
+  in-memory queue, and uses the same verified target/transport helpers as verification
+  (§3.15.2). Attempts beyond the queue are dropped, and queued work is lost on restart. A
+  subscriber that misses a notification reconciles through the public event feed; durable retry
+  and recovery are tracked separately. The registration quota is in-process,
+  resets on restart and is keyed per IPv4 address or IPv6 /64; behind a reverse proxy all
+  clients share the proxy socket address because forwarding headers are deliberately not
+  trusted. The verification attempt window and the challenge expiry are durable, but
+  subscriptions themselves never expire and there is no operator cleanup, so a full
+  per-rulebook bound stays full until subscribers revoke rows.
 - The administrator login is one environment-configured account with no MFA, self-service
   password change or account management API; rotating the password means changing
   `ADMIN_PASSWORD_HASH` and restarting. The failure limiter is in-process and resets on

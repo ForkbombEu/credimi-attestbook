@@ -66,7 +66,7 @@ import type {
 } from '../registry/types'
 import { CREDENTIAL_SCHEMA_KINDS } from '../registry/types'
 import { parseRulebookVersionDocument, type RulebookVersionDocument } from '../registry/versioning'
-import type { SubscriptionService } from '../subscriptions'
+import type { SubscriptionService, WebhookDeliveryService } from '../subscriptions'
 import {
   CREDENTIAL_VALIDATION_PATH,
   hostedSchemaDocumentId,
@@ -917,7 +917,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: '/api/v1/rulebooks/:rulebookId/versions/:version/publish',
     summary: 'Publish a draft version',
     description:
-      'Authenticated publication of the owning provider’s draft version after proving its snapshot still matches the current content. Publishing the same already-published version again is an idempotent replay; historical versions cannot be republished.',
+      'Authenticated publication of the owning provider’s draft version after proving its snapshot still matches the current content. Publishing the same already-published version again is an idempotent replay; historical versions cannot be republished. After the publication transaction commits, one signed `rulebook.published` attempt is asynchronously enqueued for each `active`, verified subscription of the rulebook (see docs/api.md §3.15.2); the notification is signed with that subscription’s webhook secret and carries the same stable event ID as the public event feed. Delivery never delays or changes the publication response. A global in-flight cap and a bounded in-memory queue bound the work; excess attempts are dropped and queued work is lost on restart. One attempt is made per event without retries, a durable outbox or delivery status (#120).',
     tag: 'versions',
     security: true,
     parameters: pathParameters(['rulebookId', 'version']),
@@ -1336,7 +1336,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: '/api/v1/rulebooks/:rulebookId/subscriptions',
     summary: 'Register an anonymous webhook subscription',
     description:
-      'Registers one pending (inactive) webhook subscription for an existing rulebook that has a published or historical version. No AttestBook account, provider bearer token, session cookie or CSRF token is required, and publishing or editing rulebooks remains authenticated. The request must use `Content-Type: application/json`; any other content type answers 400, which prevents a cross-site HTML form or no-cors fetch from registering on a visitor’s behalf. The body carries only `callbackUrl`: an absolute `https` URL on a public host without embedded credentials or a fragment; a plain `http` loopback URL is accepted only by an opt-in local test configuration. The URL is validated and normalized before storage. The response returns the opaque `id`, the `pending` state and a one-time `managementToken`; only the token hash is stored, so the plaintext cannot be recovered later. Unknown rulebooks answer 404, invalid payloads 400 and a rulebook without a published version or at its subscription bound 409, without creating a record. Repeated registrations from one client are bounded by an in-process quota that answers 429 with Retry-After. Registration performs no outbound request and starts no delivery.',
+      'Registers one pending (inactive) webhook subscription for an existing rulebook that has a published or historical version. No AttestBook account, provider bearer token, session cookie or CSRF token is required, and publishing or editing rulebooks remains authenticated. The request must use `Content-Type: application/json`; any other content type answers 400, which prevents a cross-site HTML form or no-cors fetch from registering on a visitor’s behalf. The body carries only `callbackUrl`: an absolute `https` URL on a public host without embedded credentials or a fragment; a plain `http` loopback URL is accepted only by an opt-in local test configuration. The URL is validated and normalized before storage. The response returns the opaque `id`, the `pending` state and a one-time `managementToken`; only the token hash is stored, so the plaintext cannot be recovered later. When the deployment configured `SUBSCRIPTION_WEBHOOK_SIGNING_KEY`, the response also carries the derived `webhookSecret` exactly once; it is never part of a readable subscription projection and is what signs delivered notifications. The row keeps only a truncated non-secret fingerprint of that deployment key, so a subscription registered without the key or under a key that later changes is never contacted and must re-register. Unknown rulebooks answer 404, invalid payloads 400 and a rulebook without a published version or at its subscription bound 409, without creating a record. Repeated registrations from one client are bounded by an in-process quota that answers 429 with Retry-After. Registration performs no outbound request; publications are delivered only after the subscription is `active` and verified.',
     tag: 'subscriptions',
     security: false,
     parameters: [PATH_ID],
@@ -1459,6 +1459,11 @@ export interface ApiDependencies {
   readonly verifierPolicy?: VerifierPolicyService
   /** Anonymous webhook-subscription registration and management (#117). */
   readonly subscriptions?: SubscriptionService
+  /**
+   * Signed, single-attempt publication webhook delivery (#119). Absent keeps
+   * publication pure and makes no outbound request.
+   */
+  readonly webhookDelivery?: WebhookDeliveryService
   /** Environment-configured administrator browser login; absent means unavailable. */
   readonly adminAuth?: AdminAuth
   /**
@@ -2535,6 +2540,25 @@ function publishRulebookVersionHandler(dependencies: ApiDependencies): ApiHandle
     }
 
     const published = registry.publishRulebookVersion(actor, rulebookId, label)
+
+    // The publication transaction has committed. Delivery is enqueued after
+    // it, so no outbound request can hold a transaction lock, roll a
+    // publication back or delay this response. One signed attempt is made to
+    // every active, verified subscriber; excess attempts are dropped when the
+    // in-memory queue is full, and #120 owns durable retries and status.
+    const delivery = dependencies.webhookDelivery
+    if (delivery !== undefined) {
+      const event = registry.getPublicationEvent(rulebookId, label)
+      if (event !== null) {
+        try {
+          delivery.dispatchPublicationEvent(event)
+        } catch {
+          // Delivery is best effort in this slice. The event stays on the
+          // public feed for reconciliation and #120 will own durable retries.
+        }
+      }
+    }
+
     return context.json({ data: toRulebookVersionResource(published) }, 200)
   }
 }

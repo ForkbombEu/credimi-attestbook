@@ -155,9 +155,14 @@ export const subscriptionSchema = z.object({
   updatedAt: timestamp,
 })
 
-/** Registration result. The management token is returned exactly once. */
+/**
+ * Registration result. Both secrets are returned exactly once: the management
+ * token and, when publication delivery is configured, the webhook verification
+ * secret. Neither appears in a readable subscription projection again.
+ */
 export const registeredSubscriptionSchema = subscriptionSchema.extend({
   managementToken: z.string().min(1),
+  webhookSecret: z.string().min(1).optional(),
 })
 
 export const subscriptionResponseSchema = z.object({ data: subscriptionSchema })
