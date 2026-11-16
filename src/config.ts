@@ -1,3 +1,6 @@
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
+
 import { parsePublicBaseUrl } from './public-urls'
 
 export interface AppConfig {
@@ -17,6 +20,14 @@ export interface AppConfig {
   readonly schemaSandboxMaxRssMb: number
   /** Maximum number of concurrent schema-evaluation sandbox children. */
   readonly schemaSandboxConcurrency: number
+  /**
+   * Private writable base directory for the sandbox child's temporary and
+   * cache files. The launcher creates one per-child directory beneath it and
+   * removes it after the child exits; the child receives no other writable
+   * environment. It defaults to the database's directory so a read-only root
+   * filesystem still has a writable location. See `SANDBOX_TEMP_DIR`.
+   */
+  readonly schemaSandboxTempDir: string
   /** Maximum number of parsed immutable rulebook snapshots cached in-process. */
   readonly validationCacheMaxEntries: number
   /** Maximum total snapshot bytes cached in-process (MiB). */
@@ -51,6 +62,35 @@ function booleanFlag(env: Record<string, string | undefined>, name: string): boo
     return true
   }
   throw new Error(`invalid ${name} "${raw}": expected true or false`)
+}
+
+/** Name of the private sandbox scratch directory created under the data directory. */
+export const SANDBOX_TEMP_DIRECTORY_NAME = '.attestbook-sandbox'
+
+/**
+ * Resolves the writable base directory for sandbox children. A deployment may
+ * override it with `SANDBOX_TEMP_DIR`; otherwise it sits next to the SQLite
+ * database, which the documented container configuration already mounts
+ * writable (`/data`), so it also works under a read-only root filesystem.
+ * An in-memory database has no directory, so the private OS temporary
+ * directory is the only documented writable location left.
+ */
+export function resolveSchemaSandboxTempDir(
+  env: Record<string, string | undefined>,
+  databasePath: string,
+): string {
+  const raw = env.SANDBOX_TEMP_DIR?.trim() ?? ''
+  if (raw !== '') {
+    if (raw.includes('\0')) {
+      throw new Error('invalid SANDBOX_TEMP_DIR: expected a filesystem path')
+    }
+    return resolve(raw)
+  }
+  if (databasePath === ':memory:') {
+    return join(tmpdir(), SANDBOX_TEMP_DIRECTORY_NAME)
+  }
+  return join(dirname(resolve(databasePath)), SANDBOX_TEMP_DIRECTORY_NAME)
+}
 }
 
 function positiveInteger(
@@ -111,6 +151,7 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): A
       'SCHEMA_SANDBOX_CONCURRENCY',
       DEFAULT_SCHEMA_SANDBOX_CONCURRENCY,
     ),
+    schemaSandboxTempDir: resolveSchemaSandboxTempDir(env, databasePath),
     validationCacheMaxEntries: positiveInteger(
       env,
       'VALIDATION_CACHE_MAX_ENTRIES',

@@ -3,6 +3,9 @@ node_modules/
 dist/
 coverage/
 
+# Local sandbox scratch directory (defaults to the database directory)
+.attestbook-sandbox/
+
 # Local configuration and secrets
 .env
 .env.*

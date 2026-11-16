@@ -408,7 +408,9 @@ to `http://localhost:3000` for local use only. The server opens the SQLite datab
 at startup; the image stores it at `/data/attestbook.sqlite` and Compose mounts a named volume
 there. CI builds the image, starts a container and verifies the `/health`, the built catalog
 page at `/`, the empty rulebook-catalogue and unknown-route API round-trips, so the image is
-exercised on every pull request.
+exercised on every pull request. A second container runs as the non-root `bun` user with a
+read-only root filesystem and registers a JSON Schema through the authenticated API, which
+also exercises the schema sandbox's private temporary directory.
 
 ## Configuration
 
@@ -421,6 +423,7 @@ exercised on every pull request.
 | `SCHEMA_SANDBOX_TIMEOUT_MS`         | `2000`              | Hard wall-clock limit for one schema-evaluation child                                                 |
 | `SCHEMA_SANDBOX_MAX_RSS_MB`         | `256`               | RSS limit for one schema-evaluation child                                                             |
 | `SCHEMA_SANDBOX_CONCURRENCY`        | `2`                 | Maximum concurrent schema-evaluation children                                                         |
+| `SANDBOX_TEMP_DIR`                  | database directory  | Base for each child's private scratch directory; used as-is                                           |
 | `VALIDATION_CACHE_MAX_ENTRIES`      | `64`                | Maximum parsed immutable rulebook snapshots cached in-process                                         |
 | `VALIDATION_CACHE_MAX_MB`           | `16`                | Maximum snapshot bytes cached in-process                                                              |
 | `ADMIN_USERNAME`                    | unset               | Browser administrator username; the group is all-or-nothing                                           |
@@ -431,6 +434,17 @@ exercised on every pull request.
 Local development binds loopback only. The Docker image and `compose.yaml` set
 `HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup
 instead of silently binding elsewhere.
+
+The schema and fixture sandboxes run in separate Bun processes. Each child receives one
+private, writable directory (mode `0700`) and an environment allowlist that points
+`BUN_TMPDIR`, `TMPDIR` and `HOME` at it; no other variable — and in particular no
+credential, token or database path — is inherited. The directory is removed after the
+child exits, and a directory that cannot be created is a controlled sandbox failure (a
+generic `500` on registration, `NOT_TESTED` evidence in validation) with only a sanitized
+`schema sandbox child failure` server log line. `SANDBOX_TEMP_DIR` defaults to
+the database's directory (`.attestbook-sandbox`), which is the documented writable volume
+of the container; that keeps the sandbox working when the image runs with a read-only root
+filesystem. For an in-memory database it falls back to the OS temporary directory.
 
 ## Hosted credential schema documents
 

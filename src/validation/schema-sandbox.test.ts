@@ -1,7 +1,15 @@
 import { describe, expect, test } from 'bun:test'
+import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { validateSchemaDocuments } from './schema-sandbox'
+import {
+  SANDBOX_CHILD_ENVIRONMENT_KEYS,
+  runSandboxChild,
+  runSchemaSandbox,
+  validateSchemaDocuments,
+} from './schema-sandbox'
 import { parseSdJwtVc, type ParsedSdJwtVc } from './sd-jwt'
 import { defaultCredentialClaims, issueTestCredential, sha256Sri, TEST_VCT } from './test-support'
 
@@ -257,5 +265,177 @@ describe('schema sandbox', () => {
     const codes = outcome.findings.map((entry) => entry.code)
     expect(codes).toContain('integrity_mismatch')
     expect(codes).toContain('schema_evaluation_timeout')
+  })
+})
+
+async function captureErrors<T>(
+  run: () => Promise<T>,
+): Promise<{ result: T; logs: readonly (readonly unknown[])[] }> {
+  const logs: unknown[][] = []
+  const original = console.error
+  console.error = (...args: unknown[]) => {
+    logs.push(args)
+  }
+  try {
+    return { result: await run(), logs }
+  } finally {
+    console.error = original
+  }
+}
+
+describe('sandbox child environment', () => {
+  test('passes only one private writable directory to the child', async () => {
+    if (process.platform !== 'linux') {
+      return
+    }
+    const root = mkdtempSync(join(tmpdir(), 'attestbook-sandbox-env-'))
+    const secretName = 'ATTESTBOOK_SANDBOX_TEST_SECRET'
+    const previous = process.env[secretName]
+    process.env[secretName] = 'must-not-reach-the-child'
+    try {
+      const base = join(root, 'base')
+      const outcome = await runSandboxChild(
+        fixture('env-entry.ts'),
+        {},
+        {
+          tempDir: base,
+          timeoutMs: 5_000,
+        },
+      )
+
+      expect(outcome.kind).toBe('ok')
+      if (outcome.kind !== 'ok') {
+        return
+      }
+      const { env } = JSON.parse(outcome.raw) as { env: Record<string, string> }
+      expect(Object.keys(env).sort()).toEqual([...SANDBOX_CHILD_ENVIRONMENT_KEYS].sort())
+      const values = Object.values(env)
+      expect(new Set(values).size).toBe(1)
+      expect(values[0]?.startsWith(`${base}/`)).toBe(true)
+      expect(env[secretName]).toBeUndefined()
+      // The base directory is private, and the per-child directory is removed.
+      expect(statSync(base).mode & 0o777).toBe(0o700)
+      expect(readdirSync(base)).toEqual([])
+    } finally {
+      if (previous === undefined) {
+        delete process.env[secretName]
+      } else {
+        process.env[secretName] = previous
+      }
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('fails closed when the temporary directory cannot be created', async () => {
+    if (process.platform !== 'linux') {
+      return
+    }
+    const root = mkdtempSync(join(tmpdir(), 'attestbook-sandbox-blocked-'))
+    const blocked = join(root, 'blocked')
+    writeFileSync(blocked, 'not a directory')
+    try {
+      const { result, logs } = await captureErrors(() =>
+        runSandboxChild(
+          fixture('env-entry.ts'),
+          {},
+          {
+            tempDir: join(blocked, 'sandbox'),
+            timeoutMs: 5_000,
+          },
+        ),
+      )
+
+      expect(result).toMatchObject({ kind: 'failed', reason: 'temp_dir_unavailable' })
+      const serialized = JSON.stringify(logs)
+      expect(serialized).toContain('temp_dir_unavailable')
+      expect(serialized).not.toContain('not a directory')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('classifies a write-denied child startup without logging its stderr', async () => {
+    if (process.platform !== 'linux') {
+      return
+    }
+    const root = mkdtempSync(join(tmpdir(), 'attestbook-sandbox-denied-'))
+    try {
+      const base = join(root, 'base')
+      const { result, logs } = await captureErrors(() =>
+        runSandboxChild(
+          fixture('write-denied-entry.ts'),
+          {},
+          {
+            tempDir: base,
+            timeoutMs: 5_000,
+          },
+        ),
+      )
+
+      expect(result).toMatchObject({
+        kind: 'failed',
+        reason: 'child_exit',
+        exitCode: 1,
+        stderrClass: 'write_denied',
+      })
+      const serialized = JSON.stringify(logs)
+      expect(serialized).toContain('write_denied')
+      expect(serialized).not.toContain('AccessDenied')
+      expect(readdirSync(base)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+})
+
+describe('built sandbox worker', () => {
+  test('starts with the private environment and compiles a minimal JSON Schema', async () => {
+    if (process.platform !== 'linux') {
+      return
+    }
+    const root = mkdtempSync(join(tmpdir(), 'attestbook-sandbox-built-'))
+    try {
+      const entrySource = fileURLToPath(new URL('./schema-sandbox-entry.ts', import.meta.url))
+      const outdir = join(root, 'dist')
+      const built = await Bun.build({ entrypoints: [entrySource], outdir, target: 'bun' })
+      expect(built.success).toBe(true)
+      const entry = join(outdir, 'schema-sandbox-entry.js')
+      expect(existsSync(entry)).toBe(true)
+
+      const document = {
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        properties: { given_name: { type: 'string' } },
+      }
+      const outcome = await runSchemaSandbox(
+        {
+          items: [
+            {
+              index: 0,
+              reference: {
+                formatIdentifier: 'dc+sd-jwt',
+                uri: 'urn:attestbook:test',
+                integrity: null,
+              },
+              kind: 'json_schema',
+              document,
+              integrityFindings: [],
+            },
+          ],
+          input: { claims: { given_name: 'Ada' }, packedPayload: {}, disclosureMap: {}, vct: '' },
+        },
+        { entry, tempDir: join(root, 'sandbox'), timeoutMs: 10_000 },
+      )
+
+      expect(outcome.kind).toBe('ok')
+      if (outcome.kind !== 'ok') {
+        return
+      }
+      expect(outcome.results[0]?.application.applied).toBe(true)
+      expect(outcome.results[0]?.application.status).toBe('PASS')
+      expect(readdirSync(join(root, 'sandbox'))).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

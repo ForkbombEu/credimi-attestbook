@@ -1,4 +1,6 @@
 import { describe, expect, test } from 'bun:test'
+import { tmpdir } from 'node:os'
+import { dirname, join, resolve } from 'node:path'
 
 import {
   DEFAULT_DATABASE_PATH,
@@ -9,7 +11,9 @@ import {
   DEFAULT_SCHEMA_SANDBOX_TIMEOUT_MS,
   DEFAULT_VALIDATION_CACHE_MAX_ENTRIES,
   DEFAULT_VALIDATION_CACHE_MAX_MB,
+  SANDBOX_TEMP_DIRECTORY_NAME,
   loadConfig,
+  resolveSchemaSandboxTempDir,
 } from './config'
 
 const DEFAULTS = {
@@ -20,6 +24,7 @@ const DEFAULTS = {
   schemaSandboxTimeoutMs: DEFAULT_SCHEMA_SANDBOX_TIMEOUT_MS,
   schemaSandboxMaxRssMb: DEFAULT_SCHEMA_SANDBOX_MAX_RSS_MB,
   schemaSandboxConcurrency: DEFAULT_SCHEMA_SANDBOX_CONCURRENCY,
+  schemaSandboxTempDir: join(dirname(resolve(DEFAULT_DATABASE_PATH)), SANDBOX_TEMP_DIRECTORY_NAME),
   validationCacheMaxEntries: DEFAULT_VALIDATION_CACHE_MAX_ENTRIES,
   validationCacheMaxMb: DEFAULT_VALIDATION_CACHE_MAX_MB,
   subscriptionsAllowLoopbackHttp: false,
@@ -40,6 +45,7 @@ describe('loadConfig', () => {
         SCHEMA_SANDBOX_TIMEOUT_MS: '1500',
         SCHEMA_SANDBOX_MAX_RSS_MB: '128',
         SCHEMA_SANDBOX_CONCURRENCY: '1',
+        SANDBOX_TEMP_DIR: '/data/sandbox-scratch',
         VALIDATION_CACHE_MAX_ENTRIES: '8',
         VALIDATION_CACHE_MAX_MB: '4',
       }),
@@ -51,6 +57,7 @@ describe('loadConfig', () => {
       schemaSandboxTimeoutMs: 1500,
       schemaSandboxMaxRssMb: 128,
       schemaSandboxConcurrency: 1,
+      schemaSandboxTempDir: '/data/sandbox-scratch',
       validationCacheMaxEntries: 8,
       validationCacheMaxMb: 4,
       subscriptionsAllowLoopbackHttp: false,
@@ -71,6 +78,33 @@ describe('loadConfig', () => {
     expect(() => loadConfig({ SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP: 'yes' })).toThrow(
       'invalid SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP',
     )
+  })
+
+  test('derives the sandbox temporary directory from the database directory', () => {
+    expect(loadConfig({ DATABASE_PATH: '/data/attestbook.sqlite' }).schemaSandboxTempDir).toBe(
+      join('/data', SANDBOX_TEMP_DIRECTORY_NAME),
+    )
+    expect(loadConfig({ DATABASE_PATH: 'relative/attestbook.sqlite' }).schemaSandboxTempDir).toBe(
+      join(resolve('relative'), SANDBOX_TEMP_DIRECTORY_NAME),
+    )
+    expect(loadConfig({ DATABASE_PATH: ':memory:' }).schemaSandboxTempDir).toBe(
+      join(tmpdir(), SANDBOX_TEMP_DIRECTORY_NAME),
+    )
+  })
+
+  test('resolves and validates the SANDBOX_TEMP_DIR override', () => {
+    expect(
+      resolveSchemaSandboxTempDir({ SANDBOX_TEMP_DIR: '/var/tmp/attestbook' }, '/data/db.sqlite'),
+    ).toBe('/var/tmp/attestbook')
+    expect(
+      resolveSchemaSandboxTempDir({ SANDBOX_TEMP_DIR: 'relative/dir' }, '/data/db.sqlite'),
+    ).toBe(resolve('relative/dir'))
+    expect(resolveSchemaSandboxTempDir({ SANDBOX_TEMP_DIR: '   ' }, '/data/db.sqlite')).toBe(
+      join('/data', SANDBOX_TEMP_DIRECTORY_NAME),
+    )
+    expect(() =>
+      resolveSchemaSandboxTempDir({ SANDBOX_TEMP_DIR: 'bad\0path' }, '/data/db.sqlite'),
+    ).toThrow('invalid SANDBOX_TEMP_DIR')
   })
 
   test('falls back to the default hostname for a blank HOST', () => {
