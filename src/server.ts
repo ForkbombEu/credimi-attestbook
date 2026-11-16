@@ -8,7 +8,7 @@ import { openDatabase } from './db/database'
 import { applyMigrations } from './db/migrations'
 import { IssuerFixtureGenerator } from './fixtures'
 import { Registry } from './registry'
-import { SubscriptionService } from './subscriptions'
+import { SubscriptionService, WebhookDeliveryService } from './subscriptions'
 import { CredentialValidator, RulebookSnapshotCache } from './validation'
 
 /** Vite writes the built web UI here; `bun run build` produces it. */
@@ -31,10 +31,25 @@ const registry = new Registry({ database, schemaSandboxLimits: schemaSandbox })
 // verifies its callback. Production keeps the test-only loopback HTTP opt-in
 // off, so only public HTTPS callback URLs are accepted and contacted; the local
 // UAT start script enables it for a disposable loopback callback server.
+// Publication delivery derives the per-subscription signing secret from
+// SUBSCRIPTION_WEBHOOK_SIGNING_KEY. A deployment that does not configure the key
+// still serves the registry and subscriptions but performs no delivery and
+// issues no webhook secret, instead of falling back to a generated key.
+if (config.subscriptionWebhookSigningKey === null) {
+  console.warn(
+    'SUBSCRIPTION_WEBHOOK_SIGNING_KEY is not set: publication webhook delivery is disabled and registrations receive no webhook secret',
+  )
+}
+const webhookDelivery = new WebhookDeliveryService({
+  database,
+  signingKey: config.subscriptionWebhookSigningKey,
+  allowLoopbackHttp: config.subscriptionsAllowLoopbackHttp,
+})
 const subscriptions = new SubscriptionService({
   database,
   source: registry,
   allowLoopbackHttp: config.subscriptionsAllowLoopbackHttp,
+  webhookSigningKey: config.subscriptionWebhookSigningKey,
 })
 // Administrator login is optional: a missing or invalid group leaves it
 // unavailable without stopping the public API or provider bearer writes.
@@ -83,6 +98,7 @@ const app = createApp({
   issuerFixtures,
   captures,
   subscriptions,
+  webhookDelivery,
   adminAuth,
   publicBaseUrl: config.publicBaseUrl,
   ...(existsSync(UI_DIST_PATH) ? { uiRoot: UI_DIST_PATH } : {}),

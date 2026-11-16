@@ -51,6 +51,12 @@ export interface Http1Request {
   readonly contentType?: string
   readonly accept?: string
   readonly userAgent?: string
+  /**
+   * Additional request headers, for example a webhook signature. Names and
+   * values are validated before the head is written, so a caller cannot inject
+   * a second request line; framing headers belong to the transport itself.
+   */
+  readonly headers?: Readonly<Record<string, string>>
 }
 
 /** A bounded HTTP response; redirects are returned, never followed here. */
@@ -116,6 +122,46 @@ function mapSocketError(error: unknown): Http1TransportError {
   return new Http1TransportError('fetch_failed', 'the remote endpoint could not be reached')
 }
 
+/** RFC 9110 token: what a header name may contain. */
+const HEADER_NAME_PATTERN = /^[!#$%&'*+\-.^_`|~0-9A-Za-z]+$/
+
+/** No CR, LF or other control characters: a value cannot end the head early. */
+const HEADER_VALUE_PATTERN = /^[\t\x20-\x7e]*$/
+
+/** Framing headers the transport writes itself; a caller must not duplicate them. */
+const RESERVED_HEADERS = new Set([
+  'host',
+  'accept',
+  'user-agent',
+  'accept-encoding',
+  'connection',
+  'content-type',
+  'content-length',
+  'transfer-encoding',
+])
+
+/**
+ * Writes caller-supplied headers. A redefined framing header or a value that
+ * could terminate a line is a programming error, not a remote failure, so this
+ * throws a plain `Error` before any socket is opened.
+ */
+function appendExtraHeaders(lines: string[], headers: Readonly<Record<string, string>>): void {
+  for (const [rawName, rawValue] of Object.entries(headers)) {
+    const name = rawName.trim()
+    const value = rawValue.trim()
+    if (!HEADER_NAME_PATTERN.test(name)) {
+      throw new Error(`request header name ${JSON.stringify(rawName)} is not a valid token`)
+    }
+    if (RESERVED_HEADERS.has(name.toLowerCase())) {
+      throw new Error(`request header ${JSON.stringify(name)} is written by the transport`)
+    }
+    if (!HEADER_VALUE_PATTERN.test(value)) {
+      throw new Error(`request header ${JSON.stringify(name)} has an invalid value`)
+    }
+    lines.push(`${name}: ${value}`)
+  }
+}
+
 function requestHead(request: Http1Request): string {
   const method = request.method ?? 'GET'
   const hostname = isIP(request.hostname) === 6 ? `[${request.hostname}]` : request.hostname
@@ -132,6 +178,9 @@ function requestHead(request: Http1Request): string {
   if (request.body !== undefined) {
     lines.push(`Content-Type: ${request.contentType ?? 'application/octet-stream'}`)
     lines.push(`Content-Length: ${String(request.body.byteLength)}`)
+  }
+  if (request.headers !== undefined) {
+    appendExtraHeaders(lines, request.headers)
   }
   lines.push('', '')
   return lines.join('\r\n')
@@ -348,13 +397,22 @@ export function createHttp1Transport(options: CreateHttp1TransportOptions = {}):
         }
       }
 
+      // The head is built before the socket is opened so an invalid caller
+      // header rejects the request instead of escaping from a socket event.
+      let requestHeadText: string
+      try {
+        requestHeadText = requestHead(request)
+      } catch (error) {
+        reject(error instanceof Error ? error : new Error('the request head could not be built'))
+        return
+      }
+
       const onConnect = (): void => {
-        const head = requestHead(request)
         if (request.body === undefined) {
-          socket?.write(head)
+          socket?.write(requestHeadText)
           return
         }
-        socket?.write(Buffer.from(head, 'latin1'))
+        socket?.write(Buffer.from(requestHeadText, 'latin1'))
         socket?.write(Buffer.from(request.body))
       }
 

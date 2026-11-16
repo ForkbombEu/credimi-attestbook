@@ -60,6 +60,7 @@ import type {
   IssuedToken,
   ListPublicationEventsOptions,
   Provider,
+  PublicationEvent,
   PublicationEventPage,
   RegisterCredentialSchemaDocumentInput,
   ReplaceDraftContentInput,
@@ -1283,6 +1284,21 @@ export class Registry {
         hasMore && last !== undefined ? encodePublicationEventCursor(last.sequence) : null,
       hasMore,
     }
+  }
+
+  /**
+   * Returns the durable event one published version produced, or `null` for a
+   * draft version, an unknown version or an unknown rulebook. Publication
+   * webhook dispatch (#119) resolves the just-published version to the exact
+   * stored event, so the notification ID and fields are the ones the public
+   * feed serves rather than a second reconstruction.
+   */
+  getPublicationEvent(rulebookId: string, version: string): PublicationEvent | null {
+    const rulebook = this.getRulebook(rulebookId)
+    if (rulebook === null) {
+      return null
+    }
+    return this.store.getPublicationEvent(rulebook.id, version)
   }
 
   // ------------------------------------------------ credential schema documents

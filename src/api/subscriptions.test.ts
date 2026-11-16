@@ -28,7 +28,16 @@ import { Registry } from '../registry/registry'
 import { provisionProvider } from '../registry/bootstrap'
 import { seedPublishedRulebook, type SeededRulebook } from '../validation/test-support'
 
-import type { CallbackHostResolver, SubscriptionServiceOptions } from '../subscriptions'
+import {
+  deriveSubscriptionWebhookSecret,
+  verifyWebhookSignature,
+  WEBHOOK_EVENT_ID_HEADER,
+  WEBHOOK_SIGNATURE_HEADER,
+  WEBHOOK_TIMESTAMP_HEADER,
+  WebhookDeliveryService,
+  type CallbackHostResolver,
+  type SubscriptionServiceOptions,
+} from '../subscriptions'
 import { SubscriptionService } from '../subscriptions'
 
 import { registeredSubscriptionResponseSchema, subscriptionResponseSchema } from './schemas'
@@ -41,7 +50,7 @@ interface Fixture {
   service: SubscriptionService
   readonly seeded: SeededRulebook
   readonly options: Partial<SubscriptionServiceOptions>
-  app(): Hono
+  app(webhookDelivery?: WebhookDeliveryService): Hono
   register(rulebookId?: string, body?: unknown, headers?: Record<string, string>): Promise<Response>
   reopen(): void
   cleanup(): void
@@ -70,8 +79,12 @@ function createFixture(overrides: Partial<SubscriptionServiceOptions> = {}): Fix
     },
     seeded,
     options,
-    app() {
-      return createApp({ registry, subscriptions: service })
+    app(webhookDelivery?: WebhookDeliveryService) {
+      return createApp({
+        registry,
+        subscriptions: service,
+        ...(webhookDelivery === undefined ? {} : { webhookDelivery }),
+      })
     },
     async register(
       rulebookId = seeded.rulebookId,
@@ -615,5 +628,127 @@ describe('subscription route wiring', () => {
         'subscription_unavailable',
       )
     }
+  })
+})
+
+describe('publication webhook delivery over HTTP', () => {
+  const WEBHOOK_KEY = Buffer.from('00112233445566778899aabbccddeeff', 'utf8')
+  const FIXED_NOW = '2026-01-01T00:00:00.000Z'
+
+  test('returns the derived webhook secret exactly once at registration', async () => {
+    fixture = createFixture({ webhookSigningKey: WEBHOOK_KEY })
+
+    const response = await fixture.register()
+    expect(response.status).toBe(201)
+    const body = registeredSubscriptionResponseSchema.parse(await response.json())
+    expect(body.data.webhookSecret).toBe(deriveSubscriptionWebhookSecret(WEBHOOK_KEY, body.data.id))
+
+    const readable = await fixture.app().request(managementPath(body.data.id), {
+      headers: { authorization: bearer(body.data.managementToken) },
+    })
+    const projection = subscriptionResponseSchema.parse(await readable.json())
+    expect(projection.data).not.toHaveProperty('webhookSecret')
+    expect(JSON.stringify(rows(fixture.database))).not.toContain(body.data.webhookSecret)
+    expect(JSON.stringify(rows(fixture.database))).not.toContain(WEBHOOK_KEY.toString('base64url'))
+  })
+
+  test('publishes one signed notification to a verified subscriber and not on replay', async () => {
+    const verification = createVerificationTransport(acknowledgement)
+    fixture = createFixture({
+      webhookSigningKey: WEBHOOK_KEY,
+      resolveCallbackHostname: fakeResolver(),
+      verificationTransport: verification.transport,
+    })
+
+    const registration = await fixture.register()
+    const registered = registeredSubscriptionResponseSchema.parse(await registration.json())
+    const secret = registered.data.webhookSecret
+    if (secret === undefined) {
+      throw new Error('registration did not return a webhook secret')
+    }
+    const activated = await verify(fixture, registered.data.id, registered.data.managementToken)
+    expect(activated.status).toBe(200)
+
+    const deliveries: Http1Request[] = []
+    const delivery = new WebhookDeliveryService({
+      database: fixture.database,
+      signingKey: WEBHOOK_KEY,
+      now: () => FIXED_NOW,
+      resolveCallbackHostname: fakeResolver(),
+      transport: (request) => {
+        deliveries.push(request)
+        return Promise.resolve({
+          status: 204,
+          headers: {},
+          body: new Uint8Array(),
+          url: request.url,
+        })
+      },
+    })
+    const app = fixture.app(delivery)
+    const authorization = { authorization: bearer(fixture.seeded.token) }
+
+    const created = await app.request(`/api/v1/rulebooks/${fixture.seeded.rulebookId}/versions`, {
+      method: 'POST',
+      headers: { ...authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ version: '1.1' }),
+    })
+    expect(created.status).toBe(201)
+    const published = await app.request(
+      `/api/v1/rulebooks/${fixture.seeded.rulebookId}/versions/1.1/publish`,
+      { method: 'POST', headers: authorization },
+    )
+    expect(published.status).toBe(200)
+
+    expect(deliveries).toHaveLength(1)
+    const request = deliveries[0]
+    if (request === undefined) {
+      throw new Error('the publication did not trigger a delivery')
+    }
+    const feed = await app.request(`/api/v1/rulebooks/${fixture.seeded.rulebookId}/events`)
+    const page = (await feed.json()) as {
+      data: readonly { id: string; version: string }[]
+    }
+    const event = page.data.find((candidate) => candidate.version === '1.1')
+    if (event === undefined) {
+      throw new Error('the published event is missing from the feed')
+    }
+    expect(request.headers?.[WEBHOOK_EVENT_ID_HEADER]).toBe(event.id)
+    const timestamp = request.headers?.[WEBHOOK_TIMESTAMP_HEADER] ?? ''
+    const body = Buffer.from(request.body ?? [])
+    expect(JSON.parse(body.toString('utf8'))).toEqual(event)
+    expect(
+      verifyWebhookSignature({
+        secret,
+        timestamp,
+        eventId: event.id,
+        body,
+        signature: request.headers?.[WEBHOOK_SIGNATURE_HEADER] ?? '',
+      }),
+    ).toBe(true)
+
+    // An idempotent publish replay acknowledges the version but appends no
+    // event and sends no second notification.
+    const replay = await app.request(
+      `/api/v1/rulebooks/${fixture.seeded.rulebookId}/versions/1.1/publish`,
+      { method: 'POST', headers: authorization },
+    )
+    expect(replay.status).toBe(200)
+    expect(deliveries).toHaveLength(1)
+
+    // A pending subscription of the same rulebook stays ineligible.
+    await fixture.register()
+    const next = await app.request(`/api/v1/rulebooks/${fixture.seeded.rulebookId}/versions`, {
+      method: 'POST',
+      headers: { ...authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ version: '1.2' }),
+    })
+    expect(next.status).toBe(201)
+    const nextPublish = await app.request(
+      `/api/v1/rulebooks/${fixture.seeded.rulebookId}/versions/1.2/publish`,
+      { method: 'POST', headers: authorization },
+    )
+    expect(nextPublish.status).toBe(200)
+    expect(deliveries).toHaveLength(2)
   })
 })

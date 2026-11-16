@@ -145,11 +145,17 @@ export function toSubscriptionResource(subscription: Subscription) {
   })
 }
 
-/** Registration projection: the plaintext management token is returned once. */
+/**
+ * Registration projection: the plaintext management token, and the derived
+ * webhook verification secret when delivery is configured, are returned once.
+ */
 export function toRegisteredSubscriptionResource(subscription: RegisteredSubscription) {
   return registeredSubscriptionSchema.parse({
     ...toSubscriptionResource(subscription),
     managementToken: subscription.managementToken,
+    ...(subscription.webhookSecret === undefined
+      ? {}
+      : { webhookSecret: subscription.webhookSecret }),
   })
 }
 

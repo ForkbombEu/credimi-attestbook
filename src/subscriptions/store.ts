@@ -87,6 +87,24 @@ export class SubscriptionStore {
   }
 
   /**
+   * Delivery-eligible subscriptions of one rulebook (#119): exactly the rows
+   * that are `active` *and* carry the verification instant SQLite requires for
+   * that state. Pending, revoked and unrelated-rulebook rows are never
+   * returned, so an event cannot reach an inactive subscriber. The
+   * `(rulebook_id, state)` index bounds this read.
+   */
+  listDeliveryEligibleByRulebook(rulebookId: string): readonly SubscriptionRecord[] {
+    return this.database
+      .query<SubscriptionRow, [string]>(
+        `SELECT * FROM subscriptions
+         WHERE rulebook_id = ? AND state = 'active' AND verified_at IS NOT NULL
+         ORDER BY created_at, id`,
+      )
+      .all(rulebookId)
+      .map(toRecord)
+  }
+
+  /**
    * Marks a live subscription revoked. Revocation is final, so an already
    * revoked row is left untouched and a repeated delete stays idempotent.
    */

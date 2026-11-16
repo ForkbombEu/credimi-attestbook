@@ -28,6 +28,7 @@ const DEFAULTS = {
   validationCacheMaxEntries: DEFAULT_VALIDATION_CACHE_MAX_ENTRIES,
   validationCacheMaxMb: DEFAULT_VALIDATION_CACHE_MAX_MB,
   subscriptionsAllowLoopbackHttp: false,
+  subscriptionWebhookSigningKey: null,
 }
 
 describe('loadConfig', () => {
@@ -61,6 +62,7 @@ describe('loadConfig', () => {
       validationCacheMaxEntries: 8,
       validationCacheMaxMb: 4,
       subscriptionsAllowLoopbackHttp: false,
+      subscriptionWebhookSigningKey: null,
     })
   })
 
@@ -138,6 +140,28 @@ describe('loadConfig', () => {
     )
     expect(loadConfig({ PUBLIC_BASE_URL: 'http://localhost:3000/' }).publicBaseUrl).toBe(
       'http://localhost:3000',
+    )
+  })
+
+  test('reads a valid webhook signing key and disables delivery without one', () => {
+    const raw = Buffer.alloc(32, 7).toString('base64url')
+    expect(
+      loadConfig({ SUBSCRIPTION_WEBHOOK_SIGNING_KEY: raw }).subscriptionWebhookSigningKey,
+    ).toEqual(Buffer.alloc(32, 7))
+    expect(
+      loadConfig({ SUBSCRIPTION_WEBHOOK_SIGNING_KEY: '  ' }).subscriptionWebhookSigningKey,
+    ).toBeNull()
+  })
+
+  test.each([
+    'not-a-key',
+    'short_key',
+    `${Buffer.alloc(16, 1).toString('base64url')}`,
+    `${Buffer.alloc(32, 1).toString('base64url')}=`,
+    `${Buffer.alloc(32, 1).toString('base64')}+/`,
+  ])('rejects a malformed webhook signing key %p', (value) => {
+    expect(() => loadConfig({ SUBSCRIPTION_WEBHOOK_SIGNING_KEY: value })).toThrow(
+      'invalid SUBSCRIPTION_WEBHOOK_SIGNING_KEY',
     )
   })
 

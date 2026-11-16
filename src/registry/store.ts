@@ -804,6 +804,35 @@ export class RegistryStore {
       }))
   }
 
+  /**
+   * Reads the single durable event a publication appended for one rulebook
+   * version. A version has at most one event (the schema's uniqueness rule), so
+   * a caller can map a just-published version to the exact event an
+   * asynchronous consumer reads from the public feed.
+   */
+  getPublicationEvent(rulebookId: string, version: string): PublicationEvent | null {
+    const row = this.database
+      .query<PublicationEventRow, [string, string]>(
+        `SELECT sequence, id, format, event_type, rulebook_id, version_id, version,
+                content_digest, published_at
+         FROM publication_events
+         WHERE rulebook_id = ? AND version = ?`,
+      )
+      .get(rulebookId, version)
+    if (row === null) {
+      return null
+    }
+    return {
+      id: row.id,
+      format: row.format as PublicationEventFormat,
+      type: row.event_type as PublicationEventType,
+      rulebookId: row.rulebook_id,
+      version: row.version,
+      contentDigest: row.content_digest,
+      publishedAt: row.published_at,
+    }
+  }
+
   // -------------------------------------------------- credential schema documents
 
   insertCredentialSchemaDocument(document: CredentialSchemaDocument): void {

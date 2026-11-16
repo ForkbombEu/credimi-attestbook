@@ -418,22 +418,30 @@ also exercises the schema sandbox's private temporary directory.
 
 ## Configuration
 
-| Variable                            | Default             | Meaning                                                                                               |
-| ----------------------------------- | ------------------- | ----------------------------------------------------------------------------------------------------- |
-| `PORT`                              | `3000`              | Listener port; an integer between 1 and 65535                                                         |
-| `HOST`                              | `127.0.0.1`         | Listener hostname or address                                                                          |
-| `DATABASE_PATH`                     | `attestbook.sqlite` | SQLite file opened at startup; `:memory:` is accepted for local use                                   |
-| `PUBLIC_BASE_URL`                   | unset               | Trusted public origin for permanent hosted-schema URLs (see below)                                    |
-| `SCHEMA_SANDBOX_TIMEOUT_MS`         | `2000`              | Hard wall-clock limit for one schema-evaluation child                                                 |
-| `SCHEMA_SANDBOX_MAX_RSS_MB`         | `256`               | RSS limit for one schema-evaluation child                                                             |
-| `SCHEMA_SANDBOX_CONCURRENCY`        | `2`                 | Maximum concurrent schema-evaluation children                                                         |
-| `SANDBOX_TEMP_DIR`                  | database directory  | Base for each child's private scratch directory; used as-is                                           |
-| `VALIDATION_CACHE_MAX_ENTRIES`      | `64`                | Maximum parsed immutable rulebook snapshots cached in-process                                         |
-| `VALIDATION_CACHE_MAX_MB`           | `16`                | Maximum snapshot bytes cached in-process                                                              |
-| `ADMIN_USERNAME`                    | unset               | Browser administrator username; the group is all-or-nothing                                           |
-| `ADMIN_PASSWORD_HASH`               | unset               | Argon2id PHC hash of the administrator password, never plaintext                                      |
-| `ADMIN_PROVIDER_ID`                 | unset               | Identifier of an existing provider the administrator is bound to                                      |
-| `SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP` | unset               | Test-only: allow a literal loopback `http` webhook callback for local UAT; never enable in production |
+| Variable                            | Default             | Meaning                                                                                                                                                                                       |
+| ----------------------------------- | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`                              | `3000`              | Listener port; an integer between 1 and 65535                                                                                                                                                 |
+| `HOST`                              | `127.0.0.1`         | Listener hostname or address                                                                                                                                                                  |
+| `DATABASE_PATH`                     | `attestbook.sqlite` | SQLite file opened at startup; `:memory:` is accepted for local use                                                                                                                           |
+| `PUBLIC_BASE_URL`                   | unset               | Trusted public origin for permanent hosted-schema URLs (see below)                                                                                                                            |
+| `SCHEMA_SANDBOX_TIMEOUT_MS`         | `2000`              | Hard wall-clock limit for one schema-evaluation child                                                                                                                                         |
+| `SCHEMA_SANDBOX_MAX_RSS_MB`         | `256`               | RSS limit for one schema-evaluation child                                                                                                                                                     |
+| `SCHEMA_SANDBOX_CONCURRENCY`        | `2`                 | Maximum concurrent schema-evaluation children                                                                                                                                                 |
+| `SANDBOX_TEMP_DIR`                  | database directory  | Base for each child's private scratch directory; used as-is                                                                                                                                   |
+| `VALIDATION_CACHE_MAX_ENTRIES`      | `64`                | Maximum parsed immutable rulebook snapshots cached in-process                                                                                                                                 |
+| `VALIDATION_CACHE_MAX_MB`           | `16`                | Maximum snapshot bytes cached in-process                                                                                                                                                      |
+| `ADMIN_USERNAME`                    | unset               | Browser administrator username; the group is all-or-nothing                                                                                                                                   |
+| `ADMIN_PASSWORD_HASH`               | unset               | Argon2id PHC hash of the administrator password, never plaintext                                                                                                                              |
+| `ADMIN_PROVIDER_ID`                 | unset               | Identifier of an existing provider the administrator is bound to                                                                                                                              |
+| `SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP` | unset               | Test-only: allow a literal loopback `http` webhook callback for local UAT; never enable in production                                                                                         |
+| `SUBSCRIPTION_WEBHOOK_SIGNING_KEY`  | unset               | Unpadded base64url deployment key (at least 32 bytes) used to derive per-subscription webhook secrets and sign publication notifications; unset disables delivery, malformed fails at startup |
+
+`SUBSCRIPTION_WEBHOOK_SIGNING_KEY` is an unpadded base64url deployment key of at least 32 bytes.
+It derives every subscription's webhook verification secret and signs publication
+notifications; registration returns the derived secret once. Keep it stable across restarts and
+deployments. Without it the server runs but performs no publication delivery and issues no
+webhook secret; after setting or rotating it, subscriptions registered under an earlier key (or
+none) are skipped and must re-register. A malformed value fails startup.
 
 Local development binds loopback only. The Docker image and `compose.yaml` set
 `HOST=0.0.0.0` so the published port is reachable. Invalid values fail fast at startup

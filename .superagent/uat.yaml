@@ -3,7 +3,10 @@
 # so a scenario can observe restart persistence against the same database.
 # It also sets SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP=1, so a webhook subscription
 # may use a disposable `http://127.0.0.1:<port>/...` callback for the
-# verification handshake documented in docs/api.md §3.15.1.
+# verification handshake and the signed publication delivery documented in
+# docs/api.md §3.15.1 and §3.15.2. uat:setup generates a disposable
+# SUBSCRIPTION_WEBHOOK_SIGNING_KEY in dist/uat/admin.env, and registration
+# returns the derived per-subscription webhook secret exactly once.
 version: 1
 default_environment: local
 environments:
