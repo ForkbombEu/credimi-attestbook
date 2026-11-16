@@ -27,6 +27,7 @@ import {
   isSubscriptionWebhookSecret,
   signWebhookRequest,
   verifyWebhookSignature,
+  webhookSigningKeyId,
   WEBHOOK_CONTENT_TYPE,
   WEBHOOK_EVENT_ID_HEADER,
   WEBHOOK_EVENT_TYPE_HEADER,
@@ -34,6 +35,7 @@ import {
   WEBHOOK_TIMESTAMP_HEADER,
   WebhookDeliveryService,
   type WebhookDeliveryOptions,
+  type WebhookDeliveryResult,
 } from './delivery'
 import { SubscriptionService } from './service'
 import type { CallbackHostResolver } from './verification'
@@ -94,6 +96,7 @@ function createFixture(
     source: registry,
     resolveCallbackHostname: PUBLIC_RESOLVER,
     verificationTransport: echoChallengeTransport(),
+    webhookSigningKey: SIGNING_KEY,
     ...serviceOverrides,
   })
   return {
@@ -324,7 +327,7 @@ describe('webhook secret derivation', () => {
   })
 
   test('registration without a configured key returns no secret and delivery is disabled', async () => {
-    const fixture = createFixture()
+    const fixture = createFixture({ webhookSigningKey: null })
     const registered = fixture.service.register({
       rulebookId: fixture.seeded.rulebookId,
       callbackUrl: 'https://subscriber.example.test/webhook',
@@ -504,5 +507,198 @@ describe('publication delivery', () => {
     })
     expect(results).toEqual([])
     expect(recorded).toHaveLength(0)
+  })
+})
+
+describe('delivery key binding', () => {
+  test('skips a subscription registered while delivery was disabled', async () => {
+    const fixture = createFixture({ webhookSigningKey: null })
+    await activeSubscription(fixture)
+    const recorded: RecordedDelivery[] = []
+    const service = deliveryService(fixture, {
+      transport: recordingTransport(() => new Response(null, { status: 204 }), recorded),
+    })
+    expect(await service.deliverPublicationEvent(fixture.event)).toEqual([])
+    expect(recorded).toHaveLength(0)
+  })
+
+  test('skips a subscription registered under a rotated key and delivers under the current key', async () => {
+    const keyA = Buffer.from('aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa', 'utf8')
+    const keyB = Buffer.from('bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'utf8')
+    const fixture = createFixture({ webhookSigningKey: keyA })
+    await activeSubscription(fixture)
+
+    const recordedB: RecordedDelivery[] = []
+    const serviceB = deliveryService(fixture, {
+      signingKey: keyB,
+      transport: recordingTransport(() => new Response(null, { status: 204 }), recordedB),
+    })
+    expect(await serviceB.deliverPublicationEvent(fixture.event)).toEqual([])
+    expect(recordedB).toHaveLength(0)
+
+    const recordedA: RecordedDelivery[] = []
+    const serviceA = deliveryService(fixture, {
+      signingKey: keyA,
+      transport: recordingTransport(() => new Response(null, { status: 204 }), recordedA),
+    })
+    const results = await serviceA.deliverPublicationEvent(fixture.event)
+    expect(results).toHaveLength(1)
+    expect(recordedA).toHaveLength(1)
+  })
+
+  test('stores only a non-secret key fingerprint with the subscription', async () => {
+    const fixture = createFixture()
+    const registered = await activeSubscription(fixture)
+    const row = fixture.database
+      .query<Record<string, unknown>, [string]>('SELECT * FROM subscriptions WHERE id = ?')
+      .get(registered.id)
+    const keyId = row?.['webhook_key_id']
+    expect(keyId).toBe(webhookSigningKeyId(SIGNING_KEY))
+    expect(keyId).toMatch(/^[0-9a-f]{32}$/)
+    expect(keyId).not.toBe(registered.webhookSecret)
+    expect(JSON.stringify(row)).not.toContain(SIGNING_KEY.toString('base64url'))
+    if (typeof registered.webhookSecret === 'string') {
+      expect(JSON.stringify(row)).not.toContain(registered.webhookSecret)
+    }
+  })
+})
+
+interface GateTransport {
+  readonly transport: Http1Transport
+  resolve(): void
+  calls(): number
+  maxInFlight(): number
+}
+
+function gateTransport(): GateTransport {
+  let release: (() => void) | undefined
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  let inFlight = 0
+  let maxInFlight = 0
+  let calls = 0
+  return {
+    transport: async (request) => {
+      calls += 1
+      inFlight += 1
+      maxInFlight = Math.max(maxInFlight, inFlight)
+      await gate
+      inFlight -= 1
+      return {
+        status: 204,
+        headers: {},
+        body: new Uint8Array(),
+        url: request.url,
+      }
+    },
+    resolve: () => {
+      release?.()
+    },
+    calls: () => calls,
+    maxInFlight: () => maxInFlight,
+  }
+}
+
+describe('bounded dispatch', () => {
+  test('caps in-flight attempts globally across publication events', async () => {
+    const fixture = createFixture()
+    const other = seedPublishedRulebook(fixture.database, fixture.registry, {
+      authority: 'authority-dispatch',
+      rulebookName: 'Other Dispatch Rulebook',
+    })
+    for (let index = 0; index < 3; index += 1) {
+      await activeSubscription(
+        fixture,
+        fixture.seeded.rulebookId,
+        `203.0.113.${String(60 + index)}`,
+        `https://first-${String(index)}.example.test/hook`,
+      )
+    }
+    for (let index = 0; index < 2; index += 1) {
+      await activeSubscription(
+        fixture,
+        other.rulebookId,
+        `203.0.113.${String(70 + index)}`,
+        `https://second-${String(index)}.example.test/hook`,
+      )
+    }
+    const otherEvent = fixture.registry.getPublicationEvent(other.rulebookId, '1.0')
+    if (otherEvent === null) {
+      throw new Error('the second publication event is missing')
+    }
+    const gate = gateTransport()
+    const results: WebhookDeliveryResult[] = []
+    const service = deliveryService(fixture, {
+      maxConcurrency: 2,
+      transport: gate.transport,
+      onResult: (result) => results.push(result),
+    })
+
+    service.dispatchPublicationEvent(fixture.event)
+    service.dispatchPublicationEvent(otherEvent)
+    await Bun.sleep(0)
+    expect(gate.maxInFlight()).toBe(2)
+    gate.resolve()
+    await service.whenIdle()
+
+    expect(gate.maxInFlight()).toBe(2)
+    expect(gate.calls()).toBe(5)
+    expect(results).toHaveLength(5)
+    expect(results.every((result) => result.delivered)).toBe(true)
+  })
+
+  test('drops attempts beyond the in-memory queue bound', async () => {
+    const fixture = createFixture()
+    for (let index = 0; index < 3; index += 1) {
+      await activeSubscription(
+        fixture,
+        fixture.seeded.rulebookId,
+        `203.0.113.${String(80 + index)}`,
+        `https://bounded-${String(index)}.example.test/hook`,
+      )
+    }
+    const gate = gateTransport()
+    const results: WebhookDeliveryResult[] = []
+    const service = deliveryService(fixture, {
+      maxConcurrency: 1,
+      maxPendingDeliveries: 2,
+      transport: gate.transport,
+      onResult: (result) => results.push(result),
+    })
+    const warnings: string[] = []
+    const originalWarn = console.warn
+    console.warn = (...args: unknown[]) => {
+      warnings.push(args.map(String).join(' '))
+    }
+    try {
+      service.dispatchPublicationEvent(fixture.event)
+    } finally {
+      console.warn = originalWarn
+    }
+
+    await Bun.sleep(0)
+    expect(gate.calls()).toBe(1)
+    expect(warnings).toContain('webhook delivery queue full; dropped 1 attempts')
+    gate.resolve()
+    await service.whenIdle()
+    expect(gate.calls()).toBe(2)
+    expect(results).toHaveLength(2)
+  })
+
+  test('maps an unexpected error to a typed network failure and still becomes idle', async () => {
+    const fixture = createFixture()
+    await activeSubscription(fixture)
+    const results: WebhookDeliveryResult[] = []
+    const service = deliveryService(fixture, {
+      transport: () => Promise.reject(new Error('unexpected transport failure')),
+      onResult: (result) => results.push(result),
+    })
+
+    service.dispatchPublicationEvent(fixture.event)
+    await service.whenIdle()
+
+    expect(results).toHaveLength(1)
+    expect(results[0]).toMatchObject({ delivered: false, reason: 'network_failure' })
   })
 })

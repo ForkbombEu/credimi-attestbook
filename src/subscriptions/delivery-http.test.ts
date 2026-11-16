@@ -80,7 +80,12 @@ async function createActiveSubscription(callbackUrl: string) {
   if (event === null) {
     throw new Error('fixture publication event is missing')
   }
-  const service = new SubscriptionService({ database, source: registry, allowLoopbackHttp: true })
+  const service = new SubscriptionService({
+    database,
+    source: registry,
+    allowLoopbackHttp: true,
+    webhookSigningKey: SIGNING_KEY,
+  })
   const registered = service.register({
     rulebookId: seeded.rulebookId,
     callbackUrl,

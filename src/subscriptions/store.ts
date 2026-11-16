@@ -23,6 +23,7 @@ interface SubscriptionRow {
   readonly verification_window_started_at: string | null
   readonly verification_attempts: number
   readonly verified_at: string | null
+  readonly webhook_key_id: string | null
 }
 
 function toRecord(row: SubscriptionRow): SubscriptionRecord {
@@ -42,6 +43,7 @@ function toRecord(row: SubscriptionRow): SubscriptionRecord {
     verificationWindowStartedAt: row.verification_window_started_at,
     verificationAttempts: row.verification_attempts,
     verifiedAt: row.verified_at,
+    webhookKeyId: row.webhook_key_id,
   }
 }
 
@@ -53,8 +55,8 @@ export class SubscriptionStore {
       .query(
         `INSERT INTO subscriptions (
           id, rulebook_id, callback_url, management_token_hash, state,
-          created_at, updated_at, revoked_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+          created_at, updated_at, revoked_at, webhook_key_id
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         record.id,
@@ -65,6 +67,7 @@ export class SubscriptionStore {
         record.createdAt,
         record.updatedAt,
         record.revokedAt,
+        record.webhookKeyId,
       )
   }
 
@@ -89,18 +92,22 @@ export class SubscriptionStore {
   /**
    * Delivery-eligible subscriptions of one rulebook (#119): exactly the rows
    * that are `active` *and* carry the verification instant SQLite requires for
-   * that state. Pending, revoked and unrelated-rulebook rows are never
-   * returned, so an event cannot reach an inactive subscriber. The
+   * that state and whose stored key fingerprint matches the deployment key
+   * that would sign the notification. A subscription registered while delivery
+   * was disabled, or under a rotated key, was never given the current secret,
+   * so it is skipped rather than sent a notification it cannot verify.
+   * Pending, revoked and unrelated-rulebook rows are never returned. The
    * `(rulebook_id, state)` index bounds this read.
    */
-  listDeliveryEligibleByRulebook(rulebookId: string): readonly SubscriptionRecord[] {
+  listDeliveryEligibleByRulebook(rulebookId: string, keyId: string): readonly SubscriptionRecord[] {
     return this.database
-      .query<SubscriptionRow, [string]>(
+      .query<SubscriptionRow, [string, string]>(
         `SELECT * FROM subscriptions
          WHERE rulebook_id = ? AND state = 'active' AND verified_at IS NOT NULL
+           AND webhook_key_id = ?
          ORDER BY created_at, id`,
       )
-      .all(rulebookId)
+      .all(rulebookId, keyId)
       .map(toRecord)
   }
 

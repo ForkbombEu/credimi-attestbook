@@ -53,6 +53,13 @@ export interface SubscriptionRecord extends Subscription {
   readonly verificationAttempts: number
   /** Instant the callback proved control, or `null` while unverified. */
   readonly verifiedAt: string | null
+  /**
+   * Non-secret fingerprint of the deployment key this subscription was
+   * registered under (#119), or `null` when delivery was disabled at
+   * registration. A row is delivery-eligible only while this matches the
+   * current deployment key; the derived secret itself is never stored.
+   */
+  readonly webhookKeyId: string | null
 }
 
 /** The bounded rulebook facts the subscription service needs. */

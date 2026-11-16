@@ -8,7 +8,11 @@ import { openDatabase } from './db/database'
 import { applyMigrations } from './db/migrations'
 import { IssuerFixtureGenerator } from './fixtures'
 import { Registry } from './registry'
-import { SubscriptionService, WebhookDeliveryService } from './subscriptions'
+import {
+  DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS,
+  SubscriptionService,
+  WebhookDeliveryService,
+} from './subscriptions'
 import { CredentialValidator, RulebookSnapshotCache } from './validation'
 
 /** Vite writes the built web UI here; `bun run build` produces it. */
@@ -116,7 +120,14 @@ function shutdown(signal: 'SIGINT' | 'SIGTERM'): void {
   console.log(`received ${signal}, shutting down`)
   server
     .stop()
-    .then(() => {
+    .then(async () => {
+      // Give the bounded one-attempt dispatcher a short chance to finish
+      // before closing the database; queued work is in-memory only and is lost
+      // on restart, which the durable outbox issue (#120) will replace.
+      await Promise.race([
+        webhookDelivery.whenIdle(),
+        Bun.sleep(DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS),
+      ])
       database.close()
       process.exit(0)
     })

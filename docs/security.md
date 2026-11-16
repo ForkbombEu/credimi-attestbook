@@ -182,12 +182,16 @@ own management credential, deliberately separate from provider authentication:
   default); exceeding it answers `429` with `Retry-After`. A concurrent handshake for the same
   subscription answers `409 conflict` instead of minting a second challenge. A challenge and an
   attempt are consumed by any outcome other than success.
-- **Publication delivery is derived and signed.** A new publication dispatches one signed
-  `POST` to each active, verified subscription of its rulebook (§2.4). Each subscription's
-  verification secret is derived with HMAC-SHA-256 from the deployment-configured
-  `SUBSCRIPTION_WEBHOOK_SIGNING_KEY` and its id, so it is stable across restarts, independent
-  per subscription and never stored; only the derived secret is returned, once, by registration.
-  The exact body plus timestamp and event id are signed with HMAC-SHA-256 under that secret
+- **Publication delivery is derived, signed and asynchronous.** A new publication enqueues one
+  signed `POST` attempt for each active, verified subscription of its rulebook that was
+  registered under the current deployment key (§2.4), and the publish response returns without
+  waiting on a callback. A global in-flight cap and a bounded in-memory queue bound the work;
+  attempts beyond the queue are dropped with a count-only warning and queued work is lost on
+  restart. Each subscription's verification secret is derived with HMAC-SHA-256 from the
+  deployment-configured `SUBSCRIPTION_WEBHOOK_SIGNING_KEY` and its id, so it is stable across
+  restarts, independent per subscription and never stored; only the derived secret is returned,
+  once, by registration, and the row keeps a truncated non-secret key fingerprint. The exact
+  body plus timestamp and event id are signed with HMAC-SHA-256 under that secret
   (`X-AttestBook-Signature: v1=<hex>`), so a callback can verify authenticity and integrity. A
   missing key disables delivery and issues no secret instead of falling back to a generated or
   committed one; a malformed key fails at startup. Rotating the key invalidates every issued
@@ -229,8 +233,9 @@ enforce:
   callback again at send time, refuses a non-public answer, pins the connection, never follows a
   redirect and applies the same five-second deadline and 8 KiB response cap. A delivery failure
   is typed (`blocked_target`, `dns_failure`, `network_failure`, `timeout`, `redirect_not_followed`,
-  `response_too_large`, `unexpected_status`) and never a success. Delivery is one attempt in this
-  slice; there is no persisted queue, retry loop or delivery-status endpoint yet.
+  `response_too_large`, `unexpected_status`) and never a success. Delivery is asynchronous and
+  one attempt in this slice, bounded by a global in-flight cap and a bounded in-memory queue;
+  there is no persisted queue, retry loop or delivery-status endpoint yet.
 
 ### 2.4 Publication webhook signing
 
@@ -241,8 +246,12 @@ was not altered. The delivery contract is defined in [`docs/api.md`](api.md) §3
   key; the secret is `HMAC-SHA-256(key, "attestbook.subscription.webhook-secret@1\n" + id)`
   rendered as `atw_` + base64url. It is a 256-bit key per subscription, stable across restarts
   and independent across subscriptions. Nothing is stored, so the database contains no
-  plaintext secret and a dump cannot forge a notification. A missing key disables delivery and
-  issues no secret, never a generated fallback; a malformed key fails at startup.
+  plaintext secret and a dump cannot forge a notification. Each row stores only a truncated
+  HMAC fingerprint of the deployment key (`webhook_key_id`), which is neither the key nor the
+  secret and cannot be reversed; delivery selects only rows whose fingerprint matches the
+  current key, so subscriptions registered without a key or under a rotated key are never sent
+  a notification they cannot verify. A missing key disables delivery and issues no secret, never
+  a generated fallback; a malformed key fails at startup.
 - **Exact-body signature.** The canonical input is the versioned context line, the delivery
   timestamp, the event id and the lowercase hex SHA-256 of the exact request body, joined by a
   single LF. `HMAC-SHA-256` of that input is sent as `X-AttestBook-Signature: v1=<hex>` together
@@ -503,14 +512,17 @@ trail is not exposed over HTTP; it is read by operators from the database.
   attempt window are time-bounded. The per-subscription attempt window is a service-level
   read-then-update, so a multi-process deployment could race it; the activation transition
   itself is guarded by a conditional update on the stored challenge hash.
-- **Delivery is one attempt and not yet durable.** A publication dispatches one signed POST per
-  active, verified subscription after the transaction commits, but there is no persisted outbox,
-  retry, backoff or delivery-status endpoint in this slice, and a still-running attempt is not
-  recovered after a restart. A failed attempt is not retried; the subscriber reconciles through
-  the public event feed. Delivery reuses the verification resolver and pinned transport at send
-  time rather than trusting the registration-time check. Deleting a subscription ends
-  eligibility immediately, and the delivery component re-reads the row before contacting it, so
-  a revocation between listing and sending is not delivered.
+- **Delivery is asynchronous, one attempt and not yet durable.** A publication enqueues one
+  signed POST per eligible subscription after the transaction commits, but there is no
+  persisted outbox, retry, backoff or delivery-status endpoint in this slice, and queued or
+  still-running attempts are not recovered after a restart. A global in-flight cap and a
+  bounded in-memory queue limit the work, and attempts beyond the queue are dropped. A failed
+  attempt is not retried; the subscriber reconciles through the public event feed. Delivery
+  reuses the verification resolver and pinned transport at send time rather than trusting the
+  registration-time check. Deleting a subscription ends eligibility immediately, and the
+  delivery component re-reads the row before contacting it, so a revocation between listing and
+  sending is not delivered. A subscription registered without the key, or under a key that has
+  since been rotated, is never contacted; it must re-register under the current key.
 - **No token expiry or rotation policy.** Tokens and the deployment webhook signing key are
   rotated only by changing configuration; a key rotation invalidates previously issued webhook
   secrets.

@@ -1031,9 +1031,13 @@ and activates it.
 `SUBSCRIPTION_WEBHOOK_SIGNING_KEY`. It is derived with HMAC-SHA-256 from that deployment key and
 the subscription id, so it is stable across restarts and independent per subscription, and it is
 never stored in the database. It is returned once here, exactly like the management token, and
-never appears in a readable subscription projection, an error or a log. A deployment without the
-key performs no publication delivery and issues no secret instead of falling back to a generated
-or committed key; the server logs a warning at startup.
+never appears in a readable subscription projection, an error or a log. The subscription row
+stores only a truncated, non-secret fingerprint of the deployment key it was registered under,
+so delivery can tell whether the subscriber was ever given the current secret. A deployment
+without the key performs no publication delivery and issues no secret instead of falling back to
+a generated or committed key; the server logs a warning at startup. A subscription registered
+without a key, or under a key that has since changed, is never contacted and cannot be made
+verifiable retroactively; the subscriber re-registers under the current key.
 
 `GET /api/v1/subscriptions/{subscriptionId}` and
 `DELETE /api/v1/subscriptions/{subscriptionId}` require the per-subscription management token
@@ -1136,13 +1140,21 @@ the flag, so only public HTTPS callbacks are accepted and contacted.
 ### 3.15.2 Signed publication notifications
 
 When a provider publishes a new rulebook version, the durable `rulebook.published` event
-(§3.4.1) is mapped to exactly one JSON notification per **active,
-verified** subscription of the same rulebook. Pending, revoked and unrelated-rulebook rows are
-never contacted, and nothing is delivered for drafts, refreshes, failed publications or an
-idempotent re-publish of an already-published version. The dispatch happens only after the
-publication transaction commits; no outbound request runs inside it. One attempt is made per
-event and subscription, with no retry, queue or persisted delivery status in this slice (a
-separate issue owns durable retries).
+(§3.4.1) is mapped to exactly one JSON notification attempt per **active, verified** subscription
+of the same rulebook that was registered under the current deployment key. Pending, revoked,
+unrelated-rulebook and stale-key rows are never contacted, and nothing is delivered for drafts,
+refreshes, failed publications or an idempotent re-publish of an already-published version. The
+dispatch happens only after the publication transaction commits; no outbound request runs inside
+it.
+
+Delivery is asynchronous: the publish response returns as soon as the attempts are enqueued,
+and it never waits for, or changes because of, a subscriber callback. A global in-flight cap
+(four by default) bounds concurrent outbound requests across all events, and the in-memory queue
+is bounded (10,000 attempts by default); attempts beyond the queue are dropped with a count-only
+server warning that contains no URL or secret. Queued work is lost on restart. This slice makes
+one attempt per event and subscription, with no retry, durable outbox or persisted delivery
+status (a separate issue owns those, #120), so a missed notification is reconciled through the
+public event feed.
 
 The notification body is the stored event projection, so its `id` is the same stable event id
 `GET /api/v1/rulebooks/{rulebookId}/events` serves:
@@ -1206,7 +1218,7 @@ A callback that answers any `2xx` status is a successful delivery regardless of 
 `3xx` answer is a `redirect_not_followed` failure and is never followed; another status is an
 `unexpected_status` failure; an unreachable destination, timeout or oversized response is a
 typed `dns_failure`, `network_failure`, `timeout`, `blocked_target` or `response_too_large`
-failure. A failure is never reported as success and never changes the publication response.
+failure. A failure is never reported as success and never delays or changes the publication response.
 The destination is re-validated and resolved at send time exactly like verification (§3.15.1):
 every resolved answer must be public, the connection is pinned to the validated address,
 redirects are never followed, and the lookup, connection and request share a five-second
@@ -1215,7 +1227,9 @@ the public event feed.
 
 `SUBSCRIPTION_WEBHOOK_SIGNING_KEY` is an unpadded base64url string of at least 32 bytes. It must
 stay stable for the deployment, because a changed or rotated key changes every derived webhook
-secret and invalidates previously issued ones. The key is never returned by the API or logged.
+secret and invalidates previously issued ones; subscriptions bound to an earlier key are skipped
+rather than sent notifications they cannot verify. The key is never returned by the API or
+logged.
 
 ## 4. Errors
 
@@ -1461,10 +1475,12 @@ in [`docs/ui.md`](ui.md).
   token expiry/rotation and provider-administration routes remain future hardening work
   documented in [`docs/security.md`](security.md) §8.
 - Webhook deliveries are one attempt per event and subscription, with no retry, durable outbox,
-  exponential backoff or delivery-status endpoint yet. Delivery runs after the publication
-  transaction commits and uses the same verified target/transport helpers as verification
-  (§3.15.2). A subscriber that misses a notification reconciles through the public event feed;
-  durable retry and recovery are tracked separately. The registration quota is in-process,
+  exponential backoff or delivery-status endpoint yet. Delivery is enqueued after the
+  publication transaction commits, is bounded by a global in-flight cap and a bounded
+  in-memory queue, and uses the same verified target/transport helpers as verification
+  (§3.15.2). Attempts beyond the queue are dropped, and queued work is lost on restart. A
+  subscriber that misses a notification reconciles through the public event feed; durable retry
+  and recovery are tracked separately. The registration quota is in-process,
   resets on restart and is keyed per IPv4 address or IPv6 /64; behind a reverse proxy all
   clients share the proxy socket address because forwarding headers are deliberately not
   trusted. The verification attempt window and the challenge expiry are durable, but

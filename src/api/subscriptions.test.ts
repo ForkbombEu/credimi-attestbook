@@ -699,6 +699,7 @@ describe('publication webhook delivery over HTTP', () => {
       { method: 'POST', headers: authorization },
     )
     expect(published.status).toBe(200)
+    await delivery.whenIdle()
 
     expect(deliveries).toHaveLength(1)
     const request = deliveries[0]
@@ -734,6 +735,7 @@ describe('publication webhook delivery over HTTP', () => {
       { method: 'POST', headers: authorization },
     )
     expect(replay.status).toBe(200)
+    await delivery.whenIdle()
     expect(deliveries).toHaveLength(1)
 
     // A pending subscription of the same rulebook stays ineligible.
@@ -749,6 +751,72 @@ describe('publication webhook delivery over HTTP', () => {
       { method: 'POST', headers: authorization },
     )
     expect(nextPublish.status).toBe(200)
+    await delivery.whenIdle()
     expect(deliveries).toHaveLength(2)
+  })
+
+  test('responds before a slow delivery finishes', async () => {
+    const verification = createVerificationTransport(acknowledgement)
+    fixture = createFixture({
+      webhookSigningKey: WEBHOOK_KEY,
+      resolveCallbackHostname: fakeResolver(),
+      verificationTransport: verification.transport,
+    })
+
+    const registration = await fixture.register()
+    const registered = registeredSubscriptionResponseSchema.parse(await registration.json())
+    const activated = await verify(fixture, registered.data.id, registered.data.managementToken)
+    expect(activated.status).toBe(200)
+
+    let release = (): void => {}
+    const gate = new Promise<void>((resolve) => {
+      release = resolve
+    })
+    let transportSettled = false
+    const deliveries: Http1Request[] = []
+    const delivery = new WebhookDeliveryService({
+      database: fixture.database,
+      signingKey: WEBHOOK_KEY,
+      now: () => FIXED_NOW,
+      resolveCallbackHostname: fakeResolver(),
+      timeoutMs: 30_000,
+      transport: async (request) => {
+        deliveries.push(request)
+        await gate
+        transportSettled = true
+        return {
+          status: 204,
+          headers: {},
+          body: new Uint8Array(),
+          url: request.url,
+        }
+      },
+    })
+    const app = fixture.app(delivery)
+    const authorization = { authorization: bearer(fixture.seeded.token) }
+
+    const created = await app.request(`/api/v1/rulebooks/${fixture.seeded.rulebookId}/versions`, {
+      method: 'POST',
+      headers: { ...authorization, 'content-type': 'application/json' },
+      body: JSON.stringify({ version: '1.1' }),
+    })
+    expect(created.status).toBe(201)
+    const published = await app.request(
+      `/api/v1/rulebooks/${fixture.seeded.rulebookId}/versions/1.1/publish`,
+      { method: 'POST', headers: authorization },
+    )
+    expect(published.status).toBe(200)
+
+    // The delivery request is already in flight, but the publication response
+    // has arrived and does not depend on the subscriber answering.
+    for (let attempt = 0; attempt < 200 && deliveries.length === 0; attempt += 1) {
+      await Bun.sleep(1)
+    }
+    expect(deliveries).toHaveLength(1)
+    expect(transportSettled).toBe(false)
+
+    release()
+    await delivery.whenIdle()
+    expect(transportSettled).toBe(true)
   })
 })

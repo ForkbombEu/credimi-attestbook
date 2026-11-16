@@ -12,6 +12,7 @@ export { SubscriptionService, MAX_SUBSCRIPTION_ID_LENGTH } from './service'
 export {
   buildWebhookNotificationBody,
   canonicalWebhookSigningInput,
+  DEFAULT_MAX_PENDING_WEBHOOK_DELIVERIES,
   DEFAULT_MAX_WEBHOOK_RESPONSE_BYTES,
   DEFAULT_WEBHOOK_DELIVERY_CONCURRENCY,
   DEFAULT_WEBHOOK_DELIVERY_TIMEOUT_MS,
@@ -21,6 +22,7 @@ export {
   parseWebhookSigningKey,
   signWebhookRequest,
   verifyWebhookSignature,
+  webhookSigningKeyId,
   WEBHOOK_CONTENT_TYPE,
   WEBHOOK_EVENT_ID_HEADER,
   WEBHOOK_EVENT_TYPE_HEADER,
