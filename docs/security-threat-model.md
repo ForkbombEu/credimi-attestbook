@@ -218,7 +218,7 @@ and therefore creates no new audit row.
 | Discovery | Configurations / type ids / refs / auth servers | 200 / 32 / 16 / 16 | `src/discovery/metadata.ts` |
 | Schema documents | Depth / claim nodes / extends depth | 64 / 4 096 / 10 | `MAX_SCHEMA_DEPTH`, `MAX_CREDENTIAL_CLAIM_NODES`, `MAX_EXTENDS_DEPTH` |
 | Schema evaluation | Time / RSS / output / concurrency | 2 s / 256 MiB / 1 MiB / 2 | `DEFAULT_SANDBOX_LIMITS`, configurable by `SCHEMA_SANDBOX_*` |
-| Schema sandbox process | Child environment / scratch directory | allowlist of 3 temp/cache variables, one private 0700 directory per child, removed afterwards; the base must be owned by the runtime user or sticky and is never chmod-ed | `sandboxChildEnvironment`, `createSandboxTempDirectory`, configurable base by `SANDBOX_TEMP_DIR` |
+| Schema sandbox process | Child environment / scratch directory | allowlist of 3 temp/cache variables, one private 0700 directory per child, removed afterwards; the base must be owned by the runtime user, or be sticky and root-owned; it is never chmod-ed | `sandboxChildEnvironment`, `createSandboxTempDirectory`, configurable base by `SANDBOX_TEMP_DIR` |
 | Registry write | Attestations / references / metadata / batch | 64 / 16 / 64 KiB / 100 | `src/registry/validation.ts` |
 | Capture submission | Envelope / JSON depth / values / string | 512 KiB / 24 / 4 096 / 384 KiB | `DEFAULT_CAPTURE_LIMITS` |
 | Capture artifact | Inline bytes / reference URI | 256 KiB / 2 048 | `DEFAULT_CAPTURE_LIMITS` |

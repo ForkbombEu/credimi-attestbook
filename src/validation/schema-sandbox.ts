@@ -212,30 +212,68 @@ export interface SandboxTempDirectory {
   cleanup(): Promise<void>
 }
 
+export interface SandboxBaseStat {
+  readonly isDirectory: boolean
+  readonly isSymbolicLink: boolean
+  readonly uid: number
+  readonly mode: number
+}
+
+/**
+ * Decides whether a sandbox base directory is safe to create children in.
+ * Returns `null` when it is, or a fixed reason otherwise.
+ *
+ * The base is used as-is and never chmod-ed, so the runtime user must control
+ * it: either it is owned by the runtime user, or it is a sticky directory
+ * owned by root (like `/tmp`) where our entry cannot be renamed by another
+ * account. A sticky directory owned by another account is not enough, because
+ * its owner can rename or remove any entry in it.
+ */
+export function sandboxBaseRefusal(
+  info: SandboxBaseStat,
+  runtimeUid: number | undefined,
+): string | null {
+  if (info.isSymbolicLink || !info.isDirectory) {
+    return 'not a directory'
+  }
+  if (runtimeUid === undefined) {
+    return 'unknown runtime user'
+  }
+  if (info.uid === runtimeUid) {
+    return null
+  }
+  const sticky = (info.mode & 0o1000) !== 0
+  if (sticky && info.uid === 0) {
+    return null
+  }
+  return 'not owned by the runtime user or by root'
+}
+
 /**
  * Creates one private (0700) directory for a single child and returns its
  * cleanup.
  *
- * The configured base is used as-is and is never chmod-ed: it may be a
- * deployment directory owned by the runtime user or a sticky shared directory
- * such as `/tmp`. Only the directory created here is made private. A base that
- * is not a real directory, or that another account controls and could replace,
- * is refused; the caller maps any throw to a controlled sandbox failure.
+ * The configured base is used as-is and is never chmod-ed: it must be a real
+ * directory owned by the runtime user, or a sticky directory owned by root such
+ * as `/tmp`. Only the directory created here is made private. A base that is
+ * not a real directory, or that another account controls and could replace, is
+ * refused; the caller maps any throw to a controlled sandbox failure.
  */
 export async function createSandboxTempDirectory(base?: string): Promise<SandboxTempDirectory> {
   const root = base ?? defaultSandboxTempBase()
   await mkdir(root, { recursive: true, mode: 0o700 })
   const info = await lstat(root)
-  if (!info.isDirectory()) {
-    // A symlink (or a file) could redirect the child's scratch space.
-    throw new Error('sandbox base is not a directory')
-  }
-  const uid = process.getuid?.()
-  const ownedByRuntimeUser = uid !== undefined && info.uid === uid
-  const sticky = (info.mode & 0o1000) !== 0
-  if (!ownedByRuntimeUser && !sticky) {
-    // Another account could rename or replace our per-child directory.
-    throw new Error('sandbox base is not owned by the runtime user')
+  const refusal = sandboxBaseRefusal(
+    {
+      isDirectory: info.isDirectory(),
+      isSymbolicLink: info.isSymbolicLink(),
+      uid: info.uid,
+      mode: info.mode,
+    },
+    process.getuid?.(),
+  )
+  if (refusal !== null) {
+    throw new Error(`sandbox base refused: ${refusal}`)
   }
   const path = await mkdtemp(join(root, 'run-'))
   const created = await lstat(path)

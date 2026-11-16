@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   chmodSync,
   existsSync,
+  lstatSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
@@ -18,6 +19,7 @@ import {
   SANDBOX_CHILD_ENVIRONMENT_KEYS,
   runSandboxChild,
   runSchemaSandbox,
+  sandboxBaseRefusal,
   validateSchemaDocuments,
 } from './schema-sandbox'
 import { parseSdJwtVc, type ParsedSdJwtVc } from './sd-jwt'
@@ -369,7 +371,7 @@ describe('sandbox child environment', () => {
     }
   })
 
-  test('accepts a sticky shared base directory without changing its mode', async () => {
+  test('leaves an owned sticky base directory mode untouched', async () => {
     if (process.platform !== 'linux') {
       return
     }
@@ -390,6 +392,30 @@ describe('sandbox child environment', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+
+  test('accepts the real root-owned sticky temporary directory', async () => {
+    if (process.platform !== 'linux') {
+      return
+    }
+    const info = lstatSync('/tmp')
+    if (!info.isDirectory() || info.uid !== 0 || (info.mode & 0o1000) === 0) {
+      return
+    }
+    const before = info.mode & 0o7777
+    const outcome = await runSandboxChild(
+      fixture('env-entry.ts'),
+      {},
+      { tempDir: '/tmp', timeoutMs: 5_000 },
+    )
+
+    expect(outcome.kind).toBe('ok')
+    if (outcome.kind !== 'ok') {
+      return
+    }
+    const { tmpMode } = JSON.parse(outcome.raw) as { tmpMode: number | null }
+    expect(tmpMode).toBe(0o700)
+    expect(statSync('/tmp').mode & 0o7777).toBe(before)
   })
 
   test('refuses a base that is a symlink without writing through it', async () => {
@@ -475,6 +501,57 @@ describe('sandbox child environment', () => {
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
+  })
+})
+
+describe('sandbox base policy', () => {
+  const ownedDirectory = {
+    isDirectory: true,
+    isSymbolicLink: false,
+    uid: 1000,
+    mode: 0o40755,
+  }
+
+  test('accepts a directory owned by the runtime user', () => {
+    expect(sandboxBaseRefusal(ownedDirectory, 1000)).toBeNull()
+  })
+
+  test('accepts a root-owned sticky directory like /tmp', () => {
+    expect(sandboxBaseRefusal({ ...ownedDirectory, uid: 0, mode: 0o41777 }, 1000)).toBeNull()
+  })
+
+  test('refuses a sticky directory owned by another account', () => {
+    expect(sandboxBaseRefusal({ ...ownedDirectory, uid: 1001, mode: 0o41777 }, 1000)).not.toBeNull()
+  })
+
+  test('refuses a world-writable directory owned by another account', () => {
+    expect(sandboxBaseRefusal({ ...ownedDirectory, uid: 1001, mode: 0o40777 }, 1000)).not.toBeNull()
+  })
+
+  test('refuses a root-owned world-writable directory that is not sticky', () => {
+    expect(sandboxBaseRefusal({ ...ownedDirectory, uid: 0, mode: 0o40777 }, 1000)).not.toBeNull()
+  })
+
+  test('refuses a symlink', () => {
+    expect(
+      sandboxBaseRefusal(
+        { isDirectory: false, isSymbolicLink: true, uid: 1000, mode: 0o120777 },
+        1000,
+      ),
+    ).not.toBeNull()
+  })
+
+  test('refuses a regular file', () => {
+    expect(
+      sandboxBaseRefusal(
+        { isDirectory: false, isSymbolicLink: false, uid: 1000, mode: 0o100644 },
+        1000,
+      ),
+    ).not.toBeNull()
+  })
+
+  test('refuses when the runtime user is unknown', () => {
+    expect(sandboxBaseRefusal(ownedDirectory, undefined)).not.toBeNull()
   })
 })
 
