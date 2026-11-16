@@ -150,6 +150,7 @@ describe('anonymous subscription registration over HTTP', () => {
     // Without the management token the callback URL is not readable.
     const anonymous = await fixture.app().request(managementPath(body.data.id))
     expect(anonymous.status).toBe(401)
+    expect(anonymous.headers.get('www-authenticate')).toBeNull()
     expect((await jsonBody<{ error: { code: string } }>(anonymous)).error.code).toBe('unauthorized')
 
     // The provider bearer token is not a subscription credential.
@@ -157,6 +158,7 @@ describe('anonymous subscription registration over HTTP', () => {
       headers: { authorization: bearer(fixture.seeded.token) },
     })
     expect(provider.status).toBe(401)
+    expect(provider.headers.get('www-authenticate')).toBeNull()
 
     // With the correct token the subscriber sees its own record and no secret.
     const readable = await fixture.app().request(managementPath(body.data.id), {
@@ -231,6 +233,41 @@ describe('anonymous subscription registration over HTTP', () => {
     )
   })
 
+  test('requires a JSON content type so a cross-site form cannot register', async () => {
+    fixture = createFixture()
+    const payload = { callbackUrl: 'https://subscriber.example.test/webhook' }
+
+    const textPlain = await fixture.register(undefined, payload, {
+      'content-type': 'text/plain',
+    })
+    expect(textPlain.status).toBe(400)
+    expect((await jsonBody<{ error: { code: string } }>(textPlain)).error.code).toBe(
+      'invalid_request',
+    )
+    expect(textPlain.headers.get('location')).toBeNull()
+    expect(rows(fixture.database)).toHaveLength(0)
+
+    // A body sent without a content type (an ArrayBuffer body is not given an
+    // implicit one by fetch) is refused the same way.
+    const noContentType = await fixture
+      .app()
+      .request(`/api/v1/rulebooks/${fixture.seeded.rulebookId}/subscriptions`, {
+        method: 'POST',
+        body: new TextEncoder().encode(JSON.stringify(payload)),
+      })
+    expect(noContentType.status).toBe(400)
+    expect((await jsonBody<{ error: { code: string } }>(noContentType)).error.code).toBe(
+      'invalid_request',
+    )
+    expect(rows(fixture.database)).toHaveLength(0)
+
+    const withCharset = await fixture.register(undefined, payload, {
+      'content-type': 'application/json; charset=utf-8',
+    })
+    expect(withCharset.status).toBe(201)
+    expect(rows(fixture.database)).toHaveLength(1)
+  })
+
   test('registration performs no outbound request', async () => {
     fixture = createFixture()
     const originalFetch = globalThis.fetch
@@ -259,21 +296,25 @@ describe('subscription management over HTTP', () => {
       headers: { authorization: bearer(first.token) },
     })
     expect(foreign.status).toBe(401)
+    expect(foreign.headers.get('www-authenticate')).toBeNull()
 
     const missing = await fixture.app().request(managementPath('missing-subscription'), {
       headers: { authorization: bearer(first.token) },
     })
     expect(missing.status).toBe(401)
+    expect(missing.headers.get('www-authenticate')).toBeNull()
 
     const wrong = await fixture.app().request(managementPath(first.id), {
       headers: { authorization: bearer('ats_wrong') },
     })
     expect(wrong.status).toBe(401)
+    expect(wrong.headers.get('www-authenticate')).toBeNull()
 
     const malformed = await fixture.app().request(managementPath(first.id), {
       headers: { authorization: 'Basic abc' },
     })
     expect(malformed.status).toBe(401)
+    expect(malformed.headers.get('www-authenticate')).toBeNull()
   })
 
   test('deletes idempotently, revokes immediately and answers 404 afterwards', async () => {

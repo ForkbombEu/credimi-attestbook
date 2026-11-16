@@ -150,7 +150,8 @@ function isBlockedIpv4(value: number): boolean {
   return false
 }
 
-function parseIpv6(address: string): readonly number[] | null {
+/** Parses an IPv6 address into its eight groups, or `null` when it is malformed. */
+export function parseIpv6(address: string): readonly number[] | null {
   const input = address.toLowerCase()
   if (input === '' || input.includes('%')) {
     return null

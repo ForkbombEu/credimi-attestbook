@@ -159,7 +159,10 @@ own management credential, deliberately separate from provider authentication:
 - **Registration needs no credential.** `POST /api/v1/rulebooks/{rulebookId}/subscriptions`
   accepts only a bounded `callbackUrl`, requires the rulebook to have a published or historical
   version, and stores a `pending` subscription. The route does not read an `Authorization`
-  header or a cookie, and the provider transport is neither weakened nor reused.
+  header or a cookie, and the provider transport is neither weakened nor reused. The request
+  must use `Content-Type: application/json`; this forces a CORS preflight for a cross-site form
+  or no-cors fetch, so another site cannot make a visitor's browser register for it (the
+  application sends no CORS headers). A body of another content type, or none, answers `400`.
 - **The token is the only key to one subscription.** Registration mints 256 random bits with
   the `ats_` prefix and returns the plaintext exactly once; only its SHA-256 hash is stored
   (`subscriptions.management_token_hash`). `GET` and `DELETE /api/v1/subscriptions/{id}`
@@ -398,8 +401,15 @@ trail is not exposed over HTTP; it is read by operators from the database.
   successful registrations and keys on the socket's remote address. Behind a reverse proxy all
   clients therefore share the proxy's address, and forwarding headers are deliberately not
   trusted; a distributed deployment would need a shared store or a trusted-proxy configuration.
-  The per-rulebook bound is durable, but it is a service-level count-and-insert, not a
-  database constraint, so a multi-process deployment sharing one SQLite file could race it.
+  IPv4 is keyed per address and IPv6 per /64, because one host normally controls a whole /64;
+  an IPv4-mapped IPv6 address is keyed as its IPv4 address, so it is never put in a shared /64
+  bucket. The limiter tracks at most 10,000 keys and drops the oldest insertion-order key beyond
+  that, so a client able to present very many keys could displace its own entry. The
+  per-rulebook bound is durable, but it is a service-level count-and-insert, not a database
+  constraint, so a multi-process deployment sharing one SQLite file could race it. Pending
+  subscriptions do not expire and there is no operator cleanup, so a full per-rulebook bound
+  stays full until subscribers revoke rows; expiry belongs to the later verification/delivery
+  slice.
 - **Subscriptions do not verify their callback and deliver nothing.** A registration stays
   `pending`; this slice never resolves or contacts the callback host, never activates a
   subscription and never sends an event. The callback URL is validated statically at
@@ -525,13 +535,17 @@ trail is not exposed over HTTP; it is read by operators from the database.
   rejected userinfo, fragments, backslashes, control characters, single-label and blocked
   hostnames, blocked IP ranges, the test-only loopback opt-in, normalization and the absence of
   any lookup. `src/subscriptions/token.test.ts` covers token shape and hash-only comparison.
+  `src/subscriptions/rate-limit.test.ts` covers IPv4 per-address keys, IPv6 per-/64 aggregation,
+  IPv4-mapped IPv6 normalization and the bounded fallback key.
   `src/subscriptions/subscriptions.test.ts` covers anonymous registration, the one-time token,
   management-token-only reads and idempotent revocation, cross-subscriber refusal, the
-  per-rulebook and per-client bounds, invalid-attempt quota behaviour, restart persistence and
-  the absence of a stored client address; a patched `fetch` proves registration performs no
-  network request. `src/api/subscriptions.test.ts` covers the same boundary through the real
-  Hono application, including UAT-1, UAT-2, `401` uniformity, `404` after revocation, `429`
-  with `Retry-After`, `409` at the rulebook bound and `503` when the service is not wired.
+  per-rulebook and per-client bounds, IPv6 /64 quota aggregation, invalid-attempt quota
+  behaviour, restart persistence and the absence of a stored client address; a patched `fetch`
+  proves registration performs no network request. `src/api/subscriptions.test.ts` covers the
+  same boundary through the real Hono application, including UAT-1, UAT-2, `401` uniformity
+  without a provider bearer challenge, `404` after revocation, the JSON content-type refusal,
+  `429` with `Retry-After`, `409` at the rulebook bound and `503` when the service is not
+  wired.
 - Run `bun run check` and `bun run openapi:check` from the repository root.
 
 - **Capture explorer and correlation.** `src/capture/explorer.test.ts` and

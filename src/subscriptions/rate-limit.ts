@@ -8,8 +8,19 @@
 // forwarding header; behind a reverse proxy every client therefore shares the
 // proxy's address, which is documented as a limitation.
 //
+// A single IPv6 host normally controls a whole /64, so an exact-address key
+// would let one host rotate addresses and bypass the quota. IPv6 keys are
+// therefore aggregated to their /64, while IPv4 keys stay per address and an
+// IPv4-mapped IPv6 address is treated as the IPv4 client it represents.
+//
 // The quota is in memory and resets when the process restarts. The durable
-// per-rulebook bound is enforced separately against SQLite.
+// per-rulebook bound is enforced separately against SQLite. Tracking is bounded:
+// past `maxKeys` the oldest insertion-order key is dropped to admit the new one,
+// so a client that can present very many keys could displace its own entry.
+
+import { isIP } from 'node:net'
+
+import { parseIpv6 } from '../import/url'
 
 import type { SubscriptionLimits } from './types'
 
@@ -33,10 +44,57 @@ export interface SubscriptionRegistrationLimiterOptions {
   readonly now?: () => number
 }
 
-/** Normalizes a client key to a bounded, non-secret lookup value. */
+function stripBrackets(key: string): string {
+  return key.startsWith('[') && key.endsWith(']') ? key.slice(1, -1) : key
+}
+
+/** Renders the embedded IPv4 address of an IPv4-mapped IPv6 address. */
+function mappedIpv4(groups: readonly number[]): string | null {
+  const high = groups[6]
+  const low = groups[7]
+  if (high === undefined || low === undefined) {
+    return null
+  }
+  return `${String(high >> 8)}.${String(high & 0xff)}.${String(low >> 8)}.${String(low & 0xff)}`
+}
+
+/**
+ * Normalizes a client key to a bounded, non-secret lookup value. IPv4 is keyed
+ * per address, IPv6 per /64, and an IPv4-mapped IPv6 address as its IPv4
+ * address, so the quota cannot be bypassed by rotating a host's IPv6 addresses.
+ */
 export function normalizeSubscriptionClientKey(clientKey: string): string {
-  const normalized = clientKey.trim().slice(0, 128).toLowerCase()
-  return normalized === '' ? 'unknown' : normalized
+  const raw = clientKey.trim().toLowerCase().slice(0, 128)
+  const address = stripBrackets(raw)
+
+  if (isIP(address) === 4) {
+    return `ipv4:${address}`
+  }
+  if (isIP(address) === 6) {
+    const groups = parseIpv6(address)
+    if (groups !== null) {
+      if (
+        groups[0] === 0 &&
+        groups[1] === 0 &&
+        groups[2] === 0 &&
+        groups[3] === 0 &&
+        groups[4] === 0 &&
+        groups[5] === 0xffff
+      ) {
+        const mapped = mappedIpv4(groups)
+        if (mapped !== null) {
+          return `ipv4:${mapped}`
+        }
+      }
+      const prefix = groups
+        .slice(0, 4)
+        .map((group) => group.toString(16))
+        .join(':')
+      return `ipv6:${prefix}::/64`
+    }
+  }
+
+  return raw === '' ? 'unknown' : raw
 }
 
 export class SubscriptionRegistrationLimiter {

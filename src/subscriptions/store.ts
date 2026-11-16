@@ -1,7 +1,7 @@
 // SQL persistence for anonymous webhook subscriptions (issue #117).
 //
 // This module owns SQL and row mapping only; validation, token authentication
-// and quota orchestration live in `subscriptions.ts`, so repository code cannot
+// and quota orchestration live in `service.ts`, so repository code cannot
 // accidentally bypass them. No token plaintext, client address or provider
 // identity is written here.
 

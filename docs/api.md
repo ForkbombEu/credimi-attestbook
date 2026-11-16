@@ -949,6 +949,11 @@ Request body (unknown members are ignored):
 { "callbackUrl": "https://subscriber.example.test/webhook" }
 ```
 
+The request must use `Content-Type: application/json`; a different content type or none
+answers `400 invalid_request`. This forces a CORS preflight for a cross-site form or no-cors
+fetch, so a third-party page cannot make a visitor's browser register a subscription (the
+application sends no CORS headers).
+
 `callbackUrl` is required, bounded to 2,048 characters before and after normalization, and
 must be an absolute `https` URL without embedded credentials or a fragment. The raw text must
 be printable ASCII without backslashes, so a parser-difference form cannot hide another host.
@@ -966,13 +971,19 @@ working copy may be a draft for the next version, because the rulebook is still 
 readable and has published artifacts. An unknown rulebook answers `404`; a rulebook with no
 published version, or one already at its live-subscription bound, answers `409`; an invalid or
 unsafe URL answers `400`; and an oversized body answers `413`. None of these creates a record.
-Registrations are additionally bounded per client address in an in-process sliding window
-(ten successful registrations per ten minutes by default); exceeding it answers `429` with
+Registrations are additionally bounded per client in an in-process sliding window (ten
+successful registrations per ten minutes by default); exceeding it answers `429` with
 `Retry-After` and `details.retryAfterSeconds`. The client key is the socket's remote address:
 `X-Forwarded-For` and other request forwarding headers are never trusted, so behind a reverse
-proxy all clients share the proxy's address. The quota is not persisted and resets on restart.
-The per-rulebook bound (1,000 live subscriptions by default) is durable and enforced against
-SQLite. No client address is stored.
+proxy all clients share the proxy's address. IPv4 is keyed per address; IPv6 is keyed per /64,
+because one host normally controls a whole /64, and an IPv4-mapped IPv6 address is keyed as the
+IPv4 client it represents. The limiter tracks at most 10,000 keys and drops the oldest
+insertion-order key beyond that, so a client able to present very many keys could displace its
+own entry. The quota is not persisted and resets on restart. The per-rulebook bound (1,000 live
+subscriptions by default) is durable and enforced against SQLite. No client address is stored.
+Pending subscriptions do not expire and there is no operator cleanup, so a rulebook whose bound
+is full stays closed to new registrations until subscribers revoke rows; expiry is left to the
+later verification/delivery slice.
 
 Success is `201` with a `Location` header and one `RegisteredSubscription`:
 
@@ -1240,9 +1251,11 @@ in [`docs/ui.md`](ui.md).
   callback owner, activates a subscription, resolves or connects to the callback host, retries
   or delivers an event. Every registration stays `pending` and no delivery eligibility exists
   yet; callback network safety must be re-verified at activation and delivery time. The
-  registration quota is in-process and resets on restart, and behind a reverse proxy all
-  clients share the proxy socket address because forwarding headers are deliberately not
-  trusted. The per-rulebook bound is durable.
+  registration quota is in-process, resets on restart and is keyed per IPv4 address or IPv6
+  /64; behind a reverse proxy all clients share the proxy socket address because forwarding
+  headers are deliberately not trusted. The per-rulebook bound is durable, but pending
+  subscriptions never expire and there is no operator cleanup, so a full bound stays full until
+  subscribers revoke rows.
 - The administrator login is one environment-configured account with no MFA, self-service
   password change or account management API; rotating the password means changing
   `ADMIN_PASSWORD_HASH` and restarting. The failure limiter is in-process and resets on

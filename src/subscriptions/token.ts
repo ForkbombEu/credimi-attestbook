@@ -19,9 +19,6 @@ export const MAX_SUBSCRIPTION_MANAGEMENT_TOKEN_LENGTH = 128
 
 const TOKEN_HASH_PATTERN = /^[0-9a-f]{64}$/
 
-/** A fixed hash used to keep an unknown-subscription check timing-uniform. */
-const UNKNOWN_SUBSCRIPTION_TOKEN_HASH = '0'.repeat(64)
-
 /** Mints a fresh opaque management token. */
 export function generateSubscriptionManagementToken(): string {
   return `${SUBSCRIPTION_MANAGEMENT_TOKEN_PREFIX}${randomBytes(32).toString('base64url')}`
@@ -52,13 +49,4 @@ export function subscriptionManagementTokenMatches(presented: string, storedHash
   return (
     presentedHash.length === expectedHash.length && timingSafeEqual(presentedHash, expectedHash)
   )
-}
-
-/**
- * Performs the same hashing and comparison work when no subscription row
- * exists, so a wrong id and a wrong token do not differ by an early return.
- * The result is intentionally discarded.
- */
-export function equalizeUnknownSubscriptionTokenCheck(presented: string): void {
-  subscriptionManagementTokenMatches(presented, UNKNOWN_SUBSCRIPTION_TOKEN_HASH)
 }

@@ -214,7 +214,11 @@ export function toApiError(error: unknown): {
       case 'invalid_input':
         return { status: 400, body: errorEnvelope('invalid_request', error.message) }
       case 'unauthorized':
-        return { status: 401, body: errorEnvelope('unauthorized', error.message) }
+        return {
+          status: 401,
+          body: errorEnvelope('unauthorized', error.message),
+          challenge: false,
+        }
       case 'not_found':
         return { status: 404, body: errorEnvelope('not_found', error.message) }
       case 'conflict':

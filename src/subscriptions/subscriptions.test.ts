@@ -277,6 +277,22 @@ describe('anonymous subscription registration', () => {
     expect(fixture.service.register(registration()).state).toBe('pending')
     expect(fixture.service.register(registration()).state).toBe('pending')
   })
+
+  test('aggregates an IPv6 client quota to its /64 prefix', () => {
+    fixture = createSubscriptionFixture({
+      limits: { registrationsPerClient: 1, registrationWindowMs: 60_000 },
+    })
+    expect(fixture.service.register(registration({ clientKey: '2001:db8:1:2::1' })).state).toBe(
+      'pending',
+    )
+    expect(
+      expectError(() => fixture?.service.register(registration({ clientKey: '2001:db8:1:2::2' }))),
+    ).toBe('rate_limited')
+    expect(fixture.service.register(registration({ clientKey: '2001:db8:1:3::1' })).state).toBe(
+      'pending',
+    )
+    expect(subscriptionRows(fixture.database)).toHaveLength(2)
+  })
 })
 
 describe('subscription management', () => {

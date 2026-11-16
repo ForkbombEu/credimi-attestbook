@@ -1335,7 +1335,7 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
     path: '/api/v1/rulebooks/:rulebookId/subscriptions',
     summary: 'Register an anonymous webhook subscription',
     description:
-      'Registers one pending (inactive) webhook subscription for an existing rulebook that has a published or historical version. No AttestBook account, provider bearer token, session cookie or CSRF token is required, and publishing or editing rulebooks remains authenticated. The body carries only `callbackUrl`: an absolute `https` URL on a public host without embedded credentials or a fragment; a plain `http` loopback URL is accepted only by an opt-in local test configuration. The URL is validated and normalized before storage. The response returns the opaque `id`, the `pending` state and a one-time `managementToken`; only the token hash is stored, so the plaintext cannot be recovered later. Unknown rulebooks answer 404, invalid payloads 400 and a rulebook without a published version or at its subscription bound 409, without creating a record. Repeated registrations from one client are bounded by an in-process quota that answers 429 with Retry-After. Registration performs no outbound request and starts no delivery.',
+      'Registers one pending (inactive) webhook subscription for an existing rulebook that has a published or historical version. No AttestBook account, provider bearer token, session cookie or CSRF token is required, and publishing or editing rulebooks remains authenticated. The request must use `Content-Type: application/json`; any other content type answers 400, which prevents a cross-site HTML form or no-cors fetch from registering on a visitor’s behalf. The body carries only `callbackUrl`: an absolute `https` URL on a public host without embedded credentials or a fragment; a plain `http` loopback URL is accepted only by an opt-in local test configuration. The URL is validated and normalized before storage. The response returns the opaque `id`, the `pending` state and a one-time `managementToken`; only the token hash is stored, so the plaintext cannot be recovered later. Unknown rulebooks answer 404, invalid payloads 400 and a rulebook without a published version or at its subscription bound 409, without creating a record. Repeated registrations from one client are bounded by an in-process quota that answers 429 with Retry-After. Registration performs no outbound request and starts no delivery.',
     tag: 'subscriptions',
     security: false,
     parameters: [PATH_ID],
@@ -2698,6 +2698,10 @@ function subscriptionManagementToken(context: Context): string {
 function registerRulebookSubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const subscriptions = requireSubscriptions(dependencies.subscriptions)
+    // Requiring JSON forces a CORS preflight for a cross-site form or no-cors
+    // fetch, so a third-party page cannot make a visitor's browser register a
+    // subscription. The app sends no CORS headers.
+    assertJsonRequest(context)
     const body = requireRecord(await readJsonBody(context), 'request body')
     const subscription = subscriptions.register({
       rulebookId: context.req.param('rulebookId') ?? '',
