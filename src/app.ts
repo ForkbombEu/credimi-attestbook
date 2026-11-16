@@ -12,6 +12,7 @@ import type { Context } from 'hono'
 import { bodyLimit } from 'hono/body-limit'
 
 import { BEARER_CHALLENGE, errorEnvelope, toApiError } from './api/errors'
+import { OPENAPI_DOCUMENT_PATH, buildOpenApiDocument } from './api/openapi'
 import { MAX_API_BODY_BYTES, registerApiRoutes, type ApiDependencies } from './api/routes'
 
 export type { ErrorEnvelope } from './api/errors'
@@ -21,6 +22,12 @@ export interface HealthResponse {
   readonly service: 'attestbook'
   readonly version: string
 }
+
+/**
+ * The generated contract is static for a build, so build it once and serve the
+ * same document to every client.
+ */
+const OPENAPI_DOCUMENT = buildOpenApiDocument()
 
 export interface AppOptions extends ApiDependencies {
   /**
@@ -121,6 +128,12 @@ export function createApp(options: AppOptions = {}): Hono {
   )
 
   registerApiRoutes(app, options)
+
+  // Public, unauthenticated machine-readable contract. The endpoint is
+  // unversioned and outside the product API's `/api/v1` prefix; serving the
+  // generated document here introduces no second contract or new business
+  // route, and every other unknown path keeps the JSON not-found envelope.
+  app.get(OPENAPI_DOCUMENT_PATH, (context) => context.json(OPENAPI_DOCUMENT))
 
   if (options.uiRoot !== undefined) {
     const uiRoot = resolve(options.uiRoot)

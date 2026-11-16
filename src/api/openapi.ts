@@ -18,6 +18,13 @@ export const API_CONTRACT_VERSION = '1.17.0'
 /** URL prefix that carries the product API's major version. */
 export const API_VERSION_PREFIX = '/api/v1'
 
+/**
+ * Public, unversioned path that serves this generated document as JSON. It is
+ * deliberately outside `API_ROUTES`: the documentation endpoint describes the
+ * contract, while `/api/v1` carries the product API's major version.
+ */
+export const OPENAPI_DOCUMENT_PATH = '/openapi.json'
+
 type JsonObject = Record<string, unknown>
 
 export interface OpenApiDocument {

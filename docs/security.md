@@ -29,7 +29,7 @@ hashes, callback verification and their abuse bounds).
 
 | Actor | Credentials | Authority |
 | --- | --- | --- |
-| Anonymous reader | none | Public catalogue, attestation, schema-reference, version, snapshot, stored credential-schema metadata/content and health reads; structural credential validation. |
+| Anonymous reader | none | Public catalogue, attestation, schema-reference, version, snapshot, stored credential-schema metadata/content, health and generated OpenAPI contract-document reads; structural credential validation. |
 | Anonymous subscriber | none to register; a per-subscription management token (`Authorization: Bearer ats_…`) to manage and verify that one subscription | Register one **pending** webhook subscription for a publicly published rulebook, read or revoke it, and explicitly verify its callback before it becomes active, all through its own management token (issues #117 and #118). Registration, management and verification grant no provider or publication authority, never expose another subscriber's callback URL, and never trigger an outbound request except the explicit verification handshake. |
 | Provider account | Provider bearer token (`Authorization: Bearer att_…`) | Create and mutate only the rulebooks owned by that provider; import drafts owned by that provider; preview imports; discover issuer metadata. |
 | Administrator (browser) | Environment-configured username and Argon2id password hash; opaque session cookie plus its session-bound CSRF token | Authorize the same protected provider write routes a bearer token authorizes, as the bound **existing** provider (issue #89). The session resolves to the same trusted actor as a token; every state-changing cookie request must echo `X-CSRF-Token`. It does not create a provider or mint or expose a bearer token. |
@@ -256,6 +256,7 @@ The following rules implement that model:
 | Operation | Auth | Ownership rule | Denial |
 | --- | --- | --- | --- |
 | `GET /health` | no | n/a | n/a |
+| `GET /openapi.json` | no | n/a; serves the generated contract document, never a deployment credential | n/a |
 | `POST /api/v1/auth/login` | environment credentials | Binds the configured existing provider; never creates a provider or mints a token; returns the session CSRF token | `401` generic; `403` cross-origin; `429` rate limited; `503` unconfigured |
 | `GET /api/v1/auth/me` | session cookie | Resolves only its own live session; returns the public provider projection and the session CSRF token | `401` for missing, expired or revoked sessions |
 | `POST /api/v1/auth/logout` | session cookie + CSRF token | Revokes its own session; idempotent; a live session requires its CSRF token, an absent one needs none | `403` cross-origin or `csrf_failed`; `204` when there is nothing to revoke |
