@@ -20,14 +20,17 @@ authentication).
 `src/api/errors.ts` (typed error mapping), `src/app.ts` (HTTP assembly),
 `src/registry/registry.ts` (ownership enforcement), `src/registry/bootstrap.ts` (operator
 provisioning), `src/registry/tokens.ts` (token primitives), `src/auth/` (environment
-administrator login, sessions, rate limiting and origin checks) and
-`migrations/0004_admin_sessions.sql` (hashed session rows).
+administrator login, sessions, rate limiting and origin checks),
+`migrations/0004_admin_sessions.sql` (hashed session rows) and `src/subscriptions/`
+(anonymous pending registrations, hashed per-subscription management tokens and their
+registration quota).
 
 ## 1. Trust boundaries and actors
 
 | Actor | Credentials | Authority |
 | --- | --- | --- |
 | Anonymous reader | none | Public catalogue, attestation, schema-reference, version, snapshot, stored credential-schema metadata/content and health reads; structural credential validation. |
+| Anonymous subscriber | none to register; a per-subscription management token (`Authorization: Bearer ats_…`) to manage that one subscription | Register one **pending** webhook subscription for a publicly published rulebook and read or revoke only that subscription through its own management token (issue #117). Registration and management grant no provider or publication authority, never expose another subscriber's callback URL and never trigger an outbound request or delivery. |
 | Provider account | Provider bearer token (`Authorization: Bearer att_…`) | Create and mutate only the rulebooks owned by that provider; import drafts owned by that provider; preview imports; discover issuer metadata. |
 | Administrator (browser) | Environment-configured username and Argon2id password hash; opaque session cookie plus its session-bound CSRF token | Authorize the same protected provider write routes a bearer token authorizes, as the bound **existing** provider (issue #89). The session resolves to the same trusted actor as a token; every state-changing cookie request must echo `X-CSRF-Token`. It does not create a provider or mint or expose a bearer token. |
 | Operator | Out-of-band deployment access | Provision a provider and its first token, configure the optional administrator login, audit inspection and deployment configuration. Nothing in the HTTP API performs provider administration. |
@@ -35,7 +38,9 @@ administrator login, sessions, rate limiting and origin checks) and
 
 Writes are authenticated; reads are deliberately public, mirroring TS11's public-read
 expectation. Provider identity is never inferred from a remote URL, a `rulebookURI`, an
-import source, issuer metadata or a request body.
+import source, issuer metadata or a request body. Anonymous subscription registration is the
+one deliberate unauthenticated write: it creates only an inert, pending subscription record
+owned by no provider, and it neither reads nor changes registry content.
 
 ## 2. Authentication
 
@@ -146,6 +151,36 @@ API token in the session or changes the bearer checks above.
   cannot grant access to another provider's resource. Headless clients keep the bearer
   transport described above.
 
+### 2.2 Anonymous subscription management token
+
+Anonymous webhook subscriptions (issue #117) are the one unauthenticated write and have their
+own management credential, deliberately separate from provider authentication:
+
+- **Registration needs no credential.** `POST /api/v1/rulebooks/{rulebookId}/subscriptions`
+  accepts only a bounded `callbackUrl`, requires the rulebook to have a published or historical
+  version, and stores a `pending` subscription. The route does not read an `Authorization`
+  header or a cookie, and the provider transport is neither weakened nor reused. The request
+  must use `Content-Type: application/json`; this forces a CORS preflight for a cross-site form
+  or no-cors fetch, so another site cannot make a visitor's browser register for it (the
+  application sends no CORS headers). A body of another content type, or none, answers `400`.
+- **The token is the only key to one subscription.** Registration mints 256 random bits with
+  the `ats_` prefix and returns the plaintext exactly once; only its SHA-256 hash is stored
+  (`subscriptions.management_token_hash`). `GET` and `DELETE /api/v1/subscriptions/{id}`
+  require `Authorization: Bearer <managementToken>` through their own handler check, not the
+  central provider middleware. A provider bearer token, administrator session cookie or CSRF
+  token has no authority there, and a management token has no authority on any registry route.
+- **No valid subscription oracle.** A missing, malformed, invalid or foreign token and an
+  unknown subscription id all answer the same `401 unauthorized` without a provider bearer
+  challenge; the comparison is constant-time and an unknown id performs the same hash work. A
+  revoked subscription answers `404` only to its own token holder.
+- **Deletion is a revocation, not a hard delete.** The row and its token binding are retained,
+  so a repeated authenticated delete is an idempotent `204`, while the state change removes
+  delivery eligibility immediately. A revoked row can never return to `pending` or `active`
+  (a SQLite trigger enforces this).
+- **No token is readable later.** Neither management response returns the token or its hash,
+  and the registration response is `Cache-Control: no-store`. Tokens and callback URLs are
+  never logged or included in an error message.
+
 ## 3. Authorization and provider ownership
 
 Every mutation loads the stored resource and requires
@@ -203,12 +238,17 @@ The following rules implement that model:
 | `POST /api/v1/credentials/validate` | no | Read-only, public by design | `400`/`404`/`503` |
 | `GET /api/v1/captures`, `GET /api/v1/captures/{id}` | no | Mock-backed read; normalized metadata plus the redacted projection only, never the raw artifact | n/a |
 | `POST /api/v1/captures/{id}/validate` | bearer or session+CSRF | Records an in-memory rulebook correlation visible to every reader; writes no registry data | `401`; `400`; `404`; `409` for evidence that cannot be validated |
+| `POST /api/v1/rulebooks/{id}/subscriptions` | no | Anonymous pending registration for an existing rulebook with a published/historical version; stores only a normalized callback URL, a random id and a hashed management token; no outbound request | `400` for an unsafe/malformed URL; `404` for an unknown rulebook; `409` for an unpublished rulebook or the per-rulebook bound; `413`/`429` |
+| `GET /api/v1/subscriptions/{id}` | subscription token | Returns that one subscription's callback URL and state; never a token/hash or another subscriber's data | `401` uniformly for a missing/invalid/foreign token or unknown id; `404` for a revoked one |
+| `DELETE /api/v1/subscriptions/{id}` | subscription token | Revokes that one subscription immediately and idempotently; writes no registry data | `401` uniformly for a missing/invalid/foreign token or unknown id |
 
 Every row marked `bearer or session+CSRF` accepts exactly one of the two credentials; the
 session path adds the CSRF header but not a wider authority, so the ownership rule and the
 denial statuses are identical. Requesting a protected route with no credential answers `401`
 whether the intended credential was a token or a cookie, and the response never says whether a
-cookie existed.
+cookie existed. The subscription rows are not provider-protected routes: their HTTP method and
+the subscription-specific token are checked in their own handlers, and they grant no provider
+authority.
 
 The browser editor and the capture correlation form currently hold a provider token: it lives
 in the app's React memory for the current page session only, is sent only in the
@@ -221,11 +261,13 @@ token because it records server state that every reader sees.
 ## 4. How protection is enforced
 
 - `src/api/routes.ts` declares every operation once in `API_ROUTES`. Its `security` flag is
-  the only list of protected operations; `registerApiRoutes` wraps each protected handler with
-  one central check that resolves the trusted actor (bearer token or session cookie) before the
-  handler can read a request body or start an outbound fetch. The declared HTTP method decides
-  whether a cookie request also needs its CSRF token, so there is no second list of secured
-  endpoints that could drift.
+  the only list of **provider-protected** operations; `registerApiRoutes` wraps each protected
+  handler with one central check that resolves the trusted actor (bearer token or session
+  cookie) before the handler can read a request body or start an outbound fetch. The declared
+  HTTP method decides whether a cookie request also needs its CSRF token, so there is no second
+  list of secured endpoints that could drift. The two subscription-management routes are not
+  provider-protected: they carry the `subscriptionAuth` declaration and verify the
+  subscription's own token in their handler, so a provider credential cannot authorize them.
 - The resolved actor is stored on the request context and read by handlers; no handler parses
   a credential, takes a provider id from input or constructs an actor. The registry service
   exposes `authenticateBearer` for the transport and accepts the already-verified actor
@@ -277,21 +319,34 @@ relevant mapping is:
 | Authenticated but not the owning provider | `403` | `forbidden` | none |
 | Unknown resource (for the owner) | `404` | `not_found` | none |
 | Invalid create/query/body input | `400` | `invalid_request` | none |
+| Unsafe or malformed subscription callback URL | `400` | `invalid_request` | none; no subscription is created |
+| Missing, malformed, invalid or foreign subscription management token, or unknown subscription id | `401` | `unauthorized` | no provider bearer challenge; the same body for every failure |
+| Rulebook without a published version, or per-rulebook subscription bound | `409` | `conflict` | none |
+| Registration over the per-client quota | `429` | `rate_limited` | `Retry-After` and `details.retryAfterSeconds` |
 | Duplicate label, stale draft, immutable state | `409` | `conflict` / `immutable` | none |
 | Body over the limit | `413` | `payload_too_large` | none |
 | Unexpected failure | `500` | `internal_error` | none; no internal detail is returned |
 
-Messages are safe to display and never contain bearer tokens, token hashes, credential
-material, personal attributes or remote document bytes. The challenge header is documented in
-the OpenAPI responses of every protected operation. A protected route answers `401` with the
-same body and challenge whether the attempted credential was a bearer token or a cookie, so
-the response cannot be used to learn which credential path failed; the session-only
-`/auth/me` route answers `401` without the bearer challenge.
+Messages are safe to display and never contain bearer tokens, token hashes, subscription
+management tokens, credential material, personal attributes or remote document bytes. The
+challenge header is documented in the OpenAPI responses of every protected operation. A
+protected route answers `401` with the same body and challenge whether the attempted
+credential was a bearer token or a cookie, so the response cannot be used to learn which
+credential path failed; the session-only `/auth/me` route and the subscription-management
+routes answer `401` without the provider bearer challenge.
 
 ## 6. Secret and sensitive-data handling
 
 - Raw bearer tokens are generated once, never persisted in plaintext and never written to an
   error message, response body or log. The database stores only their SHA-256 hash.
+- Subscription management tokens follow the same rule: 256 random bits with the `ats_` prefix,
+  returned exactly once by registration, stored only as a SHA-256 hash and compared in
+  constant time. Management responses never include the token or its hash, the registration
+  response is `Cache-Control: no-store`, and a failing check never echoes the presented value.
+  The normalized callback URL is stored because the subscriber supplied it and needs it back;
+  it is returned only to the holder of that subscription's token and is never logged. No IP
+  address, forwarding header or provider identity is stored with a subscription; the
+  per-client registration quota keeps only a bounded in-memory socket-address key.
 - Request headers, bodies and URLs are not logged by the HTTP pipeline. The only request-scoped
   server log is the unhandled-error record in `src/app.ts`, which contains the method, path and
   error class name — never headers, payloads, exception messages or stacks.
@@ -337,10 +392,30 @@ trail is not exposed over HTTP; it is read by operators from the database.
 
 ## 8. Limitations and non-goals
 
-- **No general HTTP rate limiting.** Login failures are rate limited (§2.1), but an
-  authenticated provider can repeat a bounded import fetch or a write at the network level.
-  The import pipeline still applies its own timeout, size, redirect and fan-out limits. Rate
-  limiting for the remaining routes remains future hardening work.
+- **No general HTTP rate limiting.** Login failures are rate limited (§2.1) and anonymous
+  subscription registrations have their own per-client quota (§2.2), but an authenticated
+  provider can repeat a bounded import fetch or a write at the network level. The import
+  pipeline still applies its own timeout, size, redirect and fan-out limits. Rate limiting for
+  the remaining routes remains future hardening work.
+- **The subscription registration quota is in-process.** It resets on restart, counts only
+  successful registrations and keys on the socket's remote address. Behind a reverse proxy all
+  clients therefore share the proxy's address, and forwarding headers are deliberately not
+  trusted; a distributed deployment would need a shared store or a trusted-proxy configuration.
+  IPv4 is keyed per address and IPv6 per /64, because one host normally controls a whole /64;
+  an IPv4-mapped IPv6 address is keyed as its IPv4 address, so it is never put in a shared /64
+  bucket. The limiter tracks at most 10,000 keys and drops the oldest insertion-order key beyond
+  that, so a client able to present very many keys could displace its own entry. The
+  per-rulebook bound is durable, but it is a service-level count-and-insert, not a database
+  constraint, so a multi-process deployment sharing one SQLite file could race it. Pending
+  subscriptions do not expire and there is no operator cleanup, so a full per-rulebook bound
+  stays full until subscribers revoke rows; expiry belongs to the later verification/delivery
+  slice.
+- **Subscriptions do not verify their callback and deliver nothing.** A registration stays
+  `pending`; this slice never resolves or contacts the callback host, never activates a
+  subscription and never sends an event. The callback URL is validated statically at
+  registration, but DNS and address safety must be re-checked at activation and delivery time
+  by the later slices. Deleting a subscription revokes it immediately, but no delivery path
+  exists yet to observe that.
 - **No token expiry or rotation policy.** Tokens are revoked explicitly and provider-scoped.
 - **No fine-grained scopes or roles.** Every token of a provider has the provider's full write
   authority; there are no read-only or per-rulebook tokens.
@@ -456,6 +531,21 @@ trail is not exposed over HTTP; it is read by operators from the database.
   discovery work, maps the shared bounded-fetch failures and validates its response against
   the generated contract; `src/discovery/discover.test.ts` covers the SSRF, size,
   content-type, redirect and metadata-validation controls with an offline transport.
+- `src/subscriptions/url.test.ts` covers the callback-URL policy: HTTPS-only public hosts,
+  rejected userinfo, fragments, backslashes, control characters, single-label and blocked
+  hostnames, blocked IP ranges, the test-only loopback opt-in, normalization and the absence of
+  any lookup. `src/subscriptions/token.test.ts` covers token shape and hash-only comparison.
+  `src/subscriptions/rate-limit.test.ts` covers IPv4 per-address keys, IPv6 per-/64 aggregation,
+  IPv4-mapped IPv6 normalization and the bounded fallback key.
+  `src/subscriptions/subscriptions.test.ts` covers anonymous registration, the one-time token,
+  management-token-only reads and idempotent revocation, cross-subscriber refusal, the
+  per-rulebook and per-client bounds, IPv6 /64 quota aggregation, invalid-attempt quota
+  behaviour, restart persistence and the absence of a stored client address; a patched `fetch`
+  proves registration performs no network request. `src/api/subscriptions.test.ts` covers the
+  same boundary through the real Hono application, including UAT-1, UAT-2, `401` uniformity
+  without a provider bearer challenge, `404` after revocation, the JSON content-type refusal,
+  `429` with `Retry-After`, `409` at the rulebook bound and `503` when the service is not
+  wired.
 - Run `bun run check` and `bun run openapi:check` from the repository root.
 
 - **Capture explorer and correlation.** `src/capture/explorer.test.ts` and
@@ -478,3 +568,5 @@ trail is not exposed over HTTP; it is read by operators from the database.
   audit in [issue #52](https://github.com/ForkbombEu/credimi-attestbook/issues/52)
 - [Issue #88](https://github.com/ForkbombEu/credimi-attestbook/issues/88) for the
   environment-configured administrator login and server-side browser session
+- [Issue #117](https://github.com/ForkbombEu/credimi-attestbook/issues/117) for anonymous
+  webhook subscription registration and management (storage only; no verification or delivery)

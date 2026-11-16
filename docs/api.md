@@ -52,7 +52,11 @@ Implemented and exposed by this slice:
 - authenticated, idempotent registration of a local JSON schema document that returns its
   canonical hosted URL, W3C SRI pin, digest and media type, usable as an ordinary
   `schemaReferences[].uri`/`integrity` pair (added by
-  [issue #99](https://github.com/ForkbombEu/credimi-attestbook/issues/99)).
+  [issue #99](https://github.com/ForkbombEu/credimi-attestbook/issues/99));
+- anonymous registration and management of pending webhook subscriptions for publicly
+  published rulebooks, with a one-time per-subscription management token (added by
+  [issue #117](https://github.com/ForkbombEu/credimi-attestbook/issues/117)). This slice
+  stores subscriptions only: it contacts no callback host and delivers no event.
 
 The public API is the integration boundary for Credimi. The standalone adapter documented in
 [`docs/credimi-integration.md`](credimi-integration.md) (issue #49) consumes these routes only:
@@ -65,9 +69,13 @@ Deliberately **not** in this slice:
 - the TS11 catalogue interface (`GET/PUT/DELETE /schemas`, JWS responses) — it must be
   implemented separately and exactly if a later issue adds it (architecture §5);
 - capture validation and validation-result persistence; no route pretends to offer them;
+- webhook callback verification and event delivery. A subscription is stored `pending` and is
+  never contacted or delivered to; callback network verification and delivery are separate
+  later issues. No route in this slice performs an outbound request for a subscription;
 - provider-management HTTP routes, generic API rate limiting and token expiry/rotation —
-  future hardening; the administrator login has its own failure limit and the implemented
-  write-auth model is documented in [`docs/security.md`](security.md);
+  future hardening; the administrator login has its own failure limit, anonymous subscription
+  registration has its own per-client quota, and the implemented write-auth model is
+  documented in [`docs/security.md`](security.md);
 - document replacement or deletion: registration is append-only and content-addressed, so no
   route updates, replaces or deletes a stored schema document;
 - a publication signature: no export claims one. OWF 0.5.4 signs only a bare OWF-profile
@@ -100,8 +108,9 @@ wired answers `503` with a typed code instead of a placeholder success response.
   #50, the reproducible conformance run added by #51, the public hosted
   credential-schema document reads added by #98, the authenticated schema document
   registration added by #99, hosted-schema issuer fixture grounding added by #102, the
-  hosted/external schema provenance projection added by #103 and the public publication
-  event feed added by #116); it is
+  hosted/external schema provenance projection added by #103, the public publication
+  event feed added by #116 and anonymous webhook subscription registration and management
+  added by #117); it is
   separate from the package version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
@@ -111,8 +120,10 @@ wired answers `503` with a typed code instead of a placeholder success response.
 
 All paths below are prefixed with the API base. `auth` means an AttestBook provider bearer
 token in the `Authorization: Bearer <token>` header; `session` means the opaque administrator
-browser-session cookie set by `/api/v1/auth/login`. The two credential paths are independent.
-All operations are synchronous in Phase 1.
+browser-session cookie set by `/api/v1/auth/login`; `subscription` means the per-subscription
+management token in the same `Authorization: Bearer <token>` header, which authorizes that
+one subscription only. The credential paths are independent. All operations are synchronous
+in Phase 1.
 
 | Method | Path | Auth | Success | Purpose |
 | --- | --- | --- | --- | --- |
@@ -154,6 +165,9 @@ All operations are synchronous in Phase 1.
 | `GET` | `/api/v1/captures/{captureId}` | no | `200` | One capture with its redacted artifact projection, evidence timeline and the validation linked to its pinned rulebook version. |
 | `POST` | `/api/v1/captures/{captureId}/validate` | yes | `200` | Correlate a captured issued credential with a pinned rulebook version and record the structural validation result. |
 | `POST` | `/api/v1/captures/{captureId}/compare` | no | `200` | Read-only headless-wallet comparison evidence: the pinned AttestBook structural results plus an optional caller-supplied external wallet observation, with every unsupported dimension explicit. |
+| `POST` | `/api/v1/rulebooks/{rulebookId}/subscriptions` | no | `201` + `Location` | Anonymous registration of one pending webhook subscription for a rulebook that has a published version. Body: `callbackUrl`. The response returns the opaque id, `pending` state and a one-time `managementToken`; only its SHA-256 hash is stored. `404` for an unknown rulebook, `400` for an invalid or unsafe URL, `409` for a rulebook with no published version or at its subscription bound, `429` with `Retry-After` over the per-client registration quota. Performs no outbound request and stores no client address. |
+| `GET` | `/api/v1/subscriptions/{subscriptionId}` | subscription | `200` | One subscription read with its per-subscription management token. Missing, invalid or unknown tokens and unknown ids answer `401` uniformly; a revoked subscription answers `404`. Never returns the management token or hash. |
+| `DELETE` | `/api/v1/subscriptions/{subscriptionId}` | subscription | `204` | Revoke one subscription immediately with its per-subscription management token. Idempotent: a repeated authenticated delete answers `204` again; a missing, invalid or foreign token answers `401`. Delivery eligibility ends with the revocation. |
 
 Representations are the public projection of the services: rulebook `provenance`,
 `metadata` and `importKey`, attestation/schema-reference `metadata` and version `provenance`
@@ -921,6 +935,97 @@ add a `hostedSchema` member to every reference (issue #103):
   See [`docs/schema-authoring.md`](schema-authoring.md) for the complete local authoring,
   publication and consumption walkthrough.
 
+### 3.15 Anonymous webhook subscriptions
+
+`POST /api/v1/rulebooks/{rulebookId}/subscriptions` registers a consumer that wants to follow
+a rulebook's publications without an AttestBook account, provider bearer token, browser
+session or CSRF token. Publishing and editing rulebooks remain authenticated exactly as before;
+this slice only stores the pending subscription, and it **never contacts the callback host and
+never delivers an event**.
+
+Request body (unknown members are ignored):
+
+```json
+{ "callbackUrl": "https://subscriber.example.test/webhook" }
+```
+
+The request must use `Content-Type: application/json`; a different content type or none
+answers `400 invalid_request`. This forces a CORS preflight for a cross-site form or no-cors
+fetch, so a third-party page cannot make a visitor's browser register a subscription (the
+application sends no CORS headers).
+
+`callbackUrl` is required, bounded to 2,048 characters before and after normalization, and
+must be an absolute `https` URL without embedded credentials or a fragment. The raw text must
+be printable ASCII without backslashes, so a parser-difference form cannot hide another host.
+The host must be a public DNS name with valid labels and at least two labels, or a public IP
+literal; single-label names, `localhost`, `.localhost`, `.local`, `.internal`, `.home.arpa`,
+trailing-dot hosts and blocked IP ranges (loopback, private, link-local, carrier-grade NAT,
+multicast, reserved and cloud-metadata) are rejected. No DNS lookup is performed and no
+outbound request is made: a name that later resolves to an internal address is a delivery-time
+concern, and any future delivery worker must repeat the address checks and pin the connection.
+A plain `http` URL on a literal loopback address is accepted only by a service-level test
+opt-in; the production wiring never enables it.
+
+The rulebook must already exist and have at least one published or historical version. Its
+working copy may be a draft for the next version, because the rulebook is still publicly
+readable and has published artifacts. An unknown rulebook answers `404`; a rulebook with no
+published version, or one already at its live-subscription bound, answers `409`; an invalid or
+unsafe URL answers `400`; and an oversized body answers `413`. None of these creates a record.
+Registrations are additionally bounded per client in an in-process sliding window (ten
+successful registrations per ten minutes by default); exceeding it answers `429` with
+`Retry-After` and `details.retryAfterSeconds`. The client key is the socket's remote address:
+`X-Forwarded-For` and other request forwarding headers are never trusted, so behind a reverse
+proxy all clients share the proxy's address. IPv4 is keyed per address; IPv6 is keyed per /64,
+because one host normally controls a whole /64, and an IPv4-mapped IPv6 address is keyed as the
+IPv4 client it represents. The limiter tracks at most 10,000 keys and drops the oldest
+insertion-order key beyond that, so a client able to present very many keys could displace its
+own entry. The quota is not persisted and resets on restart. The per-rulebook bound (1,000 live
+subscriptions by default) is durable and enforced against SQLite. No client address is stored.
+Pending subscriptions do not expire and there is no operator cleanup, so a rulebook whose bound
+is full stays closed to new registrations until subscribers revoke rows; expiry is left to the
+later verification/delivery slice.
+
+Success is `201` with a `Location` header and one `RegisteredSubscription`:
+
+```json
+{
+  "data": {
+    "id": "<opaque subscription id>",
+    "rulebookId": "<rulebook id>",
+    "callbackUrl": "https://subscriber.example.test/webhook",
+    "state": "pending",
+    "createdAt": "2026-01-01T00:00:00.000Z",
+    "updatedAt": "2026-01-01T00:00:00.000Z",
+    "managementToken": "ats_<opaque token>"
+  }
+}
+```
+
+The `managementToken` is 256 random bits and is returned **exactly once**. The database stores
+only its SHA-256 hash, so the API can never return it again and a database leak does not yield
+a usable management credential. The registered state is `pending` and therefore not delivery
+eligible; callback verification and activation are a separate later issue.
+
+`GET /api/v1/subscriptions/{subscriptionId}` and
+`DELETE /api/v1/subscriptions/{subscriptionId}` require the per-subscription management token
+as `Authorization: Bearer <managementToken>`. A provider bearer token, the administrator
+session cookie and every other credential have no authority on these routes:
+
+- `GET` returns the same public fields without `managementToken` (and without the stored hash).
+  It is the only way to read the subscriber's own normalized callback URL. Any missing,
+  malformed, invalid or foreign token and any unknown subscription id answer the same `401`
+  `unauthorized`, so the response does not disclose whether another subscriber's id exists. A
+  revoked subscription answers `404`.
+- `DELETE` revokes the subscription immediately, ending its future delivery eligibility, and
+  answers `204` with no body. The row and its token binding are retained, so repeating the
+  delete with the same valid token answers `204` again (idempotent). An unknown id or an
+  invalid token still answers `401`, and no other credential can revoke the record.
+
+Neither route returns a token, a token hash, a client address or provider ownership data.
+Both set `Cache-Control: no-store`, as does the registration response because it carries a
+one-time secret. Raw management tokens are never logged or written to an error message. See
+[`docs/security.md`](security.md) §3.1, §6 and §8 for the credential and residual-risk model.
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -971,7 +1076,13 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Capture explorer | external reference not fetched or non-credential artifact type | `409` | `conflict` |
 | Capture explorer | capture-source transport failure | `502` | `capture_fetch_failed` |
 | Administrator login | repeated failures above the account or client bound | `429` | `rate_limited` |
-| API wiring | registry, validation, issuer discovery, issuer fixtures, verifier policy resolver or capture explorer not configured | `503` | `registry_unavailable` / `validation_unavailable` / `capture_unavailable` |
+| Anonymous subscription registration | repeated successful registrations above the per-client bound | `429` | `rate_limited` |
+| Anonymous subscription registration | unknown rulebook | `404` | `not_found` |
+| Anonymous subscription registration | rulebook has no published version, or has reached its live-subscription bound | `409` | `conflict` |
+| Anonymous subscription registration | malformed body, missing/non-string `callbackUrl`, or an unsafe/non-public URL | `400` | `invalid_request` |
+| Subscription management | missing, malformed, invalid or foreign management token, or unknown subscription id | `401` | `unauthorized` |
+| Subscription management | revoked subscription read | `404` | `not_found` |
+| API wiring | registry, validation, issuer discovery, issuer fixtures, verifier policy resolver, capture explorer or subscription service not configured | `503` | `registry_unavailable` / `validation_unavailable` / `capture_unavailable` / `subscription_unavailable` |
 | Administrator login | configuration absent, partial, invalid or its provider missing | `503` | `auth_unavailable` |
 | Schema registration | deployment has no valid `PUBLIC_BASE_URL`, so no canonical hosted URL can be issued | `503` | `public_base_url_unavailable` |
 | API | unexpected failure | `500` | `internal_error` |
@@ -981,8 +1092,10 @@ mapping is implemented once in `src/api/errors.ts`; the OpenAPI document referen
 `ErrorEnvelope` component for every error response. A `401` from a protected route also carries
 the RFC 6750 challenge `WWW-Authenticate: Bearer realm="attestbook"`, whatever credential was
 attempted, so the failure does not disclose which credential path was used; the session-only
-`/auth/me` route deliberately does not advertise a bearer challenge. A refused cookie state
-change answers `403 csrf_failed` and carries no challenge.
+`/auth/me` route deliberately does not advertise a bearer challenge. A `401` from a subscription
+management route likewise carries no provider bearer challenge, because the credential there is
+the subscription's own management token. A refused cookie state change answers `403
+csrf_failed` and carries no challenge.
 
 ## 5. Authentication and authorization
 
@@ -1017,10 +1130,18 @@ summarizes the HTTP contract.
   registry accepts and never issues a synthetic token. Its write authority is exactly the
   bound provider's, so the operation matrix in [`docs/security.md`](security.md) §3.1 is the
   same for both transports apart from the cookie's CSRF requirement.
+- Anonymous subscription registration needs no credential at all. Its two management routes
+  accept only the subscription's own management token in the `Authorization` header (the same
+  header name as a provider token, but a different credential and a different operation set):
+  the provider token, session cookie and CSRF token have no authority there, and the
+  subscription token has no authority on any registry or provider route. Management failures
+  are uniform `401`s without a provider bearer challenge and without disclosing whether the id
+  exists.
 
 Generic API rate limiting, token expiry/rotation and provider-administration routes are not
-implemented in Phase 1; administrator login failures are rate limited separately
-([`docs/security.md`](security.md) §2.1 and §8).
+implemented in Phase 1; administrator login failures are rate limited separately and anonymous
+subscription registration has its own per-client quota
+([`docs/security.md`](security.md) §2.1, §3.1 and §8).
 
 ## 6. Idempotency policy
 
@@ -1041,6 +1162,8 @@ Phase 1 supports idempotency where the domain provides a deterministic identity;
 | `POST /api/v1/imports/preview` | Read-only and side-effect free, but authenticated because a URL preview performs a bounded outbound fetch; safe to retry. |
 | `POST /api/v1/credentials/validate` | Read-only; safe to retry. |
 | `POST /api/v1/conformance/runs` | Read-only and side-effect free. The same pinned request returns the same `inputDigest` and `resultReference` when the run is deterministic; a run cut short by a runtime condition returns `deterministic: false` and must be retried. No run is recorded, so there is no server-side history to deduplicate. |
+| `POST /api/v1/rulebooks/{rulebookId}/subscriptions` | **Not idempotent.** Each call creates a new pending subscription and mints a new one-time management token; there is no deduplication by callback URL. The per-client quota and per-rulebook bound still apply. |
+| `DELETE /api/v1/subscriptions/{subscriptionId}` | **Idempotent.** After a successful revoke, a repeat with the same valid management token is a no-op `204`; the revoked state and revocation instant are unchanged. Missing, invalid or foreign tokens still answer `401`. |
 
 The import policy is the substantive idempotency mechanism implemented in Phase 1
 ([`docs/import.md`](import.md) §5). A generic idempotency-key store is deliberately deferred:
@@ -1097,6 +1220,8 @@ bun test src/conformance # reproducible result references and failure classifica
 bun test src/api/verifier.test.ts  # verifier-constraint HTTP contract
 bun test src/api/comparison.test.ts  # comparison HTTP contract and pin linkage
 bun test src/api/conformance.test.ts  # conformance HTTP contract, repeats and classification
+bun test src/subscriptions # callback URLs, management tokens, storage, quota and persistence
+bun test src/api/subscriptions.test.ts  # anonymous registration and token-only management HTTP contract
 bun run check           # formatting, lint, strict typecheck and all tests
 ```
 
@@ -1104,7 +1229,9 @@ The API tests use real temporary SQLite databases, real registry services, the r
 pipeline (offline JSON sources only) and a genuinely signed SD-JWT VC fixture. The
 administrator tests use real Argon2id hashes, temporary databases and injected clocks for
 deterministic expiry. Discovery tests use an injected transport and DNS resolver, so no test
-performs a real network request. They do not claim coverage of general API rate limits or
+performs a real network request. The subscription tests patch the process `fetch` to prove
+registration performs no request, and reopen the SQLite file to prove the subscription and its
+token hash persist. They do not claim coverage of general API rate limits or
 provider-management routes. The catalog UI has its own component and browser tests described
 in [`docs/ui.md`](ui.md).
 
@@ -1114,11 +1241,21 @@ in [`docs/ui.md`](ui.md).
   returned in full. A paginated store query is a later registry slice.
 - No generic `Idempotency-Key` store, no request-body content-type enforcement beyond JSON
   parsing, and no HTTP rate limits for reads, preview, import or discovery. Administrator
-  login failures are bounded separately (§3.11). Rate limiting is still missing for the
-  outbound-fetch routes, so an authenticated provider can repeat a bounded fetch; the import
-  and discovery services' own size, time, redirect and fan-out limits still apply to every
-  call. General rate limiting, token expiry/rotation and provider-administration routes
-  remain future hardening work documented in [`docs/security.md`](security.md) §8.
+  login failures and anonymous subscription registrations are bounded separately (§3.11 and
+  §3.15). Rate limiting is still missing for the outbound-fetch routes, so an authenticated
+  provider can repeat a bounded fetch; the import and discovery services' own size, time,
+  redirect and fan-out limits still apply to every call. General rate limiting,
+  token expiry/rotation and provider-administration routes remain future hardening work
+  documented in [`docs/security.md`](security.md) §8.
+- Webhook subscriptions are storage and management only in this slice. Nothing verifies the
+  callback owner, activates a subscription, resolves or connects to the callback host, retries
+  or delivers an event. Every registration stays `pending` and no delivery eligibility exists
+  yet; callback network safety must be re-verified at activation and delivery time. The
+  registration quota is in-process, resets on restart and is keyed per IPv4 address or IPv6
+  /64; behind a reverse proxy all clients share the proxy socket address because forwarding
+  headers are deliberately not trusted. The per-rulebook bound is durable, but pending
+  subscriptions never expire and there is no operator cleanup, so a full bound stays full until
+  subscribers revoke rows.
 - The administrator login is one environment-configured account with no MFA, self-service
   password change or account management API; rotating the password means changing
   `ADMIN_PASSWORD_HASH` and restarting. The failure limiter is in-process and resets on

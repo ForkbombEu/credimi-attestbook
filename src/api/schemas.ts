@@ -12,6 +12,7 @@ import { z } from 'zod'
 import { MAX_ADMIN_PASSWORD_LENGTH, MAX_ADMIN_USERNAME_LENGTH } from '../auth'
 import { ISSUER_FIXTURE_KIND, ISSUER_FIXTURE_NEGATIVE_CATEGORIES } from '../fixtures/types'
 import { CREDENTIAL_SCHEMA_KINDS } from '../registry/types'
+import { SUBSCRIPTION_STATES } from '../subscriptions'
 import {
   CONFORMANCE_CANONICALIZATION,
   CONFORMANCE_DIGEST_ALGORITHM,
@@ -137,6 +138,37 @@ export const adminSessionSchema = z.object({
 })
 
 export const adminSessionResponseSchema = z.object({ data: adminSessionSchema })
+
+export const SUBSCRIPTION_STATE_SCHEMA = z.enum(SUBSCRIPTION_STATES)
+
+/**
+ * Public projection of one anonymous webhook subscription. It carries the
+ * normalized callback URL and lifecycle state, but never the management token
+ * or its hash; management credentials are not part of a readable resource.
+ */
+export const subscriptionSchema = z.object({
+  id: z.string().min(1),
+  rulebookId: z.string().min(1),
+  callbackUrl: z.string().min(1),
+  state: SUBSCRIPTION_STATE_SCHEMA,
+  createdAt: timestamp,
+  updatedAt: timestamp,
+})
+
+/** Registration result. The management token is returned exactly once. */
+export const registeredSubscriptionSchema = subscriptionSchema.extend({
+  managementToken: z.string().min(1),
+})
+
+export const subscriptionResponseSchema = z.object({ data: subscriptionSchema })
+export const registeredSubscriptionResponseSchema = z.object({
+  data: registeredSubscriptionSchema,
+})
+
+/** Registration body; the service applies the callback-URL safety policy. */
+export const registerSubscriptionRequestSchema = z.object({
+  callbackUrl: z.string().min(1),
+})
 
 /** The public rulebook representation: no provenance, metadata or import key. */
 export const rulebookSchema = z.object({
@@ -1584,6 +1616,11 @@ export const OPENAPI_COMPONENTS = {
   AdminLoginRequest: adminLoginRequestSchema,
   AdminSession: adminSessionSchema,
   AdminSessionResponse: adminSessionResponseSchema,
+  RegisterSubscriptionRequest: registerSubscriptionRequestSchema,
+  Subscription: subscriptionSchema,
+  SubscriptionResponse: subscriptionResponseSchema,
+  RegisteredSubscription: registeredSubscriptionSchema,
+  RegisteredSubscriptionResponse: registeredSubscriptionResponseSchema,
   Provider: providerSchema,
   ProviderListResponse: providerListResponseSchema,
   Rulebook: rulebookSchema,
@@ -1661,6 +1698,7 @@ export type OpenApiComponentName = keyof typeof OPENAPI_COMPONENTS
  */
 const REQUEST_COMPONENT_NAMES: ReadonlySet<OpenApiComponentName> = new Set([
   'AdminLoginRequest',
+  'RegisterSubscriptionRequest',
   'CreateRulebookRequest',
   'CreateRulebookVersionRequest',
   'SaveDraftRequest',

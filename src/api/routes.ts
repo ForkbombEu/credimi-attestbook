@@ -66,6 +66,7 @@ import type {
 } from '../registry/types'
 import { CREDENTIAL_SCHEMA_KINDS } from '../registry/types'
 import { parseRulebookVersionDocument, type RulebookVersionDocument } from '../registry/versioning'
+import type { SubscriptionService } from '../subscriptions'
 import {
   CREDENTIAL_VALIDATION_PATH,
   hostedSchemaDocumentId,
@@ -100,10 +101,12 @@ import {
   toPublicationEventResource,
   toPublicationExportManifestResource,
   toPublicationReadinessResource,
+  toRegisteredSubscriptionResource,
   toRulebookResource,
   toRulebookVersionResource,
   toRulebookVersionSchemaReferencesResource,
   toSchemaReferenceResource,
+  toSubscriptionResource,
   toVerifierConstraintsResource,
   toVersionDiffResource,
   type HostedSchemaLookup,
@@ -163,6 +166,9 @@ export type ApiOperationId =
   | 'validateCapture'
   | 'compareCapture'
   | 'resolveVerifierConstraints'
+  | 'registerRulebookSubscription'
+  | 'getSubscription'
+  | 'deleteSubscription'
 
 export interface ApiParameterSpec {
   readonly name: string
@@ -192,7 +198,7 @@ export interface ApiRequestBodySpec {
 
 export interface ApiRouteSpec {
   readonly operationId: ApiOperationId
-  readonly method: 'get' | 'post' | 'put'
+  readonly method: 'get' | 'post' | 'put' | 'delete'
   readonly path: string
   readonly summary: string
   readonly description: string
@@ -209,6 +215,7 @@ export interface ApiRouteSpec {
     | 'conformance'
     | 'captures'
     | 'verifiers'
+    | 'subscriptions'
   /**
    * `true` marks a protected operation: it accepts either an `Authorization:
    * Bearer` provider token or the administrator browser-session cookie. A
@@ -220,6 +227,11 @@ export interface ApiRouteSpec {
    * session cookie. It is independent of the bearer-token `security` flag.
    */
   readonly sessionAuth?: boolean
+  /**
+   * `true` marks an operation authenticated by a per-subscription management
+   * token, never by a provider credential or the administrator session.
+   */
+  readonly subscriptionAuth?: boolean
   readonly request?: ApiRequestBodySpec
   readonly parameters?: readonly ApiParameterSpec[]
   readonly responses: readonly ApiResponseSpec[]
@@ -227,13 +239,13 @@ export interface ApiRouteSpec {
 
 const ERROR_DESCRIPTIONS: Readonly<Record<number, string>> = {
   400: 'Malformed or invalid request; the body is an ErrorEnvelope with a stable code.',
-  401: 'Missing, unknown, expired or revoked credential.',
+  401: 'Missing, invalid or unknown credential; the protected resource is not disclosed.',
   403: 'The authenticated actor is not allowed to perform this operation.',
   404: 'The requested resource does not exist.',
-  409: 'The request conflicts with the current resource state (duplicate label, stale draft snapshot, published immutability).',
+  409: 'The request conflicts with the current resource state (duplicate label, stale draft snapshot, published immutability, a rulebook that is not published, or a subscription bound).',
   413: 'The request body exceeds the endpoint limit.',
   422: 'The import source is unsafe, malformed, unsupported or not importable.',
-  429: 'Too many failed login attempts; the response carries Retry-After.',
+  429: 'Too many requests; the response carries Retry-After.',
   500: 'Unexpected server failure; no internal details are exposed.',
   502: 'The remote import source could not be fetched.',
   503: 'The required service is not configured on this server.',
@@ -299,6 +311,14 @@ const PATH_CAPTURE_ID: ApiParameterSpec = {
   in: 'path',
   required: true,
   description: 'Stable capture identifier carried by the normalized envelope.',
+  schema: { type: 'string' },
+}
+
+const PATH_SUBSCRIPTION_ID: ApiParameterSpec = {
+  name: 'subscriptionId',
+  in: 'path',
+  required: true,
+  description: 'Opaque subscription identifier returned by registration.',
   schema: { type: 'string' },
 }
 
@@ -1309,6 +1329,77 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
       ...errors(400, 404, 413, 500, 503),
     ],
   },
+  {
+    operationId: 'registerRulebookSubscription',
+    method: 'post',
+    path: '/api/v1/rulebooks/:rulebookId/subscriptions',
+    summary: 'Register an anonymous webhook subscription',
+    description:
+      'Registers one pending (inactive) webhook subscription for an existing rulebook that has a published or historical version. No AttestBook account, provider bearer token, session cookie or CSRF token is required, and publishing or editing rulebooks remains authenticated. The request must use `Content-Type: application/json`; any other content type answers 400, which prevents a cross-site HTML form or no-cors fetch from registering on a visitor’s behalf. The body carries only `callbackUrl`: an absolute `https` URL on a public host without embedded credentials or a fragment; a plain `http` loopback URL is accepted only by an opt-in local test configuration. The URL is validated and normalized before storage. The response returns the opaque `id`, the `pending` state and a one-time `managementToken`; only the token hash is stored, so the plaintext cannot be recovered later. Unknown rulebooks answer 404, invalid payloads 400 and a rulebook without a published version or at its subscription bound 409, without creating a record. Repeated registrations from one client are bounded by an in-process quota that answers 429 with Retry-After. Registration performs no outbound request and starts no delivery.',
+    tag: 'subscriptions',
+    security: false,
+    parameters: [PATH_ID],
+    request: {
+      schema: 'RegisterSubscriptionRequest',
+      mediaType: 'application/json',
+      required: true,
+      description: 'The callback URL to store for this subscription.',
+    },
+    responses: [
+      {
+        status: 201,
+        description:
+          'The pending subscription. The `managementToken` is returned exactly once and is not readable afterwards.',
+        schema: 'RegisteredSubscriptionResponse',
+        headers: [
+          {
+            name: 'Location',
+            description: 'Management resource of the new subscription.',
+          },
+        ],
+      },
+      ...errorSpecs([400, 404, 409, 413, 429, 500, 503], false),
+    ],
+  },
+  {
+    operationId: 'getSubscription',
+    method: 'get',
+    path: '/api/v1/subscriptions/:subscriptionId',
+    summary: 'Read one subscription with its management token',
+    description:
+      'Returns one subscription to the holder of its per-subscription management token, sent as `Authorization: Bearer <managementToken>`. A provider bearer token, the administrator session cookie or any other credential has no authority here. A missing, invalid or unknown token and an unknown subscription id all answer 401 without disclosing whether the id exists; a revoked subscription answers 404. The response carries the normalized callback URL and lifecycle state, never the management token or its hash.',
+    tag: 'subscriptions',
+    security: false,
+    subscriptionAuth: true,
+    parameters: [PATH_SUBSCRIPTION_ID],
+    responses: [
+      {
+        status: 200,
+        description: 'The subscription managed by the presented token.',
+        schema: 'SubscriptionResponse',
+      },
+      ...errorSpecs([401, 404, 500, 503], false),
+    ],
+  },
+  {
+    operationId: 'deleteSubscription',
+    method: 'delete',
+    path: '/api/v1/subscriptions/:subscriptionId',
+    summary: 'Revoke one subscription with its management token',
+    description:
+      'Revokes one subscription immediately, ending any future delivery eligibility, and answers 204. The call is idempotent: repeating it with the same valid management token answers 204 again, while an unknown subscription id or a missing, invalid or foreign token answers 401 uniformly. The stored row and its token binding are retained so the repeated delete can be authenticated; no other credential can revoke a subscription.',
+    tag: 'subscriptions',
+    security: false,
+    subscriptionAuth: true,
+    parameters: [PATH_SUBSCRIPTION_ID],
+    responses: [
+      {
+        status: 204,
+        description: 'The subscription is revoked; there is no response body.',
+      },
+      ...errorSpecs([401, 500, 503], false),
+    ],
+  },
 ]
 
 /** Narrow import seam so tests can double the pipeline without a network. */
@@ -1326,6 +1417,8 @@ export interface ApiDependencies {
   readonly issuerDiscovery?: IssuerDiscoveryService
   readonly issuerFixtures?: IssuerFixtureService
   readonly verifierPolicy?: VerifierPolicyService
+  /** Anonymous webhook-subscription registration and management (#117). */
+  readonly subscriptions?: SubscriptionService
   /** Environment-configured administrator browser login; absent means unavailable. */
   readonly adminAuth?: AdminAuth
   /**
@@ -1358,6 +1451,17 @@ function requireValidation(dependencies: ApiDependencies): CredentialValidationS
     )
   }
   return dependencies.validation
+}
+
+function requireSubscriptions(service: SubscriptionService | undefined): SubscriptionService {
+  if (service === undefined) {
+    throw apiError(
+      503,
+      'subscription_unavailable',
+      'Webhook subscriptions are not configured on this server.',
+    )
+  }
+  return service
 }
 
 function requireCaptures(explorer: CaptureExplorer | undefined): CaptureExplorer {
@@ -1781,8 +1885,8 @@ function assertJsonRequest(context: Context): void {
   }
 }
 
-/** Remote address for the coarse client bound; `unknown` for in-process tests. */
-function adminClientKey(context: Context): string {
+/** Remote address for a coarse client bound; `unknown` for in-process tests. */
+function clientAddressKey(context: Context): string {
   try {
     return getConnInfo(context).remote.address ?? 'unknown'
   } catch {
@@ -1846,7 +1950,7 @@ function adminLoginHandler(dependencies: ApiDependencies): ApiHandler {
     const currentSessionId = getCookie(context, ADMIN_SESSION_COOKIE_NAME)
     const outcome = await adminAuth.login({
       ...credentials,
-      clientKey: adminClientKey(context),
+      clientKey: clientAddressKey(context),
       ...(currentSessionId === undefined ? {} : { currentSessionId }),
     })
 
@@ -2571,6 +2675,71 @@ function resolveVerifierConstraintsHandler(service: VerifierPolicyService | unde
   }
 }
 
+/**
+ * Management credential of a subscription route: exactly one
+ * `Authorization: Bearer <managementToken>` value. It is deliberately not the
+ * provider bearer path and never falls back to a cookie session.
+ */
+function subscriptionManagementToken(context: Context): string {
+  const header = context.req.header('authorization')
+  const match = header === undefined ? null : /^Bearer\s+(\S+)$/i.exec(header.trim())
+  const token = match?.[1]
+  if (token === undefined) {
+    throw apiError(401, 'unauthorized', 'A valid subscription management token is required.')
+  }
+  return token
+}
+
+/**
+ * Anonymous registration: no provider credential is read or required, and the
+ * response carries the management token exactly once. The callback URL is
+ * validated and normalized by the service before anything is stored.
+ */
+function registerRulebookSubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
+  return async (context) => {
+    const subscriptions = requireSubscriptions(dependencies.subscriptions)
+    // Requiring JSON forces a CORS preflight for a cross-site form or no-cors
+    // fetch, so a third-party page cannot make a visitor's browser register a
+    // subscription. The app sends no CORS headers.
+    assertJsonRequest(context)
+    const body = requireRecord(await readJsonBody(context), 'request body')
+    const subscription = subscriptions.register({
+      rulebookId: context.req.param('rulebookId') ?? '',
+      callbackUrl: body['callbackUrl'],
+      clientKey: clientAddressKey(context),
+    })
+    // The body carries a one-time secret and the resource carries the
+    // subscriber's callback URL, so neither may be cached.
+    context.header('cache-control', 'no-store')
+    return context.json({ data: toRegisteredSubscriptionResource(subscription) }, 201, {
+      Location: `/api/v1/subscriptions/${subscription.id}`,
+    })
+  }
+}
+
+function getSubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const subscriptions = requireSubscriptions(dependencies.subscriptions)
+    const subscription = subscriptions.get(
+      context.req.param('subscriptionId') ?? '',
+      subscriptionManagementToken(context),
+    )
+    context.header('cache-control', 'no-store')
+    return context.json({ data: toSubscriptionResource(subscription) }, 200)
+  }
+}
+
+function deleteSubscriptionHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const subscriptions = requireSubscriptions(dependencies.subscriptions)
+    subscriptions.delete(
+      context.req.param('subscriptionId') ?? '',
+      subscriptionManagementToken(context),
+    )
+    return new Response(null, { status: 204 })
+  }
+}
+
 function validateCredentialHandler(dependencies: ApiDependencies): ApiHandler {
   return async (context) => {
     const validation = requireValidation(dependencies)
@@ -2780,6 +2949,9 @@ export function createApiHandlers(
     validateCapture: validateCaptureHandler(captures),
     compareCapture: compareCaptureHandler(captures),
     resolveVerifierConstraints: resolveVerifierConstraintsHandler(verifierPolicy),
+    registerRulebookSubscription: registerRulebookSubscriptionHandler(dependencies),
+    getSubscription: getSubscriptionHandler(dependencies),
+    deleteSubscription: deleteSubscriptionHandler(dependencies),
   }
 }
 

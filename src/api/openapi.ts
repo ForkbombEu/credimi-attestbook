@@ -78,6 +78,11 @@ const TAG_DESCRIPTIONS: readonly { readonly name: string; readonly description: 
     description:
       'Typed verifier constraints and explicitly partial OpenID4VP-aware policy mappings of pinned rulebook versions.',
   },
+  {
+    name: 'subscriptions',
+    description:
+      'Anonymous webhook-subscription registration for publicly published rulebooks and management with a per-subscription token. Registration stores a pending subscription only: it contacts no callback host and delivers no event.',
+  },
 ]
 
 function toOpenApiPath(path: string): string {
@@ -190,7 +195,10 @@ function operationObject(route: ApiRouteSpec): JsonObject {
         { security: [{ bearerAuth: [] }, { sessionAuth: [] }] }
       : route.sessionAuth
         ? { security: [{ sessionAuth: [] }] }
-        : {}),
+        : route.subscriptionAuth
+          ? // A per-subscription management token, never a provider credential.
+            { security: [{ subscriptionTokenAuth: [] }] }
+          : {}),
     ...(parameters.length === 0 ? {} : { parameters }),
     ...(route.request === undefined
       ? {}
@@ -259,6 +267,12 @@ export function buildOpenApiDocument(): OpenApiDocument {
           name: 'attestbook_admin_session',
           description:
             'Opaque administrator browser-session identifier bound to an existing provider. Set HttpOnly and SameSite=Lax by POST /api/v1/auth/login, revoked by POST /api/v1/auth/logout, never accepted from a URL or request body. Every state-changing request that uses it must also send the session `csrfToken` in X-CSRF-Token; GET /api/v1/auth/me returns the current token.',
+        },
+        subscriptionTokenAuth: {
+          type: 'http',
+          scheme: 'bearer',
+          description:
+            'Per-subscription management token returned exactly once by POST /api/v1/rulebooks/{rulebookId}/subscriptions. It authorizes only that one subscription; it is not a provider bearer token and the administrator session cookie has no authority on these routes. Only its SHA-256 hash is stored.',
         },
       },
     },

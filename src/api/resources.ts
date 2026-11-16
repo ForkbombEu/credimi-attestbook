@@ -41,6 +41,7 @@ import type {
 import type { RulebookVersionDocument } from '../registry/versioning'
 import { credentialSchemaDocumentUrl, sha256Sri } from '../public-urls'
 import type { CredentialValidationResult } from '../validation'
+import type { RegisteredSubscription, Subscription } from '../subscriptions'
 import type { VerifierConstraintsResult } from '../verifier'
 
 import {
@@ -67,7 +68,9 @@ import {
   rulebookVersionDocumentSchema,
   rulebookVersionSchema,
   rulebookVersionSchemaReferencesSchema,
+  registeredSubscriptionSchema,
   schemaReferenceSchema,
+  subscriptionSchema,
   verifierConstraintsResultSchema,
   versionDiffSchema,
   type HostedSchemaReferenceResource,
@@ -123,6 +126,30 @@ export function toProviderResource(provider: Provider) {
     id: provider.id,
     name: provider.name,
     createdAt: provider.createdAt,
+  })
+}
+
+/**
+ * Public projection of one anonymous subscription. Neither the management
+ * token nor its hash is part of a readable resource; the callback URL is only
+ * returned through the subscription's own management token.
+ */
+export function toSubscriptionResource(subscription: Subscription) {
+  return subscriptionSchema.parse({
+    id: subscription.id,
+    rulebookId: subscription.rulebookId,
+    callbackUrl: subscription.callbackUrl,
+    state: subscription.state,
+    createdAt: subscription.createdAt,
+    updatedAt: subscription.updatedAt,
+  })
+}
+
+/** Registration projection: the plaintext management token is returned once. */
+export function toRegisteredSubscriptionResource(subscription: RegisteredSubscription) {
+  return registeredSubscriptionSchema.parse({
+    ...toSubscriptionResource(subscription),
+    managementToken: subscription.managementToken,
   })
 }
 

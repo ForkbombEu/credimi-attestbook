@@ -46,7 +46,11 @@ describe('generated OpenAPI document', () => {
     const app = createApp()
     const registered = app.routes
       .filter(
-        (route) => route.method === 'GET' || route.method === 'POST' || route.method === 'PUT',
+        (route) =>
+          route.method === 'GET' ||
+          route.method === 'POST' ||
+          route.method === 'PUT' ||
+          route.method === 'DELETE',
       )
       .map((route) => `${route.method} ${route.path}`)
       .sort()
@@ -107,13 +111,17 @@ describe('generated OpenAPI document', () => {
     expect(preview?.['security']).toEqual([{ bearerAuth: [] }, { sessionAuth: [] }])
   })
 
-  test('operations declare their bearer and/or session security scheme', () => {
+  test('operations declare their bearer, session and subscription security scheme', () => {
     const securitySchemes = document.components['securitySchemes'] as Record<string, unknown>
     expect(securitySchemes['bearerAuth']).toMatchObject({ type: 'http', scheme: 'bearer' })
     expect(securitySchemes['sessionAuth']).toMatchObject({
       type: 'apiKey',
       in: 'cookie',
       name: 'attestbook_admin_session',
+    })
+    expect(securitySchemes['subscriptionTokenAuth']).toMatchObject({
+      type: 'http',
+      scheme: 'bearer',
     })
 
     for (const route of API_ROUTES) {
@@ -124,14 +132,18 @@ describe('generated OpenAPI document', () => {
         expect(operation['security']).toEqual([{ bearerAuth: [] }, { sessionAuth: [] }])
       } else if (route.sessionAuth) {
         expect(operation['security']).toEqual([{ sessionAuth: [] }])
+      } else if (route.subscriptionAuth) {
+        expect(operation['security']).toEqual([{ subscriptionTokenAuth: [] }])
       } else {
         expect(operation['security']).toBeUndefined()
       }
     }
   })
 
-  test('session operations do not advertise a bearer challenge on 401', () => {
-    for (const route of API_ROUTES.filter((candidate) => candidate.sessionAuth)) {
+  test('session and subscription operations do not advertise a provider bearer challenge on 401', () => {
+    for (const route of API_ROUTES.filter(
+      (candidate) => candidate.sessionAuth || candidate.subscriptionAuth,
+    )) {
       const operation = operationFor(route)
       const responses = operation['responses'] as Record<string, Record<string, unknown>>
       const headers = responses['401']?.['headers'] as Record<string, unknown> | undefined
