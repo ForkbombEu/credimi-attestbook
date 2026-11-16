@@ -1,10 +1,13 @@
-// HTTP contract tests for anonymous webhook subscriptions (issue #117).
+// HTTP contract tests for anonymous webhook subscriptions (issues #117, #118).
 //
 // These exercise the real Hono application, a real migrated SQLite database and
 // the real subscription service. They cover the UAT scenarios (anonymous
-// registration and management, rejection of an unsafe callback), the uniform
-// management-token refusal, idempotent deletion, restart persistence and the
-// two abuse bounds. No test performs a network request.
+// registration and management, rejection of an unsafe callback, callback
+// verification and activation), the uniform management-token refusal,
+// idempotent deletion, restart persistence and the abuse bounds. The callback
+// verification tests inject a fake resolver and transport, so no test resolves
+// or contacts a real host here; the local mock HTTP callback is covered by
+// `src/subscriptions/verification-http.test.ts`.
 
 import { afterEach, describe, expect, test } from 'bun:test'
 import type { Database } from 'bun:sqlite'
@@ -14,12 +17,18 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 import { createApp } from '../app'
+import {
+  Http1TransportError,
+  type Http1Request,
+  type Http1Response,
+  type Http1Transport,
+} from '../net/http1'
 import { openMigratedDatabase } from '../registry/test-support'
 import { Registry } from '../registry/registry'
 import { provisionProvider } from '../registry/bootstrap'
 import { seedPublishedRulebook, type SeededRulebook } from '../validation/test-support'
 
-import type { SubscriptionServiceOptions } from '../subscriptions'
+import type { CallbackHostResolver, SubscriptionServiceOptions } from '../subscriptions'
 import { SubscriptionService } from '../subscriptions'
 
 import { registeredSubscriptionResponseSchema, subscriptionResponseSchema } from './schemas'
@@ -127,6 +136,55 @@ function rows(database: Database): readonly Record<string, unknown>[] {
   return database
     .query<Record<string, unknown>, []>('SELECT * FROM subscriptions ORDER BY rowid')
     .all()
+}
+
+interface VerificationTransportFixture {
+  readonly requests: Http1Request[]
+  readonly transport: Http1Transport
+}
+
+function createVerificationTransport(
+  responder: (request: Http1Request) => Http1Response | Promise<Http1Response>,
+): VerificationTransportFixture {
+  const requests: Http1Request[] = []
+  return {
+    requests,
+    transport: async (request) => {
+      requests.push(request)
+      return responder(request)
+    },
+  }
+}
+
+function challengeOf(request: Http1Request): string {
+  if (request.body === undefined) {
+    throw new Error('the verification request carried no body')
+  }
+  return (JSON.parse(Buffer.from(request.body).toString('utf8')) as { challenge: string }).challenge
+}
+
+function acknowledgement(request: Http1Request): Http1Response {
+  return {
+    status: 200,
+    headers: { 'content-type': 'application/json' },
+    body: Buffer.from(JSON.stringify({ challenge: challengeOf(request) })),
+    url: request.url,
+  }
+}
+
+function fakeResolver(): CallbackHostResolver {
+  return () => Promise.resolve([{ address: '8.8.8.8', family: 4 }])
+}
+
+function verificationPath(id: string): string {
+  return `/api/v1/subscriptions/${id}/verify`
+}
+
+async function verify(fixture: Fixture, id: string, token?: string): Promise<Response> {
+  return fixture.app().request(verificationPath(id), {
+    method: 'POST',
+    ...(token === undefined ? {} : { headers: { authorization: bearer(token) } }),
+  })
 }
 
 describe('anonymous subscription registration over HTTP', () => {
@@ -398,6 +456,141 @@ describe('subscription abuse bounds over HTTP', () => {
   })
 })
 
+describe('callback verification over HTTP', () => {
+  test('UAT: verify a callback and activate the subscription', async () => {
+    const verificationTransport = createVerificationTransport(acknowledgement)
+    fixture = createFixture({
+      resolveCallbackHostname: fakeResolver(),
+      verificationTransport: verificationTransport.transport,
+    })
+    const subscription = await register(fixture)
+
+    const response = await verify(fixture, subscription.id, subscription.token)
+    expect(response.status).toBe(200)
+    expect(response.headers.get('cache-control')).toBe('no-store')
+    const body = subscriptionResponseSchema.parse(await response.json())
+    expect(body.data.state).toBe('active')
+    expect(body.data.callbackUrl).toBe('https://subscriber.example.test/webhook')
+    expect(body.data).not.toHaveProperty('managementToken')
+
+    // The real service sent one POST to the pinned public address and stored
+    // only the challenge hash while the handshake was in flight.
+    expect(verificationTransport.requests).toHaveLength(1)
+    expect(verificationTransport.requests[0]?.method).toBe('POST')
+    expect(verificationTransport.requests[0]?.address).toBe('8.8.8.8')
+    expect(rows(fixture.database)[0]?.['state']).toBe('active')
+    expect(rows(fixture.database)[0]?.['verification_challenge_hash']).toBeNull()
+
+    const readable = await fixture.app().request(managementPath(subscription.id), {
+      headers: { authorization: bearer(subscription.token) },
+    })
+    expect(subscriptionResponseSchema.parse(await readable.json()).data.state).toBe('active')
+  })
+
+  test('UAT: a wrong challenge answers a typed failure and keeps the subscription pending', async () => {
+    const verificationTransport = createVerificationTransport((request) => ({
+      ...acknowledgement(request),
+      body: Buffer.from(JSON.stringify({ challenge: 'atv_not_the_challenge' })),
+    }))
+    fixture = createFixture({
+      resolveCallbackHostname: fakeResolver(),
+      verificationTransport: verificationTransport.transport,
+    })
+    const subscription = await register(fixture)
+
+    const response = await verify(fixture, subscription.id, subscription.token)
+    expect(response.status).toBe(409)
+    expect(response.headers.get('www-authenticate')).toBeNull()
+    const body = await jsonBody<{
+      error: { code: string; message: string; details?: { reason?: string } }
+    }>(response)
+    expect(body.error.code).toBe('verification_failed')
+    expect(body.error.details?.reason).toBe('challenge_mismatch')
+    expect(JSON.stringify(body)).not.toContain('atv_not_the_challenge')
+    expect(rows(fixture.database)[0]?.['state']).toBe('pending')
+    expect(rows(fixture.database)[0]?.['verified_at']).toBeNull()
+  })
+
+  test('requires the management token and refuses a foreign or unknown record', async () => {
+    const verificationTransport = createVerificationTransport(acknowledgement)
+    fixture = createFixture({
+      resolveCallbackHostname: fakeResolver(),
+      verificationTransport: verificationTransport.transport,
+    })
+    const first = await register(fixture)
+    const second = await register(fixture)
+
+    for (const token of [undefined, '', 'ats_wrong', fixture.seeded.token]) {
+      const response = await verify(fixture, first.id, token)
+      expect(response.status).toBe(401)
+      expect(response.headers.get('www-authenticate')).toBeNull()
+    }
+    const foreign = await verify(fixture, second.id, first.token)
+    expect(foreign.status).toBe(401)
+    const unknown = await verify(fixture, 'missing-subscription', first.token)
+    expect(unknown.status).toBe(401)
+    expect(verificationTransport.requests).toHaveLength(0)
+    expect(rows(fixture.database).map((row) => row['state'])).toEqual(['pending', 'pending'])
+  })
+
+  test('answers 404 for a revoked subscription', async () => {
+    const verificationTransport = createVerificationTransport(acknowledgement)
+    fixture = createFixture({
+      resolveCallbackHostname: fakeResolver(),
+      verificationTransport: verificationTransport.transport,
+    })
+    const subscription = await register(fixture)
+    await fixture.app().request(managementPath(subscription.id), {
+      method: 'DELETE',
+      headers: { authorization: bearer(subscription.token) },
+    })
+
+    const response = await verify(fixture, subscription.id, subscription.token)
+    expect(response.status).toBe(404)
+    expect(verificationTransport.requests).toHaveLength(0)
+  })
+
+  test('maps an unreachable callback to 502 and leaves the record pending', async () => {
+    const verificationTransport = createVerificationTransport(() => {
+      throw new Http1TransportError('fetch_failed', 'connection refused')
+    })
+    fixture = createFixture({
+      resolveCallbackHostname: fakeResolver(),
+      verificationTransport: verificationTransport.transport,
+    })
+    const subscription = await register(fixture)
+
+    const response = await verify(fixture, subscription.id, subscription.token)
+    expect(response.status).toBe(502)
+    const body = await jsonBody<{
+      error: { code: string; details?: { reason?: string } }
+    }>(response)
+    expect(body.error.code).toBe('callback_unreachable')
+    expect(body.error.details?.reason).toBe('network_failure')
+    expect(rows(fixture.database)[0]?.['state']).toBe('pending')
+  })
+
+  test('answers 429 with Retry-After when the verification attempt bound is spent', async () => {
+    const verificationTransport = createVerificationTransport((request) => ({
+      ...acknowledgement(request),
+      body: Buffer.from(JSON.stringify({ challenge: 'wrong' })),
+    }))
+    fixture = createFixture({
+      resolveCallbackHostname: fakeResolver(),
+      verificationTransport: verificationTransport.transport,
+      limits: { verificationsPerSubscription: 1, verificationWindowMs: 60_000 },
+    })
+    const subscription = await register(fixture)
+
+    expect((await verify(fixture, subscription.id, subscription.token)).status).toBe(409)
+    const limited = await verify(fixture, subscription.id, subscription.token)
+    expect(limited.status).toBe(429)
+    expect(limited.headers.get('retry-after')).toMatch(/^\d+$/)
+    expect(verificationTransport.requests).toHaveLength(1)
+    expect(rows(fixture.database)[0]?.['state']).toBe('pending')
+  })
+})
+
 describe('subscription route wiring', () => {
   test('answers 503 when the subscription service is not configured', async () => {
     const app = createApp()
@@ -405,15 +598,17 @@ describe('subscription route wiring', () => {
       ['POST', '/api/v1/rulebooks/rulebook-id/subscriptions'],
       ['GET', '/api/v1/subscriptions/subscription-id'],
       ['DELETE', '/api/v1/subscriptions/subscription-id'],
+      ['POST', '/api/v1/subscriptions/subscription-id/verify'],
     ] as const) {
+      const registration = path.endsWith('/subscriptions')
       const response = await app.request(path, {
         method,
-        ...(method === 'GET' || method === 'DELETE'
-          ? { headers: { authorization: bearer('ats_any') } }
-          : {
+        ...(registration
+          ? {
               headers: { 'content-type': 'application/json' },
               body: JSON.stringify({ callbackUrl: 'https://subscriber.example.test/hook' }),
-            }),
+            }
+          : { headers: { authorization: bearer('ats_any') } }),
       })
       expect(response.status, `${method} ${path}`).toBe(503)
       expect((await jsonBody<{ error: { code: string } }>(response)).error.code).toBe(

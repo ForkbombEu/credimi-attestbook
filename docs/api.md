@@ -55,8 +55,12 @@ Implemented and exposed by this slice:
   [issue #99](https://github.com/ForkbombEu/credimi-attestbook/issues/99));
 - anonymous registration and management of pending webhook subscriptions for publicly
   published rulebooks, with a one-time per-subscription management token (added by
-  [issue #117](https://github.com/ForkbombEu/credimi-attestbook/issues/117)). This slice
-  stores subscriptions only: it contacts no callback host and delivers no event.
+  [issue #117](https://github.com/ForkbombEu/credimi-attestbook/issues/117));
+- a bounded challenge/response callback verification handshake that activates a subscription
+  only after the subscriber's endpoint proves control, with verification-time SSRF checks and
+  no redirect following (added by
+  [issue #118](https://github.com/ForkbombEu/credimi-attestbook/issues/118)). Nothing is
+  delivered by this API yet.
 
 The public API is the integration boundary for Credimi. The standalone adapter documented in
 [`docs/credimi-integration.md`](credimi-integration.md) (issue #49) consumes these routes only:
@@ -69,9 +73,11 @@ Deliberately **not** in this slice:
 - the TS11 catalogue interface (`GET/PUT/DELETE /schemas`, JWS responses) — it must be
   implemented separately and exactly if a later issue adds it (architecture §5);
 - capture validation and validation-result persistence; no route pretends to offer them;
-- webhook callback verification and event delivery. A subscription is stored `pending` and is
-  never contacted or delivered to; callback network verification and delivery are separate
-  later issues. No route in this slice performs an outbound request for a subscription;
+- webhook event delivery. Callback verification and activation are implemented by
+  [issue #118](https://github.com/ForkbombEu/credimi-attestbook/issues/118), but no route
+  delivers a publication event, retries a delivery or exposes delivery history. The only
+  outbound subscription request is the explicit, management-token authenticated verification
+  handshake;
 - provider-management HTTP routes, generic API rate limiting and token expiry/rotation —
   future hardening; the administrator login has its own failure limit, anonymous subscription
   registration has its own per-client quota, and the implemented write-auth model is
@@ -100,7 +106,7 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.16.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.17.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
   export operations added by #42, issuer discovery added by #43, issuer fixture generation
   added by #44, the mock-backed capture explorer added by #48, the optional pinned
@@ -109,8 +115,8 @@ wired answers `503` with a typed code instead of a placeholder success response.
   credential-schema document reads added by #98, the authenticated schema document
   registration added by #99, hosted-schema issuer fixture grounding added by #102, the
   hosted/external schema provenance projection added by #103, the public publication
-  event feed added by #116 and anonymous webhook subscription registration and management
-  added by #117); it is
+  event feed added by #116, anonymous webhook subscription registration and management
+  added by #117 and the callback verification and activation handshake added by #118); it is
   separate from the package version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
@@ -168,6 +174,7 @@ in Phase 1.
 | `POST` | `/api/v1/rulebooks/{rulebookId}/subscriptions` | no | `201` + `Location` | Anonymous registration of one pending webhook subscription for a rulebook that has a published version. Body: `callbackUrl`. The response returns the opaque id, `pending` state and a one-time `managementToken`; only its SHA-256 hash is stored. `404` for an unknown rulebook, `400` for an invalid or unsafe URL, `409` for a rulebook with no published version or at its subscription bound, `429` with `Retry-After` over the per-client registration quota. Performs no outbound request and stores no client address. |
 | `GET` | `/api/v1/subscriptions/{subscriptionId}` | subscription | `200` | One subscription read with its per-subscription management token. Missing, invalid or unknown tokens and unknown ids answer `401` uniformly; a revoked subscription answers `404`. Never returns the management token or hash. |
 | `DELETE` | `/api/v1/subscriptions/{subscriptionId}` | subscription | `204` | Revoke one subscription immediately with its per-subscription management token. Idempotent: a repeated authenticated delete answers `204` again; a missing, invalid or foreign token answers `401`. Delivery eligibility ends with the revocation. |
+| `POST` | `/api/v1/subscriptions/{subscriptionId}/verify` | subscription | `200` | Explicitly verify the callback and activate the subscription. Mints a fresh single-use expiring challenge, sends it to the stored callback URL through a pinned, redirect-free `POST`, and activates only when the endpoint answers `200` with `application/json` and the exact challenge. The target is re-resolved and must be public; DNS, connect and the request share a five-second bound and the response is capped at 8 KiB. A wrong, expired or unreadable answer, a redirect, a non-public target, a timeout or an unreachable endpoint answers a typed `409`/`502` and leaves the subscription `pending`; initiations are bounded per subscription (`429` with `Retry-After`). An already-active subscription is returned without contacting the callback again. No event is delivered. |
 
 Representations are the public projection of the services: rulebook `provenance`,
 `metadata` and `importKey`, attestation/schema-reference `metadata` and version `provenance`
@@ -939,9 +946,10 @@ add a `hostedSchema` member to every reference (issue #103):
 
 `POST /api/v1/rulebooks/{rulebookId}/subscriptions` registers a consumer that wants to follow
 a rulebook's publications without an AttestBook account, provider bearer token, browser
-session or CSRF token. Publishing and editing rulebooks remain authenticated exactly as before;
-this slice only stores the pending subscription, and it **never contacts the callback host and
-never delivers an event**.
+session or CSRF token. Publishing and editing rulebooks remain authenticated exactly as before.
+Registration only stores a `pending` subscription and **never contacts the callback host**;
+an explicit verification request (§3.15.1) is the only operation that contacts it, and nothing
+delivers an event yet.
 
 Request body (unknown members are ignored):
 
@@ -960,11 +968,13 @@ be printable ASCII without backslashes, so a parser-difference form cannot hide 
 The host must be a public DNS name with valid labels and at least two labels, or a public IP
 literal; single-label names, `localhost`, `.localhost`, `.local`, `.internal`, `.home.arpa`,
 trailing-dot hosts and blocked IP ranges (loopback, private, link-local, carrier-grade NAT,
-multicast, reserved and cloud-metadata) are rejected. No DNS lookup is performed and no
-outbound request is made: a name that later resolves to an internal address is a delivery-time
-concern, and any future delivery worker must repeat the address checks and pin the connection.
-A plain `http` URL on a literal loopback address is accepted only by a service-level test
-opt-in; the production wiring never enables it.
+multicast, reserved and cloud-metadata) are rejected. Registration performs no DNS lookup and
+no outbound request. Verification re-validates and resolves the stored URL and connects to the
+pinned address, so a name that later resolves to an internal address cannot redirect the
+verification request. A plain `http` URL on a literal loopback address is accepted only by a
+service-level test opt-in; production wiring keeps it off, and the local UAT start script
+enables it for a disposable callback server. A DNS name is never allowed to resolve to
+loopback, even with the opt-in.
 
 The rulebook must already exist and have at least one published or historical version. Its
 working copy may be a draft for the next version, because the rulebook is still publicly
@@ -981,9 +991,9 @@ IPv4 client it represents. The limiter tracks at most 10,000 keys and drops the 
 insertion-order key beyond that, so a client able to present very many keys could displace its
 own entry. The quota is not persisted and resets on restart. The per-rulebook bound (1,000 live
 subscriptions by default) is durable and enforced against SQLite. No client address is stored.
-Pending subscriptions do not expire and there is no operator cleanup, so a rulebook whose bound
-is full stays closed to new registrations until subscribers revoke rows; expiry is left to the
-later verification/delivery slice.
+Subscriptions themselves do not expire and there is no operator cleanup, so a rulebook whose
+bound is full stays closed to new registrations until subscribers revoke rows; only the
+verification challenge and the verification-attempt window are time-bounded.
 
 Success is `201` with a `Location` header and one `RegisteredSubscription`:
 
@@ -1004,7 +1014,8 @@ Success is `201` with a `Location` header and one `RegisteredSubscription`:
 The `managementToken` is 256 random bits and is returned **exactly once**. The database stores
 only its SHA-256 hash, so the API can never return it again and a database leak does not yield
 a usable management credential. The registered state is `pending` and therefore not delivery
-eligible; callback verification and activation are a separate later issue.
+eligible; `POST /api/v1/subscriptions/{subscriptionId}/verify` proves control of the callback
+and activates it.
 
 `GET /api/v1/subscriptions/{subscriptionId}` and
 `DELETE /api/v1/subscriptions/{subscriptionId}` require the per-subscription management token
@@ -1026,6 +1037,83 @@ Both set `Cache-Control: no-store`, as does the registration response because it
 one-time secret. Raw management tokens are never logged or written to an error message. See
 [`docs/security.md`](security.md) §3.1, §6 and §8 for the credential and residual-risk model.
 
+### 3.15.1 Callback verification and activation
+
+`POST /api/v1/subscriptions/{subscriptionId}/verify` is the explicit activation handshake. It
+accepts the same `Authorization: Bearer <managementToken>` credential as the management
+routes, no request body, and never reads a provider credential or the session cookie. A
+pending subscription triggers exactly one outbound request; an invalid or foreign token, an
+unknown id and a missing credential answer the same `401` as the management routes, and a
+revoked subscription answers `404`. An already-active subscription is returned with `200` and
+is **not** contacted again.
+
+The handshake is one HTTP request to the stored callback URL:
+
+```http
+POST /webhook HTTP/1.1
+Host: subscriber.example.test
+Content-Type: application/json
+Accept: application/json
+
+{
+  "type": "attestbook.subscription.verification@1",
+  "challenge": "atv_<fresh 256-bit challenge>",
+  "expiresAt": "2026-01-01T00:05:00.000Z"
+}
+```
+
+The endpoint proves control by answering `200` with a JSON object carrying the exact
+challenge:
+
+```http
+HTTP/1.1 200 OK
+Content-Type: application/json
+
+{ "challenge": "atv_<the same challenge>" }
+```
+
+The challenge is fresh for every initiation, expires after five minutes and is stored only as
+its SHA-256 hash, so it is not readable from the database or from any later API response. A
+failed attempt consumes the challenge: a retry requires a new initiation and is charged to the
+attempt bound. Redirects are **not** followed (`3xx` fails), so every request goes to exactly
+the address that was checked. The response body is capped at 8 KiB and only a `200` answer with
+`application/json` (or a `+json` media type) and an object `challenge` member is accepted.
+
+Network safety is enforced at verification time, not trusted from registration:
+
+- The stored URL is re-validated under the registration policy, then its hostname is resolved
+  once. Every resolved answer must be public; a mixed public/private answer is refused.
+- The transport connects to the validated address and presents the original hostname only for
+  HTTPS SNI and `Host`, so a second DNS answer cannot redirect the connection.
+- Loopback, private, link-local, carrier-grade NAT, multicast, reserved and cloud-metadata
+  addresses are refused in IPv4, IPv6 and IPv4-mapped/NAT64 forms. A literal
+  `127.0.0.1`/`::1` `http` target is permitted only by the explicitly configured test-loopback
+  opt-in; a DNS name resolving to loopback is still refused.
+- The DNS lookup, connection and request share a five-second bound, and the response is read
+  under the byte cap.
+
+Failures keep the subscription `pending` and carry a stable reason:
+
+| Condition | HTTP | `error.code` | `details.reason` |
+| --- | --- | --- | --- |
+| Wrong challenge, wrong or malformed body, wrong content type, expiry, non-`200` status, redirect, oversized body | `409` | `verification_failed` | `challenge_mismatch`, `invalid_response`, `expired_challenge`, `unexpected_status`, `redirect_not_followed`, `response_too_large` |
+| A re-validated destination is not public, or the stored URL no longer passes the policy | `409` | `verification_failed` | `blocked_target` |
+| DNS failure, connection/TLS failure or timeout | `502` | `callback_unreachable` | `dns_failure`, `network_failure`, `timeout` |
+| A different handshake is already in progress | `409` | `conflict` | — |
+| More than five initiations in ten minutes for one subscription | `429` | `rate_limited` | `Retry-After` + `details.retryAfterSeconds` |
+
+No error message contains the challenge, the management token or its hash. Activation is
+final apart from revocation: the database requires `verified_at` for an `active` row and
+forbids it on a `pending` one, and an activated row can only become `revoked`. Activation
+makes the subscription delivery eligible in the data model, but this API still delivers no
+event.
+
+The local UAT environment enables the test-loopback opt-in through
+`SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP=1` in `scripts/uat-start.sh`, so a scenario can run a
+disposable callback server on `127.0.0.1` over plain `http`. A subscriber can register such a
+URL there, then call the verification route with its management token. Production does not set
+the flag, so only public HTTPS callbacks are accepted and contacted.
+
 ## 4. Errors
 
 Every error body has the same shape:
@@ -1042,8 +1130,8 @@ Every error body has the same shape:
 
 `code` is stable and machine-readable; `message` is safe to display and never contains a
 bearer token, credential material, claim values or remote document bytes. `details` is
-present where a stable sub-reason helps the client (currently import failures carry
-`reason` and sometimes `path`).
+present where a stable sub-reason helps the client (import failures carry `reason` and
+sometimes `path`; callback verification failures carry `reason`).
 
 | Source | Condition | HTTP | `error.code` |
 | --- | --- | --- | --- |
@@ -1081,7 +1169,11 @@ present where a stable sub-reason helps the client (currently import failures ca
 | Anonymous subscription registration | rulebook has no published version, or has reached its live-subscription bound | `409` | `conflict` |
 | Anonymous subscription registration | malformed body, missing/non-string `callbackUrl`, or an unsafe/non-public URL | `400` | `invalid_request` |
 | Subscription management | missing, malformed, invalid or foreign management token, or unknown subscription id | `401` | `unauthorized` |
-| Subscription management | revoked subscription read | `404` | `not_found` |
+| Subscription management | revoked subscription read or verification | `404` | `not_found` |
+| Callback verification | wrong/expired challenge, redirect, non-`200` status, invalid or oversized acknowledgement, or a refused non-public target | `409` | `verification_failed` |
+| Callback verification | a different verification handshake is already in progress | `409` | `conflict` |
+| Callback verification | DNS failure, connection failure or timeout reaching the callback | `502` | `callback_unreachable` |
+| Callback verification | per-subscription verification attempt bound exceeded | `429` | `rate_limited` |
 | API wiring | registry, validation, issuer discovery, issuer fixtures, verifier policy resolver, capture explorer or subscription service not configured | `503` | `registry_unavailable` / `validation_unavailable` / `capture_unavailable` / `subscription_unavailable` |
 | Administrator login | configuration absent, partial, invalid or its provider missing | `503` | `auth_unavailable` |
 | Schema registration | deployment has no valid `PUBLIC_BASE_URL`, so no canonical hosted URL can be issued | `503` | `public_base_url_unavailable` |
@@ -1130,13 +1222,13 @@ summarizes the HTTP contract.
   registry accepts and never issues a synthetic token. Its write authority is exactly the
   bound provider's, so the operation matrix in [`docs/security.md`](security.md) §3.1 is the
   same for both transports apart from the cookie's CSRF requirement.
-- Anonymous subscription registration needs no credential at all. Its two management routes
-  accept only the subscription's own management token in the `Authorization` header (the same
-  header name as a provider token, but a different credential and a different operation set):
-  the provider token, session cookie and CSRF token have no authority there, and the
-  subscription token has no authority on any registry or provider route. Management failures
-  are uniform `401`s without a provider bearer challenge and without disclosing whether the id
-  exists.
+- Anonymous subscription registration needs no credential at all. Its management and
+  verification routes accept only the subscription's own management token in the
+  `Authorization` header (the same header name as a provider token, but a different credential
+  and a different operation set): the provider token, session cookie and CSRF token have no
+  authority there, and the subscription token has no authority on any registry or provider
+  route. Management and verification failures are uniform `401`s without a provider bearer
+  challenge and without disclosing whether the id exists.
 
 Generic API rate limiting, token expiry/rotation and provider-administration routes are not
 implemented in Phase 1; administrator login failures are rate limited separately and anonymous
@@ -1163,6 +1255,7 @@ Phase 1 supports idempotency where the domain provides a deterministic identity;
 | `POST /api/v1/credentials/validate` | Read-only; safe to retry. |
 | `POST /api/v1/conformance/runs` | Read-only and side-effect free. The same pinned request returns the same `inputDigest` and `resultReference` when the run is deterministic; a run cut short by a runtime condition returns `deterministic: false` and must be retried. No run is recorded, so there is no server-side history to deduplicate. |
 | `POST /api/v1/rulebooks/{rulebookId}/subscriptions` | **Not idempotent.** Each call creates a new pending subscription and mints a new one-time management token; there is no deduplication by callback URL. The per-client quota and per-rulebook bound still apply. |
+| `POST /api/v1/subscriptions/{subscriptionId}/verify` | **Idempotent for an active subscription:** a repeat returns `200` with the active representation and contacts no endpoint. On a pending subscription each call is an explicit new handshake with a fresh challenge and a fresh (bounded) outbound request, so it is not a no-op retry. A concurrent handshake answers `409 conflict`. |
 | `DELETE /api/v1/subscriptions/{subscriptionId}` | **Idempotent.** After a successful revoke, a repeat with the same valid management token is a no-op `204`; the revoked state and revocation instant are unchanged. Missing, invalid or foreign tokens still answer `401`. |
 
 The import policy is the substantive idempotency mechanism implemented in Phase 1
@@ -1220,8 +1313,8 @@ bun test src/conformance # reproducible result references and failure classifica
 bun test src/api/verifier.test.ts  # verifier-constraint HTTP contract
 bun test src/api/comparison.test.ts  # comparison HTTP contract and pin linkage
 bun test src/api/conformance.test.ts  # conformance HTTP contract, repeats and classification
-bun test src/subscriptions # callback URLs, management tokens, storage, quota and persistence
-bun test src/api/subscriptions.test.ts  # anonymous registration and token-only management HTTP contract
+bun test src/subscriptions # callback URLs, tokens, storage, quota, verification and activation
+bun test src/api/subscriptions.test.ts  # registration/management/verification HTTP contract
 bun run check           # formatting, lint, strict typecheck and all tests
 ```
 
@@ -1230,8 +1323,13 @@ pipeline (offline JSON sources only) and a genuinely signed SD-JWT VC fixture. T
 administrator tests use real Argon2id hashes, temporary databases and injected clocks for
 deterministic expiry. Discovery tests use an injected transport and DNS resolver, so no test
 performs a real network request. The subscription tests patch the process `fetch` to prove
-registration performs no request, and reopen the SQLite file to prove the subscription and its
-token hash persist. They do not claim coverage of general API rate limits or
+registration performs no request, inject a fake resolver and transport for every verification
+path (unsafe destinations, private/mixed DNS answers, rebinding, wrong, oversized and expired
+acknowledgements, redirects, timeouts and the attempt bound), and reopen the SQLite file to
+prove the subscription, its token hash and its activation persist.
+`src/subscriptions/verification-http.test.ts` runs the real transport against a disposable
+loopback HTTP server for the successful handshake, a wrong challenge, a redirect, a timeout
+and the response cap. They do not claim coverage of general API rate limits or
 provider-management routes. The catalog UI has its own component and browser tests described
 in [`docs/ui.md`](ui.md).
 
@@ -1247,15 +1345,16 @@ in [`docs/ui.md`](ui.md).
   redirect and fan-out limits still apply to every call. General rate limiting,
   token expiry/rotation and provider-administration routes remain future hardening work
   documented in [`docs/security.md`](security.md) §8.
-- Webhook subscriptions are storage and management only in this slice. Nothing verifies the
-  callback owner, activates a subscription, resolves or connects to the callback host, retries
-  or delivers an event. Every registration stays `pending` and no delivery eligibility exists
-  yet; callback network safety must be re-verified at activation and delivery time. The
-  registration quota is in-process, resets on restart and is keyed per IPv4 address or IPv6
-  /64; behind a reverse proxy all clients share the proxy socket address because forwarding
-  headers are deliberately not trusted. The per-rulebook bound is durable, but pending
-  subscriptions never expire and there is no operator cleanup, so a full bound stays full until
-  subscribers revoke rows.
+- Webhook subscriptions verify and activate but do not deliver. The verification handshake
+  activates a subscription only after the callback answers the exact challenge, but no route
+  delivers a publication event, retries a delivery or exposes delivery history. Delivery-time
+  network safety lives in the same verified target/transport helpers and must be reused
+  unchanged by the eventual delivery worker; activation is the delivery-eligibility state.
+  The registration quota is in-process, resets on restart and is keyed per IPv4 address or
+  IPv6 /64; behind a reverse proxy all clients share the proxy socket address because
+  forwarding headers are deliberately not trusted. The verification attempt window and the
+  challenge expiry are durable, but subscriptions themselves never expire and there is no
+  operator cleanup, so a full per-rulebook bound stays full until subscribers revoke rows.
 - The administrator login is one environment-configured account with no MFA, self-service
   password change or account management API; rotating the password means changing
   `ADMIN_PASSWORD_HASH` and restarting. The failure limiter is in-process and resets on

@@ -18,6 +18,11 @@ interface SubscriptionRow {
   readonly created_at: string
   readonly updated_at: string
   readonly revoked_at: string | null
+  readonly verification_challenge_hash: string | null
+  readonly verification_challenge_expires_at: string | null
+  readonly verification_window_started_at: string | null
+  readonly verification_attempts: number
+  readonly verified_at: string | null
 }
 
 function toRecord(row: SubscriptionRow): SubscriptionRecord {
@@ -32,6 +37,11 @@ function toRecord(row: SubscriptionRow): SubscriptionRecord {
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     revokedAt: row.revoked_at,
+    verificationChallengeHash: row.verification_challenge_hash,
+    verificationChallengeExpiresAt: row.verification_challenge_expires_at,
+    verificationWindowStartedAt: row.verification_window_started_at,
+    verificationAttempts: row.verification_attempts,
+    verifiedAt: row.verified_at,
   }
 }
 
@@ -88,5 +98,78 @@ export class SubscriptionStore {
          WHERE id = ? AND state != 'revoked'`,
       )
       .run(revokedAt, revokedAt, id)
+  }
+
+  /**
+   * Charges one verification initiation to the current attempt window. Only a
+   * pending row can be charged; a revoked or active row is left untouched.
+   */
+  recordVerificationAttempt(
+    id: string,
+    windowStartedAt: string,
+    attempts: number,
+    updatedAt: string,
+  ): void {
+    this.database
+      .query(
+        `UPDATE subscriptions
+         SET verification_window_started_at = ?, verification_attempts = ?, updated_at = ?
+         WHERE id = ? AND state = 'pending'`,
+      )
+      .run(windowStartedAt, attempts, updatedAt, id)
+  }
+
+  /**
+   * Atomically claims the single in-flight challenge slot of a pending
+   * subscription. A live challenge from another call makes the claim fail, so
+   * one subscription cannot have two concurrent handshakes; an expired
+   * leftover challenge (for example after a crash) can be replaced.
+   */
+  beginVerification(id: string, challengeHash: string, expiresAt: string, now: string): boolean {
+    const result = this.database
+      .query(
+        `UPDATE subscriptions
+         SET verification_challenge_hash = ?,
+             verification_challenge_expires_at = ?,
+             updated_at = ?
+         WHERE id = ?
+           AND state = 'pending'
+           AND (verification_challenge_hash IS NULL OR verification_challenge_expires_at <= ?)`,
+      )
+      .run(challengeHash, expiresAt, now, id, now)
+    return result.changes > 0
+  }
+
+  /**
+   * Activates a pending subscription only while the expected challenge is
+   * still the active one, so a stale or superseded handshake cannot activate
+   * the record. Clears the challenge in the same statement.
+   */
+  activate(id: string, challengeHash: string, verifiedAt: string): boolean {
+    const result = this.database
+      .query(
+        `UPDATE subscriptions
+         SET state = 'active',
+             verified_at = ?,
+             verification_challenge_hash = NULL,
+             verification_challenge_expires_at = NULL,
+             updated_at = ?
+         WHERE id = ? AND state = 'pending' AND verification_challenge_hash = ?`,
+      )
+      .run(verifiedAt, verifiedAt, id, challengeHash)
+    return result.changes > 0
+  }
+
+  /** Clears only the expected in-flight challenge, leaving a newer one intact. */
+  clearVerificationChallenge(id: string, challengeHash: string, updatedAt: string): void {
+    this.database
+      .query(
+        `UPDATE subscriptions
+         SET verification_challenge_hash = NULL,
+             verification_challenge_expires_at = NULL,
+             updated_at = ?
+         WHERE id = ? AND verification_challenge_hash = ?`,
+      )
+      .run(updatedAt, id, challengeHash)
   }
 }

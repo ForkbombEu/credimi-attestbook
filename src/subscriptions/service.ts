@@ -14,11 +14,16 @@
 
 import { randomUUID } from 'node:crypto'
 
+import { isHttp1TransportError, type Http1Transport } from '../net/http1'
+
 import {
+  subscriptionCallbackUnreachable,
   subscriptionConflict,
   subscriptionNotFound,
   subscriptionRateLimited,
   subscriptionUnauthorized,
+  subscriptionVerificationFailed,
+  isSubscriptionError,
 } from './errors'
 import { resolveSubscriptionLimits } from './limits'
 import {
@@ -41,6 +46,15 @@ import type {
   SubscriptionServiceOptions,
 } from './types'
 import { parseSubscriptionCallbackUrl } from './url'
+import {
+  createSubscriptionVerificationTransport,
+  generateSubscriptionChallenge,
+  hashSubscriptionChallenge,
+  resolveSubscriptionCallbackTarget,
+  validateSubscriptionVerificationResponse,
+  SUBSCRIPTION_VERIFICATION_TYPE,
+  type CallbackHostResolver,
+} from './verification'
 
 /** Upper bound on a path-supplied subscription identifier. */
 export const MAX_SUBSCRIPTION_ID_LENGTH = 128
@@ -82,7 +96,10 @@ export class SubscriptionService {
   private readonly now: () => string
   private readonly generateId: () => string
   private readonly generateManagementToken: () => string
+  private readonly generateChallenge: () => string
   private readonly allowLoopbackHttp: boolean
+  private readonly resolveCallbackHostname: CallbackHostResolver | undefined
+  private readonly verificationTransport: Http1Transport
   private readonly limits: SubscriptionLimits
   private readonly limiter: SubscriptionRegistrationLimiter
 
@@ -93,7 +110,11 @@ export class SubscriptionService {
     this.generateId = options.generateId ?? (() => randomUUID())
     this.generateManagementToken =
       options.generateManagementToken ?? generateSubscriptionManagementToken
+    this.generateChallenge = options.generateChallenge ?? generateSubscriptionChallenge
     this.allowLoopbackHttp = options.allowLoopbackHttp ?? false
+    this.resolveCallbackHostname = options.resolveCallbackHostname
+    this.verificationTransport =
+      options.verificationTransport ?? createSubscriptionVerificationTransport()
     this.limits = resolveSubscriptionLimits(options.limits)
     this.limiter = options.rateLimiter ?? SubscriptionRegistrationLimiter.fromLimits(this.limits)
   }
@@ -142,6 +163,11 @@ export class SubscriptionService {
         createdAt,
         updatedAt: createdAt,
         revokedAt: null,
+        verificationChallengeHash: null,
+        verificationChallengeExpiresAt: null,
+        verificationWindowStartedAt: null,
+        verificationAttempts: 0,
+        verifiedAt: null,
       }
       this.store.insert(record)
       return { ...publicProjection(record), managementToken }
@@ -177,6 +203,163 @@ export class SubscriptionService {
       return
     }
     this.store.revoke(record.id, this.now())
+  }
+
+  /**
+   * Runs one bounded callback verification with the subscription's management
+   * token and activates the subscription only after the endpoint answers with
+   * the exact challenge.
+   *
+   * A fresh single-use challenge is minted per call, stored only as its hash
+   * and sent over a pinned, redirect-free HTTP request. A wrong answer, a
+   * redirect, an expired challenge, a timeout, an unreachable endpoint or a
+   * non-public destination leaves the row `pending` with a typed failure and
+   * no delivery eligibility. An already-active subscription is returned
+   * without another network request; a revoked one is not found.
+   */
+  async verify(id: string, managementToken: string | undefined): Promise<Subscription> {
+    const record = this.authenticate(id, managementToken)
+    if (record.state === 'revoked') {
+      throw subscriptionNotFound()
+    }
+    if (record.state === 'active') {
+      // Activation is already final; a retry must not contact the callback
+      // again or mint another challenge.
+      return publicProjection(record)
+    }
+
+    const startedAt = this.now()
+    const startedAtMs = Date.parse(startedAt)
+    const windowStartMs =
+      record.verificationWindowStartedAt === null
+        ? null
+        : Date.parse(record.verificationWindowStartedAt)
+    const withinWindow =
+      windowStartMs !== null && startedAtMs - windowStartMs < this.limits.verificationWindowMs
+    if (withinWindow && record.verificationAttempts >= this.limits.verificationsPerSubscription) {
+      const retryAtMs = (windowStartMs ?? startedAtMs) + this.limits.verificationWindowMs
+      throw subscriptionRateLimited(Math.max(1, Math.ceil((retryAtMs - startedAtMs) / 1_000)))
+    }
+
+    const challenge = this.generateChallenge()
+    const challengeHash = hashSubscriptionChallenge(challenge)
+    const expiresAt = new Date(startedAtMs + this.limits.challengeTtlMs).toISOString()
+    if (!this.store.beginVerification(record.id, challengeHash, expiresAt, startedAt)) {
+      throw subscriptionConflict('A verification attempt is already in progress.')
+    }
+
+    const attemptWindowStart =
+      withinWindow && record.verificationWindowStartedAt !== null
+        ? record.verificationWindowStartedAt
+        : startedAt
+    const attempts = withinWindow ? record.verificationAttempts + 1 : 1
+    this.store.recordVerificationAttempt(record.id, attemptWindowStart, attempts, startedAt)
+
+    const deadlineMs = startedAtMs + this.limits.verificationTimeoutMs
+    let activated = false
+    try {
+      const beforeResolve = deadlineMs - Date.parse(this.now())
+      if (beforeResolve <= 0) {
+        throw subscriptionCallbackUnreachable(
+          'timeout',
+          'The callback verification request exceeded its time budget.',
+        )
+      }
+      const target = await resolveSubscriptionCallbackTarget(record.callbackUrl, {
+        maxCallbackUrlLength: this.limits.maxCallbackUrlLength,
+        allowLoopbackHttp: this.allowLoopbackHttp,
+        timeoutMs: beforeResolve,
+        ...(this.resolveCallbackHostname === undefined
+          ? {}
+          : { resolver: this.resolveCallbackHostname }),
+      })
+
+      const remaining = deadlineMs - Date.parse(this.now())
+      if (remaining <= 0) {
+        throw subscriptionCallbackUnreachable(
+          'timeout',
+          'The callback verification request exceeded its time budget.',
+        )
+      }
+
+      const response = await this.verificationTransport({
+        url: target.url,
+        hostname: target.hostname,
+        address: target.address,
+        family: target.family,
+        port: target.port,
+        timeoutMs: remaining,
+        maxBytes: this.limits.maxVerificationResponseBytes,
+        method: 'POST',
+        body: Buffer.from(
+          JSON.stringify({
+            type: SUBSCRIPTION_VERIFICATION_TYPE,
+            challenge,
+            expiresAt,
+          }),
+          'utf8',
+        ),
+        contentType: 'application/json',
+        accept: 'application/json',
+      })
+
+      if (Date.parse(this.now()) >= Date.parse(expiresAt)) {
+        throw subscriptionVerificationFailed(
+          'expired_challenge',
+          'The verification challenge expired before the callback answered.',
+        )
+      }
+      validateSubscriptionVerificationResponse(response, challenge, {
+        maxResponseBytes: this.limits.maxVerificationResponseBytes,
+      })
+
+      const verifiedAt = this.now()
+      if (!this.store.activate(record.id, challengeHash, verifiedAt)) {
+        throw subscriptionConflict(
+          'The subscription changed while its callback was being verified.',
+        )
+      }
+      activated = true
+      const updated = this.store.get(record.id)
+      if (updated === null) {
+        throw new Error('the activated subscription disappeared')
+      }
+      return publicProjection(updated)
+    } catch (error) {
+      throw this.mapVerificationFailure(error)
+    } finally {
+      // A failure consumes the challenge: retrying requires a fresh initiation,
+      // which is charged to the attempt bound.
+      if (!activated) {
+        this.store.clearVerificationChallenge(record.id, challengeHash, this.now())
+      }
+    }
+  }
+
+  /** Maps transport failures to safe typed subscription failures. */
+  private mapVerificationFailure(error: unknown): unknown {
+    if (isSubscriptionError(error)) {
+      return error
+    }
+    if (isHttp1TransportError(error)) {
+      if (error.code === 'timeout') {
+        return subscriptionCallbackUnreachable(
+          'timeout',
+          'The callback endpoint did not answer in time.',
+        )
+      }
+      if (error.code === 'response_too_large') {
+        return subscriptionVerificationFailed(
+          'response_too_large',
+          'The callback response exceeded the verification response limit.',
+        )
+      }
+      return subscriptionCallbackUnreachable(
+        'network_failure',
+        'The callback endpoint could not be reached.',
+      )
+    }
+    return error
   }
 
   private authenticate(id: string, managementToken: string | undefined): SubscriptionRecord {

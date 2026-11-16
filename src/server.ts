@@ -19,10 +19,15 @@ const database = openDatabase(config.databasePath)
 applyMigrations(database)
 
 const registry = new Registry({ database })
-// Anonymous webhook subscriptions are stored, never contacted or delivered in
-// this slice. The production wiring keeps the test-only loopback HTTP opt-in
-// off, so only public HTTPS callback URLs are accepted.
-const subscriptions = new SubscriptionService({ database, source: registry })
+// Anonymous webhook subscriptions stay inert until the subscriber explicitly
+// verifies its callback. Production keeps the test-only loopback HTTP opt-in
+// off, so only public HTTPS callback URLs are accepted and contacted; the local
+// UAT start script enables it for a disposable loopback callback server.
+const subscriptions = new SubscriptionService({
+  database,
+  source: registry,
+  allowLoopbackHttp: config.subscriptionsAllowLoopbackHttp,
+})
 // Administrator login is optional: a missing or invalid group leaves it
 // unavailable without stopping the public API or provider bearer writes.
 const adminLoginConfig = loadAdminLoginConfig()

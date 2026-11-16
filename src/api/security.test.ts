@@ -151,6 +151,7 @@ describe('write operation security surface', () => {
       'compareCapture',
       'resolveVerifierConstraints',
       'registerRulebookSubscription',
+      'verifySubscription',
     ])
   })
 

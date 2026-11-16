@@ -17,6 +17,12 @@ set -a
 . "$environment_file"
 set +a
 
+# Test-only: a local UAT scenario may point a webhook callback at a disposable
+# loopback HTTP server so it can observe the verification handshake. This is
+# the explicitly configured test-loopback opt-in; a DNS name still may never
+# resolve to a non-public address and production keeps the flag off.
+export SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP=1
+
 # Run the application under the test-only supervisor so a local UAT can restart
 # it through `POST http://127.0.0.1:3001/restart` and observe restart
 # persistence. The supervisor forwards the application's output and keeps the

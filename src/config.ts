@@ -21,6 +21,13 @@ export interface AppConfig {
   readonly validationCacheMaxEntries: number
   /** Maximum total snapshot bytes cached in-process (MiB). */
   readonly validationCacheMaxMb: number
+  /**
+   * Test-only opt-in that lets a webhook callback use plain `http` on a
+   * literal loopback address. Off in production; the local UAT start script
+   * enables it so a disposable callback server can be reached. It never
+   * permits a DNS name to resolve to a non-public address.
+   */
+  readonly subscriptionsAllowLoopbackHttp: boolean
 }
 
 export const DEFAULT_HOSTNAME = '127.0.0.1'
@@ -34,6 +41,17 @@ export const DEFAULT_VALIDATION_CACHE_MAX_MB = 16
 
 const PORT_PATTERN = /^[1-9]\d*$/
 const POSITIVE_INTEGER_PATTERN = /^[1-9]\d*$/
+
+function booleanFlag(env: Record<string, string | undefined>, name: string): boolean {
+  const raw = env[name]?.trim().toLowerCase() ?? ''
+  if (raw === '' || raw === '0' || raw === 'false') {
+    return false
+  }
+  if (raw === '1' || raw === 'true') {
+    return true
+  }
+  throw new Error(`invalid ${name} "${raw}": expected true or false`)
+}
 
 function positiveInteger(
   env: Record<string, string | undefined>,
@@ -103,5 +121,6 @@ export function loadConfig(env: Record<string, string | undefined> = Bun.env): A
       'VALIDATION_CACHE_MAX_MB',
       DEFAULT_VALIDATION_CACHE_MAX_MB,
     ),
+    subscriptionsAllowLoopbackHttp: booleanFlag(env, 'SUBSCRIPTIONS_ALLOW_LOOPBACK_HTTP'),
   }
 }
