@@ -92,15 +92,16 @@ wired answers `503` with a typed code instead of a placeholder success response.
   endpoints and new optional request members are allowed. Removing or renaming a field,
   changing a type or status, or making an optional request member required is a breaking
   change and requires `/api/v2`.
-- The OpenAPI document's `info.version` tracks the contract document (currently `1.15.0`,
+- The OpenAPI document's `info.version` tracks the contract document (currently `1.16.0`,
   additive after the lifecycle and comparison operations added by #41, the publication
   export operations added by #42, issuer discovery added by #43, issuer fixture generation
   added by #44, the mock-backed capture explorer added by #48, the optional pinned
   correlation digest added by #49, the read-only headless-wallet comparison added by
   #50, the reproducible conformance run added by #51, the public hosted
   credential-schema document reads added by #98, the authenticated schema document
-  registration added by #99, hosted-schema issuer fixture grounding added by #102 and the
-  hosted/external schema provenance projection added by #103); it is
+  registration added by #99, hosted-schema issuer fixture grounding added by #102, the
+  hosted/external schema provenance projection added by #103 and the public publication
+  event feed added by #116); it is
   separate from the package version reported by `/health`.
 - Clients must tolerate unknown response fields. Unknown request members are ignored by the
   handlers except where the API deliberately projects a whitelist (internal registry
@@ -129,6 +130,7 @@ All operations are synchronous in Phase 1.
 | `GET` | `/api/v1/rulebooks/{rulebookId}/attestations` | no | `200` | Attestation types of the working copy, each with its schema references. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/schema-references` | no | `200` | Every schema reference of the working copy, including rulebook-level references. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions` | no | `200` | Draft, published and historical versions in creation order. |
+| `GET` | `/api/v1/rulebooks/{rulebookId}/events` | no | `200` | Public, unauthenticated feed of durable `rulebook.published` events in ascending publication order. Query parameters: `limit` (default 50, max 100) and the opaque `cursor` from a previous page. Each event pins the exact version label and snapshot digest. |
 | `POST` | `/api/v1/rulebooks/{rulebookId}/versions` | yes | `201` + `Location` | Freeze the current working copy as a new draft version. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}` | no | `200` | One version record and its content digest. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/content` | no | `200` | The exact snapshot bytes; `Content-Digest` and `ETag` carry the SHA-256. |
@@ -365,6 +367,57 @@ Publication itself stays an authenticated, owner-scoped transition
 (`POST .../publish`); the export reads are public, matching the public catalogue reads. Each
 publication writes the `version.publish` audit row with the actor provider, version,
 digest, profile and superseded versions, in the same transaction as the state change.
+
+### 3.4.1 Publication event feed
+
+`GET /api/v1/rulebooks/{rulebookId}/events` is the public, unauthenticated discovery route
+for publication: it names the exact immutable version that was published, without returning
+the rulebook working copy and without requiring a client to read every rulebook.
+
+Each successful **new** publication appends exactly one durable `rulebook.published` event
+inside the publication transaction. Draft creation, draft refresh, a failed or stale
+publication and the idempotent replay of an already-published version append nothing. The
+event carries its own product shape version (`format`, stored with the row), is not a
+TS11/ETSI wire document, and is documented by this versioned API contract:
+
+```json
+{
+  "data": [
+    {
+      "id": "…stable event id…",
+      "format": "attestbook.rulebook-publication-event@1",
+      "type": "rulebook.published",
+      "rulebookId": "…",
+      "version": "1.0",
+      "contentDigest": "…64 lowercase hex characters…",
+      "publishedAt": "2026-01-01T00:00:00.000Z"
+    }
+  ],
+  "pagination": {
+    "limit": 50,
+    "nextCursor": "opaque-cursor-or-null",
+    "hasMore": false
+  }
+}
+```
+
+Events are returned in ascending publication order. `limit` defaults to 50 and is bounded at
+100; pagination is cursor based, not offset based. Pass the opaque `pagination.nextCursor`
+value as `cursor` to read the next page; `nextCursor` is `null` on the last page. A cursor
+names a feed position, so a publication appended between two requests appears after the
+issued cursor and never shifts, duplicates or skips earlier events. The opaque cursor is
+stable across process restarts and is not a credential. The `rulebookId`, `version` and
+`contentDigest` values pin the immutable snapshot: `GET .../versions/{version}/content` or
+`.../versions/{version}/export` retrieves the exact bytes. Supersession changes the version's
+status to `historical` but keeps its event, and a new draft never removes history. An
+unknown rulebook answers `404 not_found`; an invalid `limit` or `cursor` answers
+`400 invalid_request`.
+
+The event deliberately carries only public publication provenance. Provider identity,
+publication authority, provider tokens, working-copy content, credentials, version
+provenance and audit metadata are never included. The feature does not backfill events for
+versions published before it existed; only publications performed by a build that includes
+it append events.
 
 ### 3.5 Issuer metadata discovery
 

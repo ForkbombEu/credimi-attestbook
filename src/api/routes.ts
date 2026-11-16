@@ -50,6 +50,10 @@ import { credentialSchemaDocumentUrl, parsePublicBaseUrl } from '../public-urls'
 import type { Registry } from '../registry/registry'
 import { invalidInput, unauthorized } from '../registry/errors'
 import {
+  DEFAULT_PUBLICATION_EVENT_PAGE_LIMIT,
+  MAX_PUBLICATION_EVENT_PAGE_LIMIT,
+} from '../registry/events'
+import {
   MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES,
   requireCredentialSchemaKind,
 } from '../registry/schema-documents'
@@ -93,6 +97,7 @@ import {
   toImportResultResource,
   toIssuerDiscoveryResource,
   toIssuerFixtureResource,
+  toPublicationEventResource,
   toPublicationExportManifestResource,
   toPublicationReadinessResource,
   toRulebookResource,
@@ -131,6 +136,7 @@ export type ApiOperationId =
   | 'listRulebookAttestations'
   | 'listRulebookSchemaReferences'
   | 'listRulebookVersions'
+  | 'listRulebookPublicationEvents'
   | 'getRulebookVersion'
   | 'getRulebookVersionContent'
   | 'getRulebookVersionSchemaReferences'
@@ -591,6 +597,42 @@ export const API_ROUTES: readonly ApiRouteSpec[] = [
         status: 200,
         description: 'The rulebook’s versions.',
         schema: 'RulebookVersionListResponse',
+      },
+      ...errors(400, 404, 500, 503),
+    ],
+  },
+  {
+    operationId: 'listRulebookPublicationEvents',
+    method: 'get',
+    path: '/api/v1/rulebooks/:rulebookId/events',
+    summary: 'List a rulebook’s publication events',
+    description:
+      'Public, unauthenticated feed of durable `rulebook.published` events in ascending publication order. Each entry pins the stable event id, the exact frozen version label, the immutable snapshot digest and the publication timestamp, so an independent issuer or verifier can discover a published version without reading every rulebook. Supersession, new drafts and process restarts never hide or reorder history. Pagination is cursor based: pass the opaque `pagination.nextCursor` value as `cursor` to continue. An unknown rulebook answers `404 not_found`; an invalid `limit` or `cursor` answers `400 invalid_request`.',
+    tag: 'versions',
+    security: false,
+    parameters: [
+      ...pathParameters(['rulebookId']),
+      {
+        name: 'limit',
+        in: 'query',
+        required: false,
+        description: 'Page size (default 50, maximum 100).',
+        schema: { type: 'integer', minimum: 1, maximum: MAX_PUBLICATION_EVENT_PAGE_LIMIT },
+      },
+      {
+        name: 'cursor',
+        in: 'query',
+        required: false,
+        description:
+          'Opaque cursor copied from a previous page’s `pagination.nextCursor`. Events are returned after that position in ascending order.',
+        schema: { type: 'string', maxLength: 64 },
+      },
+    ],
+    responses: [
+      {
+        status: 200,
+        description: 'A page of durable publication events in ascending order.',
+        schema: 'PublicationEventPageResponse',
       },
       ...errors(400, 404, 500, 503),
     ],
@@ -2049,6 +2091,35 @@ function listRulebookVersionsHandler(dependencies: ApiDependencies): ApiHandler 
   }
 }
 
+function listRulebookPublicationEventsHandler(dependencies: ApiDependencies): ApiHandler {
+  return (context) => {
+    const registry = requireRegistry(dependencies)
+    const limit = parsePositiveInteger(
+      context.req.query('limit'),
+      'limit',
+      DEFAULT_PUBLICATION_EVENT_PAGE_LIMIT,
+      1,
+      MAX_PUBLICATION_EVENT_PAGE_LIMIT,
+    )
+    const cursor = context.req.query('cursor')
+    const page = registry.listRulebookPublicationEvents(context.req.param('rulebookId') ?? '', {
+      limit,
+      ...(cursor === undefined ? {} : { cursor }),
+    })
+    return context.json(
+      {
+        data: page.events.map(toPublicationEventResource),
+        pagination: {
+          limit: page.limit,
+          nextCursor: page.nextCursor,
+          hasMore: page.hasMore,
+        },
+      },
+      200,
+    )
+  }
+}
+
 function getRulebookVersionHandler(dependencies: ApiDependencies): ApiHandler {
   return (context) => {
     const registry = requireRegistry(dependencies)
@@ -2682,6 +2753,7 @@ export function createApiHandlers(
     listRulebookAttestations: listRulebookAttestationsHandler(dependencies),
     listRulebookSchemaReferences: listRulebookSchemaReferencesHandler(dependencies),
     listRulebookVersions: listRulebookVersionsHandler(dependencies),
+    listRulebookPublicationEvents: listRulebookPublicationEventsHandler(dependencies),
     getRulebookVersion: getRulebookVersionHandler(dependencies),
     getRulebookVersionContent: getRulebookVersionContentHandler(dependencies),
     getRulebookVersionSchemaReferences: getRulebookVersionSchemaReferencesHandler(dependencies),

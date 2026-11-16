@@ -12,6 +12,13 @@ export { AUTH_TOKEN_HASH_LENGTH, generateBearerToken, hashBearerToken } from './
 export { SHA256_HEX_PATTERN, sha256Hex } from './digest'
 
 export {
+  DEFAULT_PUBLICATION_EVENT_PAGE_LIMIT,
+  MAX_PUBLICATION_EVENT_PAGE_LIMIT,
+  decodePublicationEventCursor,
+  encodePublicationEventCursor,
+} from './events'
+
+export {
   MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES,
   MAX_CREDENTIAL_SCHEMA_DOCUMENT_DEPTH,
   MAX_CREDENTIAL_SCHEMA_DOCUMENT_NODES,
@@ -43,6 +50,8 @@ export {
   AUDIT_ACTIONS,
   CREDENTIAL_SCHEMA_KINDS,
   CREDENTIAL_SCHEMA_MEDIA_TYPES,
+  PUBLICATION_EVENT_FORMAT,
+  PUBLICATION_EVENT_TYPE,
   PUBLICATION_STATUSES,
   type ActorAuthMethod,
   type AttestationType,
@@ -66,9 +75,14 @@ export {
   type DraftSchemaReferenceInput,
   type IssuedToken,
   type JsonObject,
+  type ListPublicationEventsOptions,
   type Provider,
   type ProvisionedProvider,
   type ProvisionProviderInput,
+  type PublicationEvent,
+  type PublicationEventFormat,
+  type PublicationEventPage,
+  type PublicationEventType,
   type PublicationStatus,
   type RegisterCredentialSchemaDocumentInput,
   type ReplaceDraftContentInput,

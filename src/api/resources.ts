@@ -33,6 +33,7 @@ import type {
   CredentialSchemaDocument,
   DraftContent,
   Provider,
+  PublicationEvent,
   Rulebook,
   RulebookVersion,
   SchemaReference,
@@ -59,6 +60,7 @@ import {
   issuerDiscoveryResultSchema,
   issuerFixtureSchema,
   providerSchema,
+  publicationEventSchema,
   publicationExportManifestSchema,
   publicationReadinessSchema,
   rulebookSchema,
@@ -276,6 +278,23 @@ export function toRulebookVersionResource(version: RulebookVersion) {
     specVersion: version.specVersion,
     createdAt: version.createdAt,
     publishedAt: version.publishedAt,
+  })
+}
+
+/**
+ * Public projection of one durable publication event (#116). It intentionally
+ * carries only feed identity and immutable-version provenance: no provider,
+ * working-copy content or audit metadata.
+ */
+export function toPublicationEventResource(event: PublicationEvent) {
+  return publicationEventSchema.parse({
+    id: event.id,
+    format: event.format,
+    type: event.type,
+    rulebookId: event.rulebookId,
+    version: event.version,
+    contentDigest: event.contentDigest,
+    publishedAt: event.publishedAt,
   })
 }
 

@@ -412,6 +412,10 @@ Supersession follows **publication order**, not a SemVer comparison: this slice 
 require a new label to be numerically greater, so publishing `0.9` after `2.0` still makes
 `2.0` historical. Authoring/ordering policy is left to the editor slice.
 
+Every successful **new** publication also appends exactly one durable
+`rulebook.published` event, in the same transaction as the status change, so independent
+issuers and verifiers can discover the exact immutable version that was published (§6.8).
+
 `replaceDraftContent` validates and builds the whole document before its transaction, so a
 failed validation leaves the previous working copy byte-for-byte intact. It deletes and
 re-inserts the mutable working-copy rows (with audit entries), never version or artifact
@@ -628,6 +632,41 @@ ${PUBLIC_BASE_URL}/api/v1/schema-documents/{documentId}/content
   or token. The exact-version read parses the frozen artifact without rewriting its bytes
   and reports the version label and content digest with the grouped references. See
   [`docs/api.md`](api.md) §3.14 and [`docs/schema-authoring.md`](schema-authoring.md).
+
+### 6.8 Publication event feed
+
+Issue #116 adds a durable, append-only `publication_events` table (migration
+`0007_publication_events`). A successful **new** `publishRulebookVersion` appends exactly one
+`rulebook.published` event inside the same transaction as the status change: stable event
+id, the versioned product shape (`attestbook.rulebook-publication-event@1`), rulebook id,
+version row id, the exact frozen version label, the existing artifact digest and the
+version's `published_at`. Because the insert is part of that transaction, a failure rolls the
+publication back and leaves no event; draft creation, draft refresh, a stale or otherwise
+failed publication and a replay of the same already-published version append nothing.
+
+Immutability and integrity are enforced in SQL, not only by the service: events reject every
+`UPDATE` and `DELETE`; reject an insert that reuses an event id or a `(rulebook_id, version)`
+pair, so `INSERT OR REPLACE` cannot delete an emitted event through conflict resolution; and
+reject an event whose rulebook, version row, label, digest or timestamp does not exactly
+match a version already in `published` or `historical` state.
+
+The feed is read in ascending internal `sequence` order. `listRulebookPublicationEvents`
+exposes an opaque cursor over that position and a bounded page size (default 50, maximum
+100); a cursor is a feed position, not a credential, so a publication appended between two
+requests appears after the issued cursor and never shifts or duplicates earlier events.
+Supersession only changes the pinned version's status to `historical`; it never deletes or
+reorders events, so history survives new drafts and a SQLite reopen.
+
+The public API (`GET /api/v1/rulebooks/{rulebookId}/events`) is unauthenticated and returns
+only the stable event id, `format`, `type: "rulebook.published"`, `rulebookId`, exact
+`version`, `contentDigest` and `publishedAt`. Provider identity, publication authority,
+tokens, working-copy content, credentials, version provenance and audit metadata are never
+in the projection. The full HTTP contract is in [`docs/api.md`](api.md) §3.4.1.
+
+The migration deliberately does not backfill events for versions published before this
+feature existed: an event records that this build observed a publication, so a fabricated
+historical event would claim provenance the system never emitted. Only publications
+performed by a build that includes #116 append events.
 
 ## 7. Validation and failure model
 

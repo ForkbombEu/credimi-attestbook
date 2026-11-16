@@ -35,6 +35,12 @@ import {
   requireCredentialSchemaKind,
 } from './schema-documents'
 import { RegistryStore } from './store'
+import {
+  DEFAULT_PUBLICATION_EVENT_PAGE_LIMIT,
+  decodePublicationEventCursor,
+  encodePublicationEventCursor,
+  MAX_PUBLICATION_EVENT_PAGE_LIMIT,
+} from './events'
 import { generateBearerToken, hashBearerToken } from './tokens'
 import { assertRulebookTransition, assertVersionTransition } from './transitions'
 import type {
@@ -52,7 +58,9 @@ import type {
   CredentialSchemaDocumentDigestVerification,
   DraftContent,
   IssuedToken,
+  ListPublicationEventsOptions,
   Provider,
+  PublicationEventPage,
   RegisterCredentialSchemaDocumentInput,
   ReplaceDraftContentInput,
   Rulebook,
@@ -66,6 +74,7 @@ import type {
   UpdateSchemaReferenceInput,
   VersionDigestVerification,
 } from './types'
+import { PUBLICATION_EVENT_FORMAT, PUBLICATION_EVENT_TYPE } from './types'
 import {
   assertArray,
   assertObject,
@@ -1212,6 +1221,19 @@ export class Registry {
       this.store.demotePublishedRulebookVersions(rulebook.id)
       this.store.publishRulebookVersion(existing.id, publishedAt)
       this.store.setRulebookPublicationStatus(rulebook.id, 'published', publishedAt)
+      // The public feed entry is part of the publication transaction: a failed
+      // publication leaves no event, and an event can never exist for a version
+      // this transaction did not publish.
+      this.store.insertPublicationEvent({
+        id: this.generateId(),
+        format: PUBLICATION_EVENT_FORMAT,
+        type: PUBLICATION_EVENT_TYPE,
+        rulebookId: rulebook.id,
+        versionId: existing.id,
+        version: existing.version,
+        contentDigest: existing.contentDigest,
+        publishedAt,
+      })
       this.store.insertAudit({
         at: publishedAt,
         actorProviderId: actor.providerId,
@@ -1229,6 +1251,38 @@ export class Registry {
     })()
 
     return { ...existing, status: 'published', publishedAt }
+  }
+
+  /**
+   * Public, unauthenticated feed of durable publication events (#116). It reads
+   * only the append-only event rows, in ascending feed order with an opaque
+   * cursor, so supersession, new drafts and process restarts never hide or
+   * reorder history. An unknown rulebook is reported as not found.
+   */
+  listRulebookPublicationEvents(
+    rulebookId: string,
+    options: ListPublicationEventsOptions = {},
+  ): PublicationEventPage {
+    const rulebook = this.requireRulebook(rulebookId)
+    const limit = options.limit ?? DEFAULT_PUBLICATION_EVENT_PAGE_LIMIT
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_PUBLICATION_EVENT_PAGE_LIMIT) {
+      throw invalidInput(
+        `limit must be an integer between 1 and ${String(MAX_PUBLICATION_EVENT_PAGE_LIMIT)}`,
+      )
+    }
+    const afterSequence =
+      options.cursor === undefined ? 0 : decodePublicationEventCursor(options.cursor)
+    const rows = this.store.listPublicationEvents(rulebook.id, afterSequence, limit + 1)
+    const hasMore = rows.length > limit
+    const page = hasMore ? rows.slice(0, limit) : rows
+    const last = page[page.length - 1]
+    return {
+      events: page.map((row) => row.event),
+      limit,
+      nextCursor:
+        hasMore && last !== undefined ? encodePublicationEventCursor(last.sequence) : null,
+      hasMore,
+    }
   }
 
   // ------------------------------------------------ credential schema documents

@@ -51,6 +51,7 @@ describe('registry migrations', () => {
         'auth_tokens',
         'credential_schema_documents',
         'providers',
+        'publication_events',
         'rulebook_versions',
         'rulebooks',
         'schema_migrations',
@@ -475,11 +476,12 @@ describe('registry migrations', () => {
     }
   })
 
-  test('adds credential schema documents to a populated pre-feature database', () => {
+  test('adds credential schema documents and publication events to a populated pre-feature database', () => {
     const database = createDatabase()
     try {
-      // Reproduce a deployed database that predates issue #97: every earlier
-      // migration is applied and real registry, artifact and version rows exist.
+      // Reproduce a deployed database that predates issues #97 and #116: every
+      // earlier migration is applied and real registry, artifact and version
+      // rows exist.
       database.exec(`
         CREATE TABLE schema_migrations (
           version TEXT PRIMARY KEY,
@@ -488,7 +490,9 @@ describe('registry migrations', () => {
         )
       `)
       for (const migration of MIGRATIONS.filter(
-        (candidate) => candidate.version !== '0006_credential_schema_documents',
+        (candidate) =>
+          candidate.version !== '0006_credential_schema_documents' &&
+          candidate.version !== '0007_publication_events',
       )) {
         database.exec(migration.sql)
         database
@@ -528,6 +532,7 @@ describe('registry migrations', () => {
       const applied = applyMigrations(database, { now: () => FIXED_NOW })
       expect(applied.map((migration) => migration.version)).toEqual([
         '0006_credential_schema_documents',
+        '0007_publication_events',
       ])
       expect(listAppliedMigrations(database)).toHaveLength(MIGRATIONS.length)
 
@@ -549,6 +554,20 @@ describe('registry migrations', () => {
         )
         .get()
       expect(documentTable?.name).toBe('credential_schema_documents')
+
+      // The new feed starts empty: migration never fabricates a publication
+      // event for a version published before the feature existed.
+      const eventTable = database
+        .query<{ name: string }, []>(
+          "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'publication_events'",
+        )
+        .get()
+      expect(eventTable?.name).toBe('publication_events')
+      expect(
+        database
+          .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM publication_events')
+          .get()?.count,
+      ).toBe(0)
     } finally {
       database.close()
     }
