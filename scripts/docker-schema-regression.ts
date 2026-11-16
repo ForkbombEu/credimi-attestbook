@@ -18,7 +18,7 @@
 // It never prints or stores the bearer token; the database is a throwaway file
 // under the host temporary directory.
 
-import { chmodSync, existsSync, mkdtempSync, rmSync, statSync } from 'node:fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, statSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -145,6 +145,18 @@ async function run(): Promise<void> {
       }
     }
 
+    // The server process (unlike the isolated child) needs its own writable
+    // temporary/cache environment in a hardened deployment. Provision it on the
+    // data volume, but deliberately keep the sandbox child from inheriting it:
+    // the launcher must supply its own directory. Without the fix the child
+    // would fall back to the read-only root filesystem and the registration
+    // would answer 500.
+    for (const name of ['server/tmp', 'server/home', 'server/cache']) {
+      const path = join(directory, name)
+      mkdirSync(path, { recursive: true, mode: 0o777 })
+      chmodSync(path, 0o777)
+    }
+
     docker(['rm', '--force', CONTAINER], true)
     docker([
       'run',
@@ -168,6 +180,14 @@ async function run(): Promise<void> {
       'HOST=0.0.0.0',
       '--env',
       `PUBLIC_BASE_URL=${BASE_URL}`,
+      '--env',
+      'TMPDIR=/data/server/tmp',
+      '--env',
+      'BUN_TMPDIR=/data/server/tmp',
+      '--env',
+      'HOME=/data/server/home',
+      '--env',
+      'XDG_CACHE_HOME=/data/server/cache',
       IMAGE,
     ])
 
