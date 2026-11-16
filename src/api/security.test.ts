@@ -150,6 +150,7 @@ describe('write operation security surface', () => {
       'runConformanceCheck',
       'compareCapture',
       'resolveVerifierConstraints',
+      'registerRulebookSubscription',
     ])
   })
 
@@ -301,7 +302,11 @@ describe('public read behavior is preserved', () => {
     })
 
     for (const route of API_ROUTES.filter(
-      (candidate) => candidate.method === 'get' && !candidate.security && !candidate.sessionAuth,
+      (candidate) =>
+        candidate.method === 'get' &&
+        !candidate.security &&
+        !candidate.sessionAuth &&
+        !candidate.subscriptionAuth,
     )) {
       const response = await app.request(concretePath(route, seeded.rulebookId, hosted.id))
       expect(response.status, `${route.operationId} must be publicly readable`).toBe(200)

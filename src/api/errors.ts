@@ -16,6 +16,7 @@ import { isImportError } from '../import/errors'
 import type { ImportError, ImportErrorCode } from '../import/errors'
 import { isRegistryError } from '../registry/errors'
 import type { JsonObject } from '../registry/types'
+import { isSubscriptionError } from '../subscriptions'
 
 /**
  * RFC 6750 challenge sent with every `401` response. A missing credential and
@@ -37,6 +38,7 @@ export const API_ERROR_CODES = [
   'import_rejected',
   'capture_fetch_failed',
   'capture_unavailable',
+  'subscription_unavailable',
   'rate_limited',
   'auth_unavailable',
   'registry_unavailable',
@@ -202,6 +204,30 @@ export function toApiError(error: unknown): {
 
   if (isImportError(error)) {
     return importErrorResponse(error)
+  }
+
+  if (isSubscriptionError(error)) {
+    // A subscription management token is its own credential, so its 401 does
+    // not advertise the provider bearer challenge and does not fall through to
+    // the registry mapping.
+    switch (error.code) {
+      case 'invalid_input':
+        return { status: 400, body: errorEnvelope('invalid_request', error.message) }
+      case 'unauthorized':
+        return { status: 401, body: errorEnvelope('unauthorized', error.message) }
+      case 'not_found':
+        return { status: 404, body: errorEnvelope('not_found', error.message) }
+      case 'conflict':
+        return { status: 409, body: errorEnvelope('conflict', error.message) }
+      case 'rate_limited':
+        return {
+          status: 429,
+          body: errorEnvelope('rate_limited', error.message, {
+            retryAfterSeconds: error.retryAfterSeconds ?? 1,
+          }),
+          headers: { 'Retry-After': String(error.retryAfterSeconds ?? 1) },
+        }
+    }
   }
 
   if (!isRegistryError(error)) {

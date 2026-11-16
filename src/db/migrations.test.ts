@@ -56,6 +56,7 @@ describe('registry migrations', () => {
         'rulebooks',
         'schema_migrations',
         'schema_refs',
+        'subscriptions',
       ]) {
         expect(tables).toContain(table)
       }

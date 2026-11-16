@@ -8,6 +8,7 @@ import { openDatabase } from './db/database'
 import { applyMigrations } from './db/migrations'
 import { IssuerFixtureGenerator } from './fixtures'
 import { Registry } from './registry'
+import { SubscriptionService } from './subscriptions'
 import { CredentialValidator, RulebookSnapshotCache } from './validation'
 
 /** Vite writes the built web UI here; `bun run build` produces it. */
@@ -18,6 +19,10 @@ const database = openDatabase(config.databasePath)
 applyMigrations(database)
 
 const registry = new Registry({ database })
+// Anonymous webhook subscriptions are stored, never contacted or delivered in
+// this slice. The production wiring keeps the test-only loopback HTTP opt-in
+// off, so only public HTTPS callback URLs are accepted.
+const subscriptions = new SubscriptionService({ database, source: registry })
 // Administrator login is optional: a missing or invalid group leaves it
 // unavailable without stopping the public API or provider bearer writes.
 const adminLoginConfig = loadAdminLoginConfig()
@@ -69,6 +74,7 @@ const app = createApp({
   validation,
   issuerFixtures,
   captures,
+  subscriptions,
   adminAuth,
   publicBaseUrl: config.publicBaseUrl,
   ...(existsSync(UI_DIST_PATH) ? { uiRoot: UI_DIST_PATH } : {}),
