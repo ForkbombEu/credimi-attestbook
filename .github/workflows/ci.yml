@@ -95,7 +95,7 @@ jobs:
         run: bun run build
 
       - name: Verify the bundles exist
-        run: test -s dist/server.js && test -s dist/validation/schema-sandbox-entry.js && test -s dist/ui/index.html
+        run: test -s dist/server.js && test -s dist/validation/schema-sandbox-entry.js && test -s dist/ui/index.html && test -s dist/ui/docs.html
 
   docker:
     name: docker smoke
@@ -157,6 +157,27 @@ jobs:
             echo "the catalog page was not served at /" >&2
             exit 1
           fi
+
+          curl --fail --silent --show-error http://127.0.0.1:3000/docs --output /tmp/attestbook-docs.html
+          if ! grep --quiet 'data-openapi-url="/openapi.json"' /tmp/attestbook-docs.html; then
+            echo "the API reference was not served at /docs" >&2
+            exit 1
+          fi
+          docs_asset=$(grep --only-matching --extended-regexp '/assets/docs-[A-Za-z0-9_-]+\.js' /tmp/attestbook-docs.html | head -n 1)
+          if [ -z "$docs_asset" ]; then
+            echo "the API reference did not reference its bundled script" >&2
+            exit 1
+          fi
+          curl --fail --silent --show-error "http://127.0.0.1:3000${docs_asset}" --output /tmp/attestbook-docs.js
+
+          curl --fail --silent --show-error http://127.0.0.1:3000/openapi.json --output /tmp/attestbook-openapi.json
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const contract = JSON.parse(readFileSync("/tmp/attestbook-openapi.json", "utf8"));
+            if (contract.openapi !== "3.1.0" || contract.info?.title !== "AttestBook product API" || !contract.paths?.["/api/v1/rulebooks"]) {
+              throw new Error(`unexpected OpenAPI contract: ${JSON.stringify(contract.info)}`);
+            }
+          '
 
           curl --fail --silent --show-error http://127.0.0.1:3000/api/v1/rulebooks --output /tmp/attestbook-rulebooks.json
 
