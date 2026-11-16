@@ -1,7 +1,7 @@
-import { tmpdir } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 
 import { parsePublicBaseUrl } from './public-urls'
+import { SANDBOX_TEMP_DIRECTORY_NAME, defaultSandboxTempBase } from './sandbox-temp'
 
 export interface AppConfig {
   readonly hostname: string
@@ -64,9 +64,6 @@ function booleanFlag(env: Record<string, string | undefined>, name: string): boo
   throw new Error(`invalid ${name} "${raw}": expected true or false`)
 }
 
-/** Name of the private sandbox scratch directory created under the data directory. */
-export const SANDBOX_TEMP_DIRECTORY_NAME = '.attestbook-sandbox'
-
 /**
  * Resolves the writable base directory for sandbox children. A deployment may
  * override it with `SANDBOX_TEMP_DIR`; otherwise it sits next to the SQLite
@@ -87,10 +84,9 @@ export function resolveSchemaSandboxTempDir(
     return resolve(raw)
   }
   if (databasePath === ':memory:') {
-    return join(tmpdir(), SANDBOX_TEMP_DIRECTORY_NAME)
+    return defaultSandboxTempBase()
   }
   return join(dirname(resolve(databasePath)), SANDBOX_TEMP_DIRECTORY_NAME)
-}
 }
 
 function positiveInteger(

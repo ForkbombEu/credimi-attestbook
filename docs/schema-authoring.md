@@ -300,8 +300,11 @@ schema reference is a URI plus optional pin, not an embedded body.
 - The sandbox child starts with an allowlisted environment and one private, writable
   temporary directory (mode `0700`, removed after the child exits). `SANDBOX_TEMP_DIR`
   defaults to `.attestbook-sandbox` next to the SQLite database, so a container with a
-  read-only root filesystem only needs its documented data volume to be writable. An
-  unwritable location is a controlled sandbox failure: registration answers the generic
+  read-only root filesystem only needs its documented data volume to be writable. The
+  configured base is used as-is and is never `chmod`-ed; it must be a real directory owned
+  by the runtime user, or a sticky shared directory such as `/tmp`, because another account
+  could otherwise replace a child directory. A symlink, an unwritable location or any other
+  refused base is a controlled sandbox failure: registration answers the generic
   `500 internal_error` without storing anything, validation reports `NOT_TESTED`, and the
   server logs only a sanitized failure class, exit status and Bun version.
 

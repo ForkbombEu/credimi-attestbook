@@ -18,11 +18,11 @@
 // environment is inherited.
 
 import { readFileSync } from 'node:fs'
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
+import { chmod, lstat, mkdir, mkdtemp, rm } from 'node:fs/promises'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
+import { defaultSandboxTempBase } from '../sandbox-temp'
 import type { HostedSchemaResolution } from './hosted-schema'
 import {
   aggregateSchemaStatus,
@@ -212,23 +212,36 @@ export interface SandboxTempDirectory {
   cleanup(): Promise<void>
 }
 
-/** Default base directory when no `SANDBOX_TEMP_DIR` is configured. */
-export function defaultSandboxTempBase(): string {
-  return join(tmpdir(), 'attestbook-sandbox')
-}
-
 /**
  * Creates one private (0700) directory for a single child and returns its
- * cleanup. Creation failure is reported to the caller instead of throwing, so
- * an unwritable deployment location becomes a controlled sandbox failure.
+ * cleanup.
+ *
+ * The configured base is used as-is and is never chmod-ed: it may be a
+ * deployment directory owned by the runtime user or a sticky shared directory
+ * such as `/tmp`. Only the directory created here is made private. A base that
+ * is not a real directory, or that another account controls and could replace,
+ * is refused; the caller maps any throw to a controlled sandbox failure.
  */
 export async function createSandboxTempDirectory(base?: string): Promise<SandboxTempDirectory> {
   const root = base ?? defaultSandboxTempBase()
   await mkdir(root, { recursive: true, mode: 0o700 })
-  // An existing directory may be wider than intended; the child's scratch
-  // space must stay private to the runtime user.
-  await chmod(root, 0o700)
+  const info = await lstat(root)
+  if (!info.isDirectory()) {
+    // A symlink (or a file) could redirect the child's scratch space.
+    throw new Error('sandbox base is not a directory')
+  }
+  const uid = process.getuid?.()
+  const ownedByRuntimeUser = uid !== undefined && info.uid === uid
+  const sticky = (info.mode & 0o1000) !== 0
+  if (!ownedByRuntimeUser && !sticky) {
+    // Another account could rename or replace our per-child directory.
+    throw new Error('sandbox base is not owned by the runtime user')
+  }
   const path = await mkdtemp(join(root, 'run-'))
+  const created = await lstat(path)
+  if ((created.mode & 0o777) !== 0o700) {
+    await chmod(path, 0o700)
+  }
   return {
     path,
     async cleanup(): Promise<void> {

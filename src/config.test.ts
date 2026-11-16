@@ -11,10 +11,10 @@ import {
   DEFAULT_SCHEMA_SANDBOX_TIMEOUT_MS,
   DEFAULT_VALIDATION_CACHE_MAX_ENTRIES,
   DEFAULT_VALIDATION_CACHE_MAX_MB,
-  SANDBOX_TEMP_DIRECTORY_NAME,
   loadConfig,
   resolveSchemaSandboxTempDir,
 } from './config'
+import { SANDBOX_TEMP_DIRECTORY_NAME } from './sandbox-temp'
 
 const DEFAULTS = {
   hostname: DEFAULT_HOSTNAME,

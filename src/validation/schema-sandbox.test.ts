@@ -1,5 +1,15 @@
 import { describe, expect, test } from 'bun:test'
-import { existsSync, mkdtempSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readdirSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -307,13 +317,18 @@ describe('sandbox child environment', () => {
       if (outcome.kind !== 'ok') {
         return
       }
-      const { env } = JSON.parse(outcome.raw) as { env: Record<string, string> }
+      const { env, tmpMode } = JSON.parse(outcome.raw) as {
+        env: Record<string, string>
+        tmpMode: number | null
+      }
       expect(Object.keys(env).sort()).toEqual([...SANDBOX_CHILD_ENVIRONMENT_KEYS].sort())
       const values = Object.values(env)
       expect(new Set(values).size).toBe(1)
       expect(values[0]?.startsWith(`${base}/`)).toBe(true)
       expect(env[secretName]).toBeUndefined()
-      // The base directory is private, and the per-child directory is removed.
+      // The per-child directory is private, and it is removed afterwards. The
+      // freshly created base gets the same private mode.
+      expect(tmpMode).toBe(0o700)
       expect(statSync(base).mode & 0o777).toBe(0o700)
       expect(readdirSync(base)).toEqual([])
     } finally {
@@ -322,6 +337,81 @@ describe('sandbox child environment', () => {
       } else {
         process.env[secretName] = previous
       }
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('leaves an existing base directory mode untouched', async () => {
+    if (process.platform !== 'linux') {
+      return
+    }
+    const root = mkdtempSync(join(tmpdir(), 'attestbook-sandbox-mode-'))
+    try {
+      const base = join(root, 'base')
+      mkdirSync(base)
+      chmodSync(base, 0o755)
+      const outcome = await runSandboxChild(
+        fixture('env-entry.ts'),
+        {},
+        { tempDir: base, timeoutMs: 5_000 },
+      )
+
+      expect(outcome.kind).toBe('ok')
+      if (outcome.kind !== 'ok') {
+        return
+      }
+      const { tmpMode } = JSON.parse(outcome.raw) as { tmpMode: number | null }
+      expect(tmpMode).toBe(0o700)
+      expect(statSync(base).mode & 0o777).toBe(0o755)
+      expect(readdirSync(base)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('accepts a sticky shared base directory without changing its mode', async () => {
+    if (process.platform !== 'linux') {
+      return
+    }
+    const root = mkdtempSync(join(tmpdir(), 'attestbook-sandbox-sticky-'))
+    try {
+      const base = join(root, 'base')
+      mkdirSync(base)
+      chmodSync(base, 0o1777)
+      const outcome = await runSandboxChild(
+        fixture('env-entry.ts'),
+        {},
+        { tempDir: base, timeoutMs: 5_000 },
+      )
+
+      expect(outcome.kind).toBe('ok')
+      expect(statSync(base).mode & 0o7777).toBe(0o1777)
+      expect(readdirSync(base)).toEqual([])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  test('refuses a base that is a symlink without writing through it', async () => {
+    if (process.platform !== 'linux') {
+      return
+    }
+    const root = mkdtempSync(join(tmpdir(), 'attestbook-sandbox-link-'))
+    try {
+      const realDirectory = join(root, 'real')
+      const link = join(root, 'link')
+      mkdirSync(realDirectory)
+      symlinkSync(realDirectory, link, 'dir')
+      const { result, logs } = await captureErrors(() =>
+        runSandboxChild(fixture('env-entry.ts'), {}, { tempDir: link, timeoutMs: 5_000 }),
+      )
+
+      expect(result).toMatchObject({ kind: 'failed', reason: 'temp_dir_unavailable' })
+      const serialized = JSON.stringify(logs)
+      expect(serialized).toContain('temp_dir_unavailable')
+      expect(serialized).not.toContain(link)
+      expect(readdirSync(realDirectory)).toEqual([])
+    } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
