@@ -148,6 +148,61 @@ test('reads the API integration guide from the index and reaches both references
   await expectNoA11yViolations(page)
 })
 
+test('opens the publication-events guide and follows the API reference', async ({
+  page,
+  baseURL,
+}) => {
+  const { external } = watchRequests(page, baseURL)
+
+  await page.goto('/guide')
+  await page.getByRole('link', { name: /Publication events/ }).click()
+
+  await expect(page).toHaveURL(/\/guide\/publication-events$/)
+  await expect(page.getByRole('heading', { name: 'Publication events', level: 1 })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Discover publications from the event feed' }),
+  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Prove control of the callback' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Verify a signed delivery' })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Reconcile with the pinned published version' }),
+  ).toBeVisible()
+  await expect(
+    page.locator('.guide-article pre code').filter({ hasText: '/events?limit=50' }),
+  ).toBeVisible()
+  await expect(
+    page.locator('.guide-article').getByRole('link', { name: 'API reference' }).first(),
+  ).toHaveAttribute('href', '/docs')
+
+  // The guide is public: no sign-in page and no third-party asset.
+  await expect(page).not.toHaveURL(/\/login/)
+  expect(external).toEqual([])
+
+  await expectNoA11yViolations(page)
+
+  // The API reference is a real page load outside the guide router.
+  await page.locator('.guide-article').getByRole('link', { name: 'API reference' }).first().click()
+  await page.waitForURL(/\/docs$/)
+  await expect(page.getByRole('heading', { name: 'AttestBook product API' })).toBeVisible()
+})
+
+test('keeps the publication-events guide readable at 390 px', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/guide/publication-events')
+
+  await expect(page.getByRole('heading', { name: 'Publication events', level: 1 })).toBeVisible()
+  await expect(
+    page.locator('.guide-article').getByRole('link', { name: 'API reference' }).first(),
+  ).toHaveAttribute('href', '/docs')
+
+  const horizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  )
+  expect(horizontalOverflow).toBeLessThanOrEqual(1)
+
+  await expectNoA11yViolations(page)
+})
+
 test('opens the API reference from the guide with a full page load', async ({ page }) => {
   await page.goto('/guide/introduction')
   await expect(page.getByRole('heading', { name: INTRODUCTION_HEADING, level: 1 })).toBeVisible()

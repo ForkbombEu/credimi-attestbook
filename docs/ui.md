@@ -708,6 +708,19 @@ and only the guide content differs.
 | Guide index (`/guide`) | [`guide-index-before.png`](ui/api-integration/guide-index-before.png) | [`guide-index-after.png`](ui/api-integration/guide-index-after.png) |
 | API integration (`/guide/api-integration`) | [`api-integration-before.png`](ui/api-integration/api-integration-before.png) | [`api-integration-after.png`](ui/api-integration/api-integration-after.png) |
 
+The publication-events guide slice (issue #136) has before/after captures at 1440×1000 in the
+same light theme, taken from the seeded end-to-end server in an anonymous browser. The baseline
+is `16afaef` (`main` after the API-integration guide, before this slice), where `/guide` listed
+the Introduction, Capture explorer and API integration cards and `/guide/publication-events`
+rendered the guide not-found view. The after images are from this PR's head and show the
+additional Publication events card and the rendered page over the same seeded data; the header,
+sidebar and footer are unchanged.
+
+| View | Before (`16afaef`) | After (this slice) |
+| --- | --- | --- |
+| Guide index (`/guide`) | [`guide-index-before.png`](ui/publication-events/guide-index-before.png) | [`guide-index-after.png`](ui/publication-events/guide-index-after.png) |
+| Publication events (`/guide/publication-events`) | [`guide-page-before.png`](ui/publication-events/guide-page-before.png) | [`guide-page-after.png`](ui/publication-events/guide-page-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
