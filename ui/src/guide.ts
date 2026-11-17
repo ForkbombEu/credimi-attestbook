@@ -18,6 +18,7 @@
 import apiIntegrationMarkdown from '../../docs/guides/api-integration.md?raw'
 import captureExplorerMarkdown from '../../docs/guides/capture-explorer.md?raw'
 import introductionMarkdown from '../../docs/guides/introduction.md?raw'
+import publicationEventsMarkdown from '../../docs/guides/publication-events.md?raw'
 
 export interface GuideDocument {
   readonly slug: string
@@ -47,6 +48,13 @@ export const GUIDE_DOCUMENTS: readonly GuideDocument[] = [
     description:
       'How to read the public API, choose a write credential and use the generated OpenAPI reference.',
     markdown: apiIntegrationMarkdown,
+  },
+  {
+    slug: 'publication-events',
+    title: 'Publication events',
+    description:
+      'Follow published rulebook versions through the public event feed and signed webhook notifications.',
+    markdown: publicationEventsMarkdown,
   },
 ]
 

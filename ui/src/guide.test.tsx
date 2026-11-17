@@ -331,6 +331,70 @@ describe('product guide views', () => {
     expect(onNavigate).not.toHaveBeenCalled()
   })
 
+  test('links the publication-events guide from the guide index', () => {
+    render(<GuideIndexPage onNavigate={vi.fn()} />)
+
+    const list = screen.getByRole('list', { name: 'Product guides' })
+    expect(within(list).getByRole('link', { name: /Publication events/ })).toHaveAttribute(
+      'href',
+      '/guide/publication-events',
+    )
+  })
+
+  test('renders the publication-events guide with its public contract references', () => {
+    const { container } = render(<GuideEntryPage slug="publication-events" onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Publication events' })).toBeVisible()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Discover publications from the event feed' }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Prove control of the callback' }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Verify a signed delivery' }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'Reconcile with the pinned published version',
+      }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Treat delivery as at-least-once' }),
+    ).toBeVisible()
+    expect(document.title).toBe('Publication events · AttestBook')
+
+    const article = container.querySelector('.guide-article')
+    expect(article).not.toBeNull()
+    expect(article).toHaveTextContent('/api/v1/rulebooks/{rulebookId}/events')
+    expect(article).toHaveTextContent('X-AttestBook-Signature')
+    expect(article).toHaveTextContent('attestbook.webhook-signing-input@1')
+    expect(article).toHaveTextContent('/versions/{version}/export')
+
+    // Every reference leaves the guide for the server-rendered /docs document.
+    const references = within(article as HTMLElement).getAllByRole('link', {
+      name: 'API reference',
+    })
+    expect(references.length).toBeGreaterThanOrEqual(2)
+    for (const reference of references) {
+      expect(reference).toHaveAttribute('href', '/docs')
+      expect(reference).not.toHaveAttribute('target')
+    }
+
+    const nav = screen.getByRole('navigation', { name: 'Product guides' })
+    expect(within(nav).getByRole('link', { name: 'Publication events' })).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
+  test('the publication-events guide has no detectable accessibility violations', async () => {
+    const { container } = render(<GuideEntryPage slug="publication-events" onNavigate={vi.fn()} />)
+
+    await expectNoA11yViolations(container)
+  })
+
   test('shows an explicit not-found view for an unknown slug instead of the catalog', async () => {
     const onNavigate = vi.fn()
     render(<GuideEntryPage slug="no-such-guide" onNavigate={onNavigate} />)
