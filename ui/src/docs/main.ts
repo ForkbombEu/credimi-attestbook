@@ -11,6 +11,10 @@
 import { createApiReference } from '@scalar/api-reference'
 import '@scalar/api-reference/style.css'
 
+// The small documentation header above the reference is part of this entry,
+// not the SPA layout, because `/docs` is a separate server document.
+import './docs.css'
+
 const root = document.getElementById('docs-root')
 const documentUrl = root instanceof HTMLElement ? root.dataset['openapiUrl'] : undefined
 

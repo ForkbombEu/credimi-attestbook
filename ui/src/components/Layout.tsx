@@ -1,7 +1,14 @@
 import { useState, type ReactNode } from 'react'
 
 import { currentPath, loginPath } from '../auth'
-import { AppLink, CAPTURES_PATH, CATALOG_PATH, PLAYGROUND_PATH } from '../router'
+import {
+  AppLink,
+  CAPTURES_PATH,
+  CATALOG_PATH,
+  DOCS_PATH,
+  GUIDE_PATH,
+  PLAYGROUND_PATH,
+} from '../router'
 import { useSession } from '../session'
 
 const CREDIMI_URL = 'https://credimi.io'
@@ -165,6 +172,12 @@ function SessionControls({
  * The shared header with the product views. The long-form section label names
  * the current view; the short navigation labels stay distinct from the
  * breadcrumb links so assistive technology can address each destination.
+ *
+ * The product guide is an in-app view, so `Guides` uses the client router and
+ * carries `aria-current` on its routes. The API reference is a separate server
+ * document at `/docs`, so its link is an ordinary anchor with a full page load
+ * and a distinct outlined treatment: the two kinds of documentation stay
+ * visibly apart (issue #131).
  */
 export function SiteHeader({ section, onNavigate, showLoginLink = true }: SiteHeaderProps) {
   return (
@@ -209,6 +222,19 @@ export function SiteHeader({ section, onNavigate, showLoginLink = true }: SiteHe
             >
               Capture explorer
             </AppLink>
+            <AppLink
+              href={GUIDE_PATH}
+              onNavigate={onNavigate}
+              {...(section === 'Product guide' ? { 'aria-current': 'page' as const } : {})}
+            >
+              Guides
+            </AppLink>
+            <a className="site-nav__reference" href={DOCS_PATH}>
+              API reference
+              <span className="site-nav__reference-arrow" aria-hidden="true">
+                ↗
+              </span>
+            </a>
           </nav>
           <SessionControls onNavigate={onNavigate} showLoginLink={showLoginLink} />
           <span className="site-header__section">{section}</span>

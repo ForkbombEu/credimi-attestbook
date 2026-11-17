@@ -261,9 +261,96 @@ describe('product guide views', () => {
   test('the index lists the Introduction page first', () => {
     render(<GuideIndexPage onNavigate={vi.fn()} />)
 
-    const list = screen.getByRole('list')
+    const list = screen.getByRole('list', { name: 'Product guides' })
     const items = within(list).getAllByRole('listitem')
     expect(items).toHaveLength(GUIDE_DOCUMENTS.length)
     expect(items[0]).toHaveTextContent('Introduction to AttestBook')
+  })
+})
+
+describe('guide navigation', () => {
+  test('the landing page links back to the catalog and out to the separate API reference', () => {
+    render(<GuideIndexPage onNavigate={vi.fn()} />)
+
+    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(within(breadcrumb).getByRole('link', { name: 'Catalog' })).toHaveAttribute('href', '/')
+    expect(within(breadcrumb).getByText('Guides')).toHaveAttribute('aria-current', 'page')
+
+    expect(screen.getByRole('link', { name: /Open the API reference/ })).toHaveAttribute(
+      'href',
+      '/docs',
+    )
+  })
+
+  test('renders the guide cards in registry order from one source of truth', () => {
+    render(<GuideIndexPage onNavigate={vi.fn()} />)
+
+    const list = screen.getByRole('list', { name: 'Product guides' })
+    const items = within(list).getAllByRole('listitem')
+    expect(items).toHaveLength(GUIDE_DOCUMENTS.length)
+    items.forEach((item, index) => {
+      expect(item).toHaveTextContent(GUIDE_DOCUMENTS[index]!.title)
+    })
+  })
+
+  test('a guide page lists every registered page and marks the current one', () => {
+    render(<GuideEntryPage slug="introduction" onNavigate={vi.fn()} />)
+
+    const nav = screen.getByRole('navigation', { name: 'Product guides' })
+    expect(within(nav).getByRole('link', { name: 'Guides overview' })).toHaveAttribute(
+      'href',
+      '/guide',
+    )
+    const pageLinks = GUIDE_DOCUMENTS.map((guide) =>
+      within(nav).getByRole('link', { name: guide.title }),
+    )
+    pageLinks.forEach((link, index) => {
+      expect(link).toHaveAttribute('href', `/guide/${GUIDE_DOCUMENTS[index]!.slug}`)
+    })
+    expect(pageLinks[0]).toHaveAttribute('aria-current', 'page')
+    expect(within(nav).getByRole('link', { name: /Open the API reference/ })).toHaveAttribute(
+      'href',
+      '/docs',
+    )
+    expect(within(nav).getByRole('link', { name: /Open the API reference/ })).not.toHaveAttribute(
+      'aria-current',
+    )
+  })
+
+  test('the article navigation returns to the catalog and the guide index', () => {
+    render(<GuideEntryPage slug="introduction" onNavigate={vi.fn()} />)
+
+    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    expect(within(breadcrumb).getByRole('link', { name: 'Catalog' })).toHaveAttribute('href', '/')
+    expect(within(breadcrumb).getByRole('link', { name: 'Guides' })).toHaveAttribute(
+      'href',
+      '/guide',
+    )
+    expect(within(breadcrumb).getByText('Introduction to AttestBook')).toHaveAttribute(
+      'aria-current',
+      'page',
+    )
+  })
+
+  test('the API reference link leaves the guide for the separate /docs document', async () => {
+    const onNavigate = vi.fn()
+    render(<GuideEntryPage slug="introduction" onNavigate={onNavigate} />)
+
+    const link = within(screen.getByRole('navigation', { name: 'Product guides' })).getByRole(
+      'link',
+      { name: /Open the API reference/ },
+    )
+    expect(link).toHaveAttribute('href', '/docs')
+
+    await userEvent.setup().click(link)
+    expect(onNavigate).not.toHaveBeenCalled()
+  })
+
+  test('an unknown guide page keeps the navigation but marks no page current', () => {
+    render(<GuideEntryPage slug="missing" onNavigate={vi.fn()} />)
+
+    const nav = screen.getByRole('navigation', { name: 'Product guides' })
+    expect(within(nav).getByRole('link', { name: 'Guides overview' })).toBeVisible()
+    expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(0)
   })
 })

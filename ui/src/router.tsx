@@ -25,6 +25,11 @@ export type Route =
 
 export const CATALOG_PATH = '/'
 export const GUIDE_PATH = '/guide'
+/**
+ * The standalone Scalar reference is a separate server document, not an SPA
+ * route, so navigation to it is always a full page load.
+ */
+export const DOCS_PATH = '/docs'
 export const PLAYGROUND_PATH = '/playground'
 export const CAPTURES_PATH = '/captures'
 export const NEW_RULEBOOK_PATH = '/rulebooks/new'

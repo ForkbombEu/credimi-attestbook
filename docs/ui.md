@@ -47,6 +47,17 @@ is repository-owned (`docs/guides/*.md`) and bundled at build time, so the guide
 session, no API read and no remote host. It stays separate from the API reference at `/docs`
 and the canonical `/openapi.json`.
 
+The documentation-navigation slice of
+[issue #131](https://github.com/ForkbombEu/credimi-attestbook/issues/131) makes that guide
+discoverable from the shared header and gives the guide pages a documentation layout. The
+header's `Guides` item uses the client router and marks the current guide view with
+`aria-current="page"`; the separate `API reference` item points at `/docs` with a full page
+load and a distinct outlined treatment. `/guide` adds a breadcrumb back to the catalog and an
+API-reference panel, and `/guide/<slug>` adds a sidebar generated from the same
+`GUIDE_DOCUMENTS` registry. The standalone Scalar page at `/docs` keeps its existing
+reference and gains a small branded documentation header with links back to the catalog and
+the guides. No guide or Scalar content is moved or reimplemented.
+
 **Authoritative spec:** [`docs/specification.md`](specification.md) §14
 (UI-001/UI-002/UI-005/UI-006), §15 (authentication and authorization), §11 (FR-019) and §2.2
 (independent standalone UI).
@@ -199,6 +210,35 @@ Implemented by these slices:
     API-reference link opens the Scalar page instead of the catalog fallback;
   - an unregistered slug shows an accessible guide not-found view and never falls back to
     the catalog. `/docs`, `/openapi.json` and the versioned API are untouched.
+- product-guide and API-reference navigation (#131):
+  - the shared `SiteHeader` carries a `Guides` link on the catalog, detail, playground,
+    editor, capture and guide views; it uses the client router and marks
+    `aria-current="page"` on `/guide` and `/guide/<slug>`;
+  - the same header renders a separate, outlined `API reference` link with an arrow. It is a
+    plain anchor to `/docs`, so the Scalar document gets a full page load instead of the SPA
+    router falling back to the catalog;
+  - `/guide` is a documentation landing page: a `Catalog / Guides` breadcrumb, guide cards in
+    `GUIDE_DOCUMENTS` order and a separate API-reference panel. It needs no session;
+  - `/guide/<slug>` places a persistent article sidebar beside the document. The sidebar lists
+    `Guides overview`, every registered page and the separate API-reference block; the current
+    page carries `aria-current="page"`, and the breadcrumb is `Catalog / Guides / <page>` so a
+    reader can always return to the catalog or the index;
+  - the landing cards, the sidebar and the page titles all derive from the single
+    `GUIDE_DOCUMENTS` registry in `ui/src/guide.ts`; a later guide-only change adds its
+    Markdown file and one registry entry, with no navigation component edit;
+  - `/docs` keeps the existing standalone Scalar reference and adds only a small branded
+    documentation header (`Catalog`, `Guides`, the current `API reference`) plus a skip link,
+    giving a way back to the product. Scalar and `/openapi.json` are not embedded, moved or
+    reimplemented. The docs entry does not load the SPA brand stylesheet, whose unlayered global
+    rules would override Scalar's layered styles; its chrome stylesheet is scoped to the header
+    and sets Scalar's `--scalar-custom-header-height` so Scalar's sticky sidebar and anchor
+    offsets start below the header. At 640 px and below the header is static and that offset is
+    reset;
+  - wide screens keep the sidebar and API-reference panel sticky under the topbar; at 1000 px
+    and below the layouts become a single column, so the sidebar becomes a keyboard-reachable
+    list above the article at 390 px without horizontal scrolling. The shared header wraps its
+    navigation at 960 px and lets the primary nav scroll horizontally, so the `Guides` and
+    `API reference` links stay reachable at tablet widths.
 
 Deliberately **not** in these slices:
 
@@ -297,6 +337,12 @@ guide not-found view; it is not treated as an unknown route, so it never looks l
 catalog. Browser back/forward is handled with a `popstate` listener; in-page links push
 a history entry, and the router parses the pathname while preserving the login page's `next`
 query string. Modified clicks (new tab, copy address) keep the native anchor behaviour.
+
+The shared topbar links to the in-app guide with the client router (`Guides`, current on guide
+routes) and to the standalone Scalar document with a plain `/docs` anchor, so the two kinds of
+documentation stay distinct. The guide pages add `Catalog / Guides` (and, on an article,
+`/ <page>`) breadcrumbs, and the separate `/docs` entry's own small header links back to `/`
+and `/guide`; `/docs` itself remains a full page load in both directions.
 
 The latest displayed version is the most recently created **published** version, or the most
 recently created version of any status when nothing is published. Rulebook no. 1 in
@@ -630,6 +676,24 @@ are the unchanged shared layout; the guide adds the page content and no other vi
 | Guide index (`/guide`) | [`guide-before.png`](ui/guide/guide-before.png) | [`guide-after-index.png`](ui/guide/guide-after-index.png) |
 | Introduction (`/guide/introduction`) | [`introduction-before.png`](ui/guide/introduction-before.png) | [`introduction-after.png`](ui/guide/introduction-after.png) |
 
+The documentation-navigation slice (issue #131) has before/after captures at 1440×1000 in the
+same light theme, taken from the seeded end-to-end server in an anonymous browser. The baseline
+is `aa6a780` (`main` after the guide slice, before this slice), which renders the same catalog,
+guide pages and Scalar reference without documentation navigation; the after images are from
+this PR's head. Both revisions use the same seeded data and viewport, and the narrow pair uses
+390×844. The catalog pair shows the shared header change (a `Guides` item and the outlined
+`API reference` link), the guide pairs show the landing panel, the article sidebar, the
+breadcrumbs and the active page, and the `/docs` pair shows the new documentation header over
+the unchanged Scalar reference.
+
+| View | Before (`aa6a780`) | After (this slice) |
+| --- | --- | --- |
+| Catalog header | [`catalog-before.png`](ui/guide-navigation/catalog-before.png) | [`catalog-after.png`](ui/guide-navigation/catalog-after.png) |
+| Guide index (`/guide`) | [`guide-index-before.png`](ui/guide-navigation/guide-index-before.png) | [`guide-index-after.png`](ui/guide-navigation/guide-index-after.png) |
+| Introduction (`/guide/introduction`) | [`guide-introduction-before.png`](ui/guide-navigation/guide-introduction-before.png) | [`guide-introduction-after.png`](ui/guide-navigation/guide-introduction-after.png) |
+| Introduction, 390 px | [`guide-introduction-narrow-before.png`](ui/guide-navigation/guide-introduction-narrow-before.png) | [`guide-introduction-narrow-after.png`](ui/guide-navigation/guide-introduction-narrow-after.png) |
+| API reference (`/docs`) | [`docs-before.png`](ui/guide-navigation/docs-before.png) | [`docs-after.png`](ui/guide-navigation/docs-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
@@ -709,8 +773,15 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   (root-relative, `http(s)` and `mailto` accepted; script/data/protocol-relative/backslash
   destinations rejected), raw HTML staying inert text, heading/list/code/link rendering,
   in-app links using the client router while `/docs` gets a full page load, the index and
-  deep-link views, the unknown-slug not-found view without a catalog fallback, and axe-core
-  checks for all three views;
+  deep-link views, the unknown-slug not-found view without a catalog fallback, the
+  `Catalog / Guides` and `Catalog / Guides / <page>` breadcrumbs, the registry-derived guide
+  cards and sidebar order, the current-page `aria-current`, the API-reference panel and
+  sidebar links, and axe-core checks for all three views;
+- the shared header's documentation navigation (`ui/src/components/Layout.test.tsx`): the
+  in-app `Guides` link, the plain `/docs` `API reference` link that the SPA router never
+  handles, and `aria-current="page"` moving with the current view;
+- a client-side navigation from the catalog to `/guide` and back through the guide
+  breadcrumb, plus a deep-linked guide page with its sidebar (`ui/src/App.test.tsx`);
 - an end-to-end component navigation test from the catalog to a detail page and back, from
   the catalog to the new-rulebook editor, from the catalog to the administrator sign-in
   page, a direct deep-link render of both editors and the login page, and a direct render of
@@ -787,6 +858,18 @@ heading, body heading, code block and `/docs` link visible, following the API-re
 to the full Scalar page, a reload that keeps the deep link on the same document, an accessible
 not-found view for an unknown slug with no catalog fallback, and a request watcher asserting
 that reading the guide loads no third-party asset.
+
+The documentation navigation (#131) is covered by the same spec and
+`ui/e2e/docs.spec.ts`: opening `/guide` from the catalog's primary `Guides` link, the
+`aria-current="page"` state on the header and sidebar, the `Catalog / Guides` breadcrumb back
+to the catalog, the current guide page in the article sidebar, following the API-reference
+link to the Scalar page and back through the reference's own `Guides` link, and a 390 px
+check that keeps the sidebar keyboard focusable, the article readable and the page free of
+horizontal scrolling with a full axe-core scan. The reference spec also asserts its
+documentation header links to the catalog and the guides and marks `API reference` current; that
+the docs entry loads no SPA brand stylesheet, so Scalar's section-header rules stay untouched;
+that the sticky header's height is exposed to Scalar so its sidebar and search field stay below
+the header after scrolling; and that `/docs` has no horizontal overflow at 390 px.
 
 CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test:e2e`. The
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves
@@ -998,5 +1081,7 @@ The catalog and detail slices' captures remain in the same directory
   other path falls back to the catalog except a `/guide/<slug>` address, which shows the
   guide not-found view.
 - The product guide is a fixed set of repository-owned Markdown pages registered in
-  `ui/src/guide.ts`; there is no guide search, table of contents or runtime content
-  management, and editing a page requires rebuilding the UI.
+  `ui/src/guide.ts`; there is no guide search or in-page table of contents, and editing a page
+  requires rebuilding the UI. The guide cards and article sidebar both derive from that
+  registry, but the standalone `/docs` header is part of its own Vite entry, so a future
+  top-level navigation change must update it there as well as in the shared `SiteHeader`.

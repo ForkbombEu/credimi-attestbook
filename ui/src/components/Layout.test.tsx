@@ -94,6 +94,43 @@ describe('Credimi Extras chrome', () => {
   })
 })
 
+describe('documentation navigation in the shared topbar', () => {
+  test('links to the in-app guides and the separate API reference', async () => {
+    const user = userEvent.setup()
+    const onNavigate = vi.fn()
+    render(<SiteHeader section="Rulebook catalog" onNavigate={onNavigate} />)
+
+    const guides = screen.getByRole('link', { name: 'Guides' })
+    expect(guides).toHaveAttribute('href', '/guide')
+    expect(guides).not.toHaveAttribute('aria-current')
+
+    const reference = screen.getByRole('link', { name: 'API reference' })
+    expect(reference).toHaveAttribute('href', '/docs')
+    expect(reference).not.toHaveAttribute('aria-current')
+
+    await user.click(guides)
+    expect(onNavigate).toHaveBeenCalledWith('/guide')
+
+    // `/docs` is a separate server document: the SPA router must not handle it.
+    await user.click(reference)
+    expect(onNavigate).toHaveBeenCalledTimes(1)
+  })
+
+  test('marks Guides current on product-guide views only', () => {
+    const { rerender } = render(<SiteHeader section="Rulebook catalog" onNavigate={noop} />)
+
+    expect(screen.getByRole('link', { name: 'Catalog' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: 'Guides' })).not.toHaveAttribute('aria-current')
+
+    rerender(<SiteHeader section="Credential playground" onNavigate={noop} />)
+    expect(screen.getByRole('link', { name: 'Guides' })).not.toHaveAttribute('aria-current')
+
+    rerender(<SiteHeader section="Product guide" onNavigate={noop} />)
+    expect(screen.getByRole('link', { name: 'Guides' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: 'Catalog' })).not.toHaveAttribute('aria-current')
+  })
+})
+
 describe('administrator session in the topbar', () => {
   test('links an anonymous visitor to sign in while preserving the current path', async () => {
     window.history.replaceState({}, '', '/playground')

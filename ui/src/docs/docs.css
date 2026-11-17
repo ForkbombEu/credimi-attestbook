@@ -1,0 +1,180 @@
+/*
+ * Documentation chrome for the standalone Scalar reference at `/docs`.
+ *
+ * The reference is a separate Vite entry document, not an SPA route, so it
+ * carries its own small header with the two ways back into the product: the
+ * Catalog and the Guides. The API reference stays the current page.
+ *
+ * This stylesheet is deliberately self-contained and scoped to the chrome:
+ * it must not load the SPA brand stylesheet, whose unlayered global rules would
+ * override Scalar's layered base styles and restyle the reference. Every rule
+ * below targets the documentation header, its skip link, `:root` custom
+ * properties, or the single `body` margin reset; Scalar keeps its own styles
+ * and background inside `#docs-root`.
+ */
+
+/* The header uses the same self-hosted brand face, without exposing a global
+   font rule that could reach the Scalar content. */
+@font-face {
+  font-family: 'Docs Inter';
+  src: url('/brand/fonts/InterVariable.ttf') format('truetype-variations');
+  font-weight: 400 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --docs-chrome-height: 56px;
+  /* Scalar offsets its sticky sidebar, anchors and scroll positions by this
+     documented embedding hook. Match it to our sticky header so the sidebar
+     starts below the header instead of underneath it. */
+  --scalar-custom-header-height: var(--docs-chrome-height);
+}
+
+body {
+  margin: 0;
+}
+
+.docs-chrome,
+.docs-skip-link {
+  font-family: 'Docs Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  line-height: 1.4;
+}
+
+.docs-chrome *,
+.docs-chrome *::before,
+.docs-chrome *::after {
+  box-sizing: border-box;
+}
+
+.docs-chrome :focus-visible,
+.docs-skip-link:focus-visible {
+  outline: 3px solid var(--brand-accent, #3d1fc4);
+  outline-offset: 2px;
+}
+
+.docs-skip-link {
+  position: absolute;
+  top: -100px;
+  left: 24px;
+  z-index: 40;
+  padding: 8px 16px;
+  border-radius: var(--radius, 8px);
+  background: var(--bg, #fff);
+  color: var(--brand-primary, #220e7e);
+  font-weight: 600;
+  box-shadow: var(--shadow-md, 0 4px 12px rgb(34 14 126 / 12%));
+}
+
+.docs-skip-link:focus-visible {
+  top: 12px;
+}
+
+.docs-chrome {
+  position: sticky;
+  top: 0;
+  z-index: 30;
+  border-bottom: 1px solid var(--border, #e2dcf8);
+  background: var(--bg, #fff);
+}
+
+.docs-chrome__inner {
+  display: flex;
+  height: var(--docs-chrome-height);
+  max-width: var(--max-width, 1280px);
+  margin: 0 auto;
+  padding: 0 var(--app-page-gutter, 24px);
+  align-items: center;
+  gap: var(--space-6, 24px);
+}
+
+.docs-chrome__brand {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: var(--space-3, 12px);
+  color: var(--fg, #2f294b);
+  text-decoration: none;
+}
+
+.docs-chrome__logo {
+  display: block;
+  width: auto;
+  height: 22px;
+}
+
+.docs-chrome__divider {
+  width: 1px;
+  height: 22px;
+  background: var(--border-strong, #d8cfff);
+}
+
+.docs-chrome__product {
+  color: var(--fg, #2f294b);
+  font-size: var(--fs-md, 16px);
+  font-weight: 600;
+  letter-spacing: -0.005em;
+}
+
+.docs-chrome__nav {
+  display: flex;
+  margin-left: auto;
+  align-items: center;
+  gap: var(--space-1, 4px);
+}
+
+.docs-chrome__nav a {
+  padding: 6px 10px;
+  border-radius: var(--radius, 8px);
+  color: var(--fg-subtle, #606083);
+  font-size: var(--fs-sm, 13px);
+  font-weight: 500;
+  text-decoration: none;
+  transition:
+    background-color 150ms ease-out,
+    color 150ms ease-out;
+}
+
+.docs-chrome__nav a:hover {
+  color: var(--brand-primary, #220e7e);
+  background: var(--brand-secondary, #eeeafe);
+}
+
+.docs-chrome__nav a[aria-current='page'] {
+  color: var(--brand-primary, #220e7e);
+  background: var(--brand-secondary, #eeeafe);
+  font-weight: 600;
+}
+
+.docs-main {
+  min-height: calc(100dvh - var(--docs-chrome-height));
+}
+
+@media (max-width: 640px) {
+  /* The header wraps to a variable height here, so it scrolls away rather
+     than sticking over Scalar's own mobile header. */
+  :root {
+    --scalar-custom-header-height: 0px;
+  }
+
+  .docs-chrome {
+    position: static;
+  }
+
+  .docs-chrome__inner {
+    height: auto;
+    padding: 8px 16px;
+    flex-wrap: wrap;
+    gap: 8px 16px;
+  }
+
+  .docs-chrome__nav {
+    width: 100%;
+    margin-left: 0;
+    overflow-x: auto;
+  }
+
+  .docs-skip-link {
+    left: 16px;
+  }
+}

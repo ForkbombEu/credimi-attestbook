@@ -94,7 +94,9 @@ export function GuideMarkdown({ markdown, onNavigate }: GuideMarkdownProps) {
           )
         }
         return (
-          <pre key={key}>
+          // A code block can scroll horizontally on a narrow screen; making it
+          // focusable keeps that overflow reachable from the keyboard.
+          <pre key={key} tabIndex={0}>
             <code {...(block.language === null ? {} : { className: `language-${block.language}` })}>
               {block.code}
             </code>
