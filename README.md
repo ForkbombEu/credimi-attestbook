@@ -41,8 +41,8 @@ bun run dev
 
 `bun run dev` rebuilds on change and listens on `http://localhost:3000`, serving the built
 UI at `/`, `/rulebooks/<id>`, `/rulebooks/new`, `/rulebooks/<id>/edit`, `/playground`,
-`/captures` and the interactive API reference at `/docs`, with
-the versioned API under `/api/v1`. Run
+`/captures`, the product guide at `/guide` and `/guide/<slug>`, and the interactive API
+reference at `/docs`, with the versioned API under `/api/v1`. Run
 `bun run build:ui` after UI changes, or use `bun run dev:ui` for Vite hot reload on port 5173
 with `/api` proxied to the Bun server. The health check is:
 
@@ -188,6 +188,10 @@ product API, not the TS11 catalogue API.
 `GET /docs` serves a public, login-free Scalar reference built from that same-origin document,
 with Scalar and its assets bundled into the application build rather than loaded from a CDN.
 The reference documents the product API only; the TS11 catalogue API is not part of it.
+`GET /guide` serves a public, login-free product guide, and `/guide/<slug>` renders one of the
+repository-owned Markdown pages under [`docs/guides/`](docs/guides/). The Markdown is bundled
+into the UI build (not read from the API, a filesystem path or a remote host), supports
+headings, lists, inline links and fenced code, and never injects raw HTML.
 Versioning, idempotency, error mapping, resource paths and limitations are documented in
 [`docs/api.md`](docs/api.md).
 

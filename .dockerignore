@@ -4,7 +4,11 @@
 node_modules
 dist
 coverage
-docs
+# Most repository documentation stays out of the image. The product guide is an
+# exception: the UI imports its Markdown at build time (see Dockerfile).
+docs/*
+!docs/guides
+!docs/guides/**
 research
 scripts
 *.log

@@ -40,6 +40,13 @@ renders Scalar from assets bundled with the application and reads the generated 
 `/openapi.json`, so it needs no session and no third-party CDN. It documents the product API
 only, not the TS11 catalogue API.
 
+The product-guide slice of
+[issue #130](https://github.com/ForkbombEu/credimi-attestbook/issues/130) adds a public,
+Markdown-backed guide at `/guide` and a direct, reloadable `/guide/<slug>` page. The Markdown
+is repository-owned (`docs/guides/*.md`) and bundled at build time, so the guide needs no
+session, no API read and no remote host. It stays separate from the API reference at `/docs`
+and the canonical `/openapi.json`.
+
 **Authoritative spec:** [`docs/specification.md`](specification.md) §14
 (UI-001/UI-002/UI-005/UI-006), §15 (authentication and authorization), §11 (FR-019) and §2.2
 (independent standalone UI).
@@ -177,6 +184,21 @@ Implemented by these slices:
   - it renders the canonical same-origin `/openapi.json` with Scalar and lists the generated
     operations, request/response schemas and declared authentication schemes;
   - no cookie, CSRF token, bearer token or provisioning secret is embedded in the page.
+- a public Markdown-backed product guide at `/guide` and `/guide/<slug>` (#130):
+  - `/guide` lists the bundled pages and `/guide/<slug>` renders one document with headings,
+    paragraphs, ordered and unordered lists, inline links and fenced code;
+  - the Markdown is repository-owned (`docs/guides/<slug>.md`), registered with its slug,
+    title and description in `ui/src/guide.ts`, and inlined into the Vite build with `?raw`;
+    the page never reads a filesystem path, a remote host or an API record;
+  - the registered title is the page `h1` and the document body starts at `##`; adding a
+    guide means adding its Markdown file and one registry entry;
+  - embedded raw HTML stays literal text, and only root-relative, `http(s)` and `mailto`
+    destinations become links; a `javascript:` or `data:` destination stays text;
+  - a root-relative link to a route the SPA draws uses the in-app router, while a link to a
+    page the server sends (`/docs`, `/openapi.json`) does a full page load, so the guide's
+    API-reference link opens the Scalar page instead of the catalog fallback;
+  - an unregistered slug shows an accessible guide not-found view and never falls back to
+    the catalog. `/docs`, `/openapi.json` and the versioned API are untouched.
 
 Deliberately **not** in these slices:
 
@@ -266,11 +288,13 @@ stores or sends a provider bearer token; headless API clients keep using the bea
 documented in [`docs/security.md`](security.md) §2.
 
 The client router uses real paths with the History API. The Bun server serves the built
-entry document for `/`, `/rulebooks/*`, `/playground`, `/captures/*` and `/login`, and the
-separate built `docs.html` for `/docs` and `/docs/`; `/api/*` stays separate and unknown
-non-UI paths keep the JSON not-found envelope. A deep link or a browser reload therefore
-reaches the same view, including a reload of an authenticated `/login` page and of the API
-reference. Browser back/forward is handled with a `popstate` listener; in-page links push
+entry document for `/`, `/rulebooks/*`, `/guide`, `/guide/*`, `/playground`, `/captures/*`
+and `/login`, and the separate built `docs.html` for `/docs` and `/docs/`; `/api/*` stays
+separate and unknown non-UI paths keep the JSON not-found envelope. A deep link or a browser
+reload therefore reaches the same view, including a reload of an authenticated `/login` page,
+of a guide page and of the API reference. A guide slug the bundle does not register renders the
+guide not-found view; it is not treated as an unknown route, so it never looks like the
+catalog. Browser back/forward is handled with a `popstate` listener; in-page links push
 a history entry, and the router parses the pathname while preserving the login page's `next`
 query string. Modified clicks (new tab, copy address) keep the native anchor behaviour.
 
@@ -496,13 +520,15 @@ bun run test:e2e     # Playwright against the real API with seeded data
 
 `src/server.ts` serves `dist/ui/index.html` at `/`, Vite's content-addressed
 files under `/assets/*`, the installed Credimi brand directory under `/brand/*`,
-the same entry document for `/rulebooks/*`, `/playground`, `/captures/*` and
-`/login` deep links, and the separate `dist/ui/docs.html` for `/docs` and
-`/docs/`. When `dist/ui` is absent (a source checkout without a
+the same entry document for `/rulebooks/*`, `/guide`, `/guide/*`, `/playground`,
+`/captures/*` and `/login` deep links, and the separate `dist/ui/docs.html` for `/docs`
+and `/docs/`. When `dist/ui` is absent (a source checkout without a
 UI build), the UI routes are not registered, so those paths keep the
 JSON 404 instead of serving a broken page. The Dockerfile copies the `ui/`
 sources before building, so the container serves the built UI from the same
-origin as the API. The browser never uses a private backdoor.
+origin as the API. The browser never uses a private backdoor. Because guide
+Markdown is imported by the UI source, changing a guide requires a UI rebuild
+(`bun run build:ui`).
 
 ### Brand assets and design checks
 
@@ -592,6 +618,18 @@ differ.
 | Published rulebook editor: next-version flow | [`editor-before.png`](ui/new-version/editor-before.png) | [`editor-after.png`](ui/new-version/editor-after.png) |
 | Reopened editable working copy after creating `1.1.0` | [`created-before.png`](ui/new-version/created-before.png) | [`created-after.png`](ui/new-version/created-after.png) |
 
+The product-guide slice (issue #130) has before/after captures at 1440×1000 in the same light
+theme, taken from the seeded end-to-end server in an anonymous browser. The baseline is
+`c865904` (`main` before the slice), where `/guide` and `/guide/introduction` answered the JSON
+not-found envelope; the after images are from this PR's head and render the bundled guide index
+and the Introduction document with the same seeded API data. The header, banners and footer
+are the unchanged shared layout; the guide adds the page content and no other view changes.
+
+| View | Before (`c865904`) | After (this slice) |
+| --- | --- | --- |
+| Guide index (`/guide`) | [`guide-before.png`](ui/guide/guide-before.png) | [`guide-after-index.png`](ui/guide/guide-after-index.png) |
+| Introduction (`/guide/introduction`) | [`introduction-before.png`](ui/guide/introduction-before.png) | [`introduction-after.png`](ui/guide/introduction-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
@@ -662,9 +700,17 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   working state, safe API errors, intended-destination navigation, refusal of an off-site
   `next`, the authenticated identity view, logout, a failed logout, and axe-core checks;
 - the router: path parsing (including `/playground`, `/captures`, `/captures/<id>`,
-  `/rulebooks/new`, `/rulebooks/<id>/edit` and `/login`), encoded ids, malformed paths,
-  history navigation including a query-bearing login path, and modified clicks keeping
-  native anchor behaviour;
+  `/guide`, `/guide/<slug>`, `/rulebooks/new`, `/rulebooks/<id>/edit` and `/login`), encoded
+  ids and slugs, malformed paths, history navigation including a query-bearing login path,
+  and modified clicks keeping native anchor behaviour;
+- the product guide (`ui/src/guide.test.tsx`): the registered page conventions (unique
+  URL-safe slugs, non-empty title/description, body starting at `##`), exact-slug resolution
+  that refuses file paths, Markdown block and inline parsing, safe-link filtering
+  (root-relative, `http(s)` and `mailto` accepted; script/data/protocol-relative/backslash
+  destinations rejected), raw HTML staying inert text, heading/list/code/link rendering,
+  in-app links using the client router while `/docs` gets a full page load, the index and
+  deep-link views, the unknown-slug not-found view without a catalog fallback, and axe-core
+  checks for all three views;
 - an end-to-end component navigation test from the catalog to a detail page and back, from
   the catalog to the new-rulebook editor, from the catalog to the administrator sign-in
   page, a direct deep-link render of both editors and the login page, and a direct render of
@@ -674,8 +720,8 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   colours; the browser tests run the full rule set).
 
 Browser tests (`ui/e2e/catalog.spec.ts`, `ui/e2e/detail.spec.ts`, `ui/e2e/editor.spec.ts`,
-`ui/e2e/lifecycle.spec.ts`, `ui/e2e/playground.spec.ts`, `ui/e2e/auth.spec.ts`, Playwright +
-Chromium):
+`ui/e2e/lifecycle.spec.ts`, `ui/e2e/playground.spec.ts`, `ui/e2e/auth.spec.ts`,
+`ui/e2e/guide.spec.ts`, Playwright + Chromium):
 
 - seven seeded rulebooks from the real registry/API, including the published validation-smoke
   rulebook used by the playground, with provider, version, status,
@@ -734,6 +780,13 @@ correlation of the seeded signed SD-JWT VC against the `Validator Sandbox Rulebo
 structural findings and the exact pinned version, the anonymous sign-in gating with the
 capture path as its `next` target, full axe-core scans of the list and detail, and a 390 px
 no-horizontal-overflow check.
+
+The product guide is covered by `ui/e2e/guide.spec.ts` against the production Vite build: the
+`/guide` index, following its Introduction link to `/guide/introduction` with the document
+heading, body heading, code block and `/docs` link visible, following the API-reference link
+to the full Scalar page, a reload that keeps the deep link on the same document, an accessible
+not-found view for an unknown slug with no catalog fallback, and a request watcher asserting
+that reading the guide loads no third-party asset.
 
 CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test:e2e`. The
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves
@@ -941,5 +994,9 @@ The catalog and detail slices' captures remain in the same directory
   presentation submission is not unpacked into a credential, and only the latest correlation is
   kept per capture. The explorer page shows the first 100 captures.
 - No dark theme or offline cache; routing covers the catalog, detail, playground, capture
-  explorer, administrator sign-in, new-draft and edit-draft views, and any other path falls
-  back to the catalog.
+  explorer, product guide, administrator sign-in, new-draft and edit-draft views, and any
+  other path falls back to the catalog except a `/guide/<slug>` address, which shows the
+  guide not-found view.
+- The product guide is a fixed set of repository-owned Markdown pages registered in
+  `ui/src/guide.ts`; there is no guide search, table of contents or runtime content
+  management, and editing a page requires rebuilding the UI.

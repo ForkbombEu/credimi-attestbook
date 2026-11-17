@@ -10,6 +10,7 @@ import { createHttpAuthApi, intendedPath } from './auth'
 import { CaptureDetailPage } from './CaptureDetailPage'
 import { CapturesPage } from './CapturesPage'
 import { CatalogPage } from './CatalogPage'
+import { GuideEntryPage, GuideIndexPage } from './GuidePage'
 import { LoginPage } from './LoginPage'
 import { PlaygroundPage } from './PlaygroundPage'
 import { RulebookDetailPage } from './RulebookDetailPage'
@@ -45,6 +46,12 @@ function AppRoutes() {
 
   if (route.name === 'login') {
     return <LoginPage onNavigate={navigate} nextPath={intendedPath(window.location.search)} />
+  }
+  if (route.name === 'guide') {
+    return <GuideIndexPage onNavigate={navigate} />
+  }
+  if (route.name === 'guide-page') {
+    return <GuideEntryPage slug={route.slug} onNavigate={navigate} />
   }
   if (route.name === 'playground') {
     return <PlaygroundPage api={defaultApi} validator={defaultValidator} onNavigate={navigate} />
