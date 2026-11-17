@@ -1,15 +1,21 @@
 import { useEffect } from 'react'
 
+import { GuideNavigation } from './components/GuideNavigation'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { GuideMarkdown } from './GuideMarkdown'
 import { findGuide, GUIDE_DOCUMENTS } from './guide'
-import { AppLink, GUIDE_PATH, guidePath } from './router'
+import { AppLink, CATALOG_PATH, DOCS_PATH, GUIDE_PATH, guidePath } from './router'
 
 interface GuidePageProps {
   readonly onNavigate: (path: string) => void
 }
 
-/** Public index of the bundled product guides. It needs no session. */
+/**
+ * The documentation landing page: the bundled guides as navigation cards, with
+ * a separate panel for the standalone API reference. The page list is derived
+ * from `GUIDE_DOCUMENTS`, so a later guide-only change adds one registry entry
+ * and appears here without touching this component.
+ */
 export function GuideIndexPage({ onNavigate }: GuidePageProps) {
   useEffect(() => {
     document.title = 'Product guide · AttestBook'
@@ -22,30 +28,63 @@ export function GuideIndexPage({ onNavigate }: GuidePageProps) {
       <SiteHeader section="Product guide" onNavigate={onNavigate} />
 
       <main className="page" id="main-content">
-        <div className="page-heading">
-          <p className="eyebrow">Documentation</p>
-          <h1>AttestBook product guide</h1>
-          <p className="lede">
-            Short, task-focused guides for finding rulebooks, validating credentials and reading the
-            public product API. Every page is public and bundled with the application.
-          </p>
-        </div>
+        <nav className="breadcrumb" aria-label="Breadcrumb">
+          <ol>
+            <li>
+              <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
+                Catalog
+              </AppLink>
+            </li>
+            <li aria-current="page">Guides</li>
+          </ol>
+        </nav>
 
-        <div id="guide-content" tabIndex={-1}>
-          <ul className="guide-index">
-            {GUIDE_DOCUMENTS.map((guide) => (
-              <li key={guide.slug}>
-                <AppLink
-                  className="guide-index__card"
-                  href={guidePath(guide.slug)}
-                  onNavigate={onNavigate}
-                >
-                  <span className="guide-index__title">{guide.title}</span>
-                  <span className="guide-index__description">{guide.description}</span>
-                </AppLink>
-              </li>
-            ))}
-          </ul>
+        <div className="guide-landing">
+          <div className="guide-landing__main">
+            <div className="page-heading">
+              <p className="eyebrow">Documentation</p>
+              <h1>AttestBook product guide</h1>
+              <p className="lede">
+                Short, task-focused guides for finding rulebooks, validating credentials and reading
+                the public product API. Every page is public and bundled with the application.
+              </p>
+            </div>
+
+            <div id="guide-content" tabIndex={-1}>
+              <h2 className="guide-section-title" id="guide-pages">
+                Product guides
+              </h2>
+              <ul className="guide-index" aria-labelledby="guide-pages">
+                {GUIDE_DOCUMENTS.map((guide) => (
+                  <li key={guide.slug}>
+                    <AppLink
+                      className="guide-index__card"
+                      href={guidePath(guide.slug)}
+                      onNavigate={onNavigate}
+                    >
+                      <span className="guide-index__title">{guide.title}</span>
+                      <span className="guide-index__description">{guide.description}</span>
+                    </AppLink>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+
+          <aside className="guide-landing__aside" aria-labelledby="guide-api-reference">
+            <div className="guide-reference">
+              <p className="eyebrow">Reference</p>
+              <h2 id="guide-api-reference">API reference</h2>
+              <p className="guide-reference__detail">
+                Every operation and schema of the public product API, rendered from the canonical
+                OpenAPI contract. It is a separate reference page, not part of this guide.
+              </p>
+              <a className="button button--primary" href={DOCS_PATH}>
+                Open the API reference
+                <span aria-hidden="true"> ↗</span>
+              </a>
+            </div>
+          </aside>
         </div>
       </main>
 
@@ -60,7 +99,10 @@ interface GuideEntryPageProps extends GuidePageProps {
 
 /**
  * One bundled guide, or an explicit not-found view for a slug that no bundled
- * document answers. A missing page never falls back to the catalog.
+ * document answers. The sidebar is the article navigation: it lists every
+ * registered page, marks the current one with `aria-current`, and keeps the
+ * separate API reference one full page load away. A missing page never falls
+ * back to the catalog.
  */
 export function GuideEntryPage({ slug, onNavigate }: GuideEntryPageProps) {
   const guide = findGuide(slug)
@@ -79,40 +121,60 @@ export function GuideEntryPage({ slug, onNavigate }: GuideEntryPageProps) {
       <SiteHeader section="Product guide" onNavigate={onNavigate} />
 
       <main className="page" id="main-content">
-        <nav className="breadcrumb" aria-label="Breadcrumb">
-          <ol>
-            <li>
-              <AppLink href={GUIDE_PATH} onNavigate={onNavigate}>
-                Product guide
-              </AppLink>
-            </li>
-            <li aria-current="page">{guide === null ? 'Guide page not found' : guide.title}</li>
-          </ol>
-        </nav>
+        <div className="guide-layout">
+          <aside className="guide-sidebar">
+            <GuideNavigation
+              state={guide === null ? { kind: 'not-found' } : { kind: 'page', slug: guide.slug }}
+              onNavigate={onNavigate}
+            />
+          </aside>
 
-        {guide === null ? (
-          <div className="state-panel state-panel--empty">
-            <h1 className="state-title">Guide page not found</h1>
-            <p className="state-detail">
-              No bundled product guide matches this address. The guide pages are fixed Markdown
-              files shipped with the application, so a mistyped or removed slug has no page.
-            </p>
-            <AppLink className="button button--primary" href={GUIDE_PATH} onNavigate={onNavigate}>
-              Back to the product guide
-            </AppLink>
+          <div className="guide-content">
+            <nav className="breadcrumb" aria-label="Breadcrumb">
+              <ol>
+                <li>
+                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
+                    Catalog
+                  </AppLink>
+                </li>
+                <li>
+                  <AppLink href={GUIDE_PATH} onNavigate={onNavigate}>
+                    Guides
+                  </AppLink>
+                </li>
+                <li aria-current="page">{guide === null ? 'Guide page not found' : guide.title}</li>
+              </ol>
+            </nav>
+
+            {guide === null ? (
+              <div className="state-panel state-panel--empty">
+                <h1 className="state-title">Guide page not found</h1>
+                <p className="state-detail">
+                  No bundled product guide matches this address. The guide pages are fixed Markdown
+                  files shipped with the application, so a mistyped or removed slug has no page.
+                </p>
+                <AppLink
+                  className="button button--primary"
+                  href={GUIDE_PATH}
+                  onNavigate={onNavigate}
+                >
+                  Back to the product guide
+                </AppLink>
+              </div>
+            ) : (
+              <>
+                <div className="page-heading">
+                  <p className="eyebrow">Product guide</p>
+                  <h1>{guide.title}</h1>
+                  <p className="lede">{guide.description}</p>
+                </div>
+                <div id="guide-content" tabIndex={-1}>
+                  <GuideMarkdown markdown={guide.markdown} onNavigate={onNavigate} />
+                </div>
+              </>
+            )}
           </div>
-        ) : (
-          <>
-            <div className="page-heading">
-              <p className="eyebrow">Product guide</p>
-              <h1>{guide.title}</h1>
-              <p className="lede">{guide.description}</p>
-            </div>
-            <div id="guide-content" tabIndex={-1}>
-              <GuideMarkdown markdown={guide.markdown} onNavigate={onNavigate} />
-            </div>
-          </>
-        )}
+        </div>
       </main>
 
       <SiteFooter />

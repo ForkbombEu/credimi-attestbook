@@ -433,6 +433,46 @@ describe('app catalog and detail navigation', () => {
     expect(screen.getByRole('heading', { name: 'Version history' })).toBeInTheDocument()
   })
 
+  test('opens the product guide from the shared header and returns to the catalog', async () => {
+    const user = userEvent.setup()
+    installFetch()
+
+    render(<App />)
+
+    await user.click(await screen.findByRole('link', { name: 'Guides' }))
+
+    expect(window.location.pathname).toBe('/guide')
+    expect(
+      await screen.findByRole('heading', { name: 'AttestBook product guide' }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole('link', { name: 'Guides' })).toHaveAttribute('aria-current', 'page')
+    expect(screen.getByRole('link', { name: /Open the API reference/ })).toHaveAttribute(
+      'href',
+      '/docs',
+    )
+
+    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
+    await user.click(within(breadcrumb).getByRole('link', { name: 'Catalog' }))
+
+    expect(window.location.pathname).toBe('/')
+    expect(await screen.findByRole('heading', { name: 'Rulebook catalog' })).toBeInTheDocument()
+  })
+
+  test('renders a deep-linked guide page with its article navigation', async () => {
+    installFetch()
+    window.history.replaceState({}, '', '/guide/introduction')
+
+    render(<App />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Introduction to AttestBook' }),
+    ).toBeInTheDocument()
+    const navigation = screen.getByRole('navigation', { name: 'Product guides' })
+    expect(
+      within(navigation).getByRole('link', { name: 'Introduction to AttestBook' }),
+    ).toHaveAttribute('aria-current', 'page')
+  })
+
   test('opens the administrator sign-in page from the shared header', async () => {
     const user = userEvent.setup()
     installFetch()

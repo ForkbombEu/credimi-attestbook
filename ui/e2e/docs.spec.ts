@@ -37,6 +37,19 @@ test('serves the product API reference from /docs without third-party assets', a
   await expect(page.getByRole('heading', { name: REFERENCE_TITLE })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'service' })).toBeVisible()
 
+  // The reference is a separate document with its own way back into the
+  // product: the Catalog and the Guides stay one click away (issue #131).
+  const documentation = page.getByRole('navigation', { name: 'Documentation' })
+  await expect(documentation.getByRole('link', { name: 'Catalog' })).toHaveAttribute('href', '/')
+  await expect(documentation.getByRole('link', { name: 'Guides' })).toHaveAttribute(
+    'href',
+    '/guide',
+  )
+  await expect(documentation.getByRole('link', { name: 'API reference' })).toHaveAttribute(
+    'aria-current',
+    'page',
+  )
+
   // Expand the rulebooks group and assert one real generated operation.
   await page.getByText('rulebooks', { exact: true }).first().click()
   await expect(page.getByRole('heading', { name: 'List rulebooks' })).toBeVisible()
@@ -61,4 +74,19 @@ test('keeps the reference on /docs after a reload', async ({ page }) => {
   expect(new URL(page.url()).pathname).toBe('/docs')
   await expect(page.getByRole('heading', { name: REFERENCE_TITLE })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'service' })).toBeVisible()
+})
+
+test('returns from the reference to the product guides', async ({ page }) => {
+  await page.goto('/docs')
+  await expect(page.getByRole('heading', { name: REFERENCE_TITLE })).toBeVisible()
+
+  await page
+    .getByRole('navigation', { name: 'Documentation' })
+    .getByRole('link', { name: 'Guides' })
+    .click()
+
+  await expect(page).toHaveURL(/\/guide$/)
+  await expect(
+    page.getByRole('heading', { name: 'AttestBook product guide', level: 1 }),
+  ).toBeVisible()
 })

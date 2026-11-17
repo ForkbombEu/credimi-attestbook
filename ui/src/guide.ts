@@ -7,6 +7,10 @@
 //   3. start the document body at `##` — the registered title is the page's
 //      single `h1`, and headings inside the document keep their own level.
 //
+// This registry is the single source of truth for the page set: the guide index
+// cards, their order and the article sidebar all derive from it, so adding a
+// page never means editing a separate navigation list.
+//
 // `?raw` is resolved by Vite at build time, so the built application carries
 // the page with its assets and never fetches Markdown from a filesystem path, a
 // remote host or the API.

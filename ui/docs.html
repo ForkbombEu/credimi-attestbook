@@ -3,19 +3,43 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="color-scheme" content="light dark" />
+    <meta name="color-scheme" content="light" />
     <meta name="theme-color" content="#220E7E" />
     <meta
       name="description"
       content="Interactive reference for the AttestBook product API, generated from the same-origin OpenAPI contract."
     />
     <link rel="icon" href="/brand/logos/credimi_logo.svg" type="image/svg+xml" />
+    <!-- Brand tokens first; the reference and its documentation chrome load after. -->
+    <link rel="stylesheet" href="/brand/style.css" />
     <title>API reference · AttestBook</title>
   </head>
   <body>
-    <!-- The reference reads the contract from this same-origin path; no route
-         schemas are duplicated in the page. -->
-    <div id="docs-root" data-openapi-url="/openapi.json"></div>
+    <a class="docs-skip-link" href="#docs-root">Skip to the API reference</a>
+    <!-- The reference is a separate document from the product-guide SPA, so its
+         chrome links back to the Catalog and the Guides explicitly. It reads the
+         contract from this same-origin path; no route schemas are duplicated. -->
+    <header class="docs-chrome">
+      <div class="docs-chrome__inner">
+        <a class="docs-chrome__brand" href="/">
+          <img
+            class="docs-chrome__logo"
+            src="/brand/logos/credimi_logo-transp.svg"
+            alt=""
+            width="106"
+            height="22"
+          />
+          <span class="docs-chrome__divider" aria-hidden="true"></span>
+          <span class="docs-chrome__product">AttestBook</span>
+        </a>
+        <nav class="docs-chrome__nav" aria-label="Documentation">
+          <a href="/">Catalog</a>
+          <a href="/guide">Guides</a>
+          <a href="/docs" aria-current="page">API reference</a>
+        </nav>
+      </div>
+    </header>
+    <main id="docs-root" class="docs-main" data-openapi-url="/openapi.json"></main>
     <script type="module" src="/src/docs/main.ts"></script>
   </body>
 </html>
