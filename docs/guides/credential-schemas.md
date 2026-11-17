@@ -20,12 +20,12 @@ A schema **hosted by AttestBook** is registered from its exact bytes. An authori
 or an administrator using the rulebook editor, sends `POST
 /api/v1/schema-documents?kind=json_schema_2020_12` with the document as the request body.
 Registration needs a provider bearer token or the administrator session with its CSRF token,
-and anonymous registration is refused. Registration returns a permanent public URL, the
-lowercase hex SHA-256 digest of the bytes and a `sha256-<base64>` SRI pin. The same endpoint
-registers SD-JWT VC type metadata with `kind=sd_jwt_vc_type_metadata`; this guide covers the
-JSON Schema profile. In the editor, **Upload/paste schema to AttestBook** performs this
-registration and inserts the returned values; **Use existing external URL** records an external
-reference without uploading anything.
+and anonymous registration is refused. A provider can associate at most 100 stored documents.
+Registration returns a permanent public URL, the lowercase hex SHA-256 digest of the bytes and a
+`sha256-<base64>` SRI pin. The same endpoint registers SD-JWT VC type metadata with
+`kind=sd_jwt_vc_type_metadata`; this guide covers the JSON Schema profile. In the editor,
+**Upload/paste schema to AttestBook** performs this registration and inserts the returned
+values; **Use existing external URL** records an external reference without uploading anything.
 
 Both options produce the same draft members: a `formatIdentifier`, a `uri` and an optional
 `integrity` pin. The hosted or external label is derived from the stored-document association
@@ -43,7 +43,9 @@ is byte-identical to what was registered and is never re-serialized. Its `Conten
 changes. A matching `If-None-Match` answers `304`; an unknown document answers `404`. The
 public metadata routes `GET /api/v1/schema-documents/{id}` and
 `GET /api/v1/schema-documents?limit=50&offset=0` report the same URL, media type, digest and
-pin without naming the provider.
+pin without naming the provider. If `PUBLIC_BASE_URL` is unset, those metadata routes answer
+`503 public_base_url_unavailable` because they cannot issue a canonical hosted URL; the content
+route still serves bytes that were already stored.
 
 Registration is idempotent in the useful direction: registering the same bytes again for the
 same provider returns the existing document and URL unchanged, while different bytes create a
@@ -123,12 +125,13 @@ The source badge is the distinction: a reference is **Hosted by AttestBook** onl
 exact URI equals the canonical content URL of a stored document on this deployment. Every
 other `http(s)` value remains an external link.
 
-A frozen published version exposes the same distinction through its version projection: a
-hosted reference carries a `hostedSchema` object with the public document fields, and an
-external reference carries `hostedSchema: null`. The version response also names the version
-label, content digest, status and publication time, so a reader can identify the exact snapshot
-that pins the reference. The version history's **Inspect references** action reads that frozen
-snapshot; neither the Draft JSON nor the snapshot gains a proprietary member.
+A frozen published version exposes the same distinction through its version projection at
+`GET /api/v1/rulebooks/{rulebookId}/versions/{version}/schema-references`: a hosted reference
+carries a `hostedSchema` object with the public document fields, and an external reference
+carries `hostedSchema: null`. The version response also names the version label, content digest,
+status and publication time, so a reader can identify the exact snapshot that pins the
+reference. The version history's **Inspect references** action reads that frozen snapshot;
+neither the Draft JSON nor the snapshot gains a proprietary member.
 
 ## Where to go next
 

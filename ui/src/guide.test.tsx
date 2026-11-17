@@ -430,8 +430,12 @@ describe('product guide views', () => {
     expect(article).toHaveTextContent('Hosted by AttestBook')
     expect(article).toHaveTextContent('External URL')
     expect(article).toHaveTextContent('/api/v1/schema-documents')
+    expect(article).toHaveTextContent('/api/v1/schema-documents/<document-id>/content')
     expect(article).toHaveTextContent('/api/v1/schema-documents?limit=50&offset=0')
+    expect(article).toHaveTextContent('503 public_base_url_unavailable')
+    expect(article).toHaveTextContent('at most 100 stored documents')
     expect(article).toHaveTextContent('kind=sd_jwt_vc_type_metadata')
+    expect(article).toHaveTextContent('/versions/{version}/schema-references')
     expect(article).toHaveTextContent('sha256-<base64>')
     expect(
       within(article as HTMLElement).getByRole('link', { name: 'rulebook catalog' }),
