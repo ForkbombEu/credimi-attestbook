@@ -1,7 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
 
 import { parseInline, parseMarkdown, type InlineToken } from './markdown'
-import { AppLink } from './router'
+import { AppLink, isClientRoute } from './router'
 
 /**
  * Renders the supported Markdown subset as React elements. There is no
@@ -26,10 +26,19 @@ function inlineNodes(
         return <em key={key}>{token.text}</em>
       case 'link':
         if (token.href.startsWith('/')) {
+          // Only routes the SPA draws use the in-app router. Server documents
+          // such as `/docs` and `/openapi.json` must get a full page load.
+          if (isClientRoute(token.href)) {
+            return (
+              <AppLink key={key} href={token.href} onNavigate={onNavigate}>
+                {token.text}
+              </AppLink>
+            )
+          }
           return (
-            <AppLink key={key} href={token.href} onNavigate={onNavigate}>
+            <a key={key} href={token.href}>
               {token.text}
-            </AppLink>
+            </a>
           )
         }
         if (token.href.startsWith('#')) {

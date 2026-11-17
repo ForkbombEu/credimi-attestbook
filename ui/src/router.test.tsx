@@ -10,6 +10,7 @@ import {
   NEW_RULEBOOK_PATH,
   capturePath,
   guidePath,
+  isClientRoute,
   parseRoute,
   rulebookEditorPath,
   rulebookPath,
@@ -125,6 +126,42 @@ describe('parseRoute', () => {
     expect(GUIDE_PATH).toBe('/guide')
     expect(guidePath('introduction')).toBe('/guide/introduction')
     expect(guidePath('a b')).toBe('/guide/a%20b')
+  })
+})
+
+describe('isClientRoute', () => {
+  test('recognises every view the SPA router draws', () => {
+    for (const href of [
+      '/',
+      '/guide',
+      '/guide/',
+      '/guide/introduction',
+      '/playground',
+      '/captures',
+      '/captures/x',
+      '/rulebooks/abc',
+      '/rulebooks/abc/edit',
+      '/rulebooks/new',
+      '/login',
+      '/login?next=%2Fguide',
+    ]) {
+      expect(isClientRoute(href), href).toBe(true)
+    }
+  })
+
+  test('leaves server documents and API or asset paths to a full navigation', () => {
+    for (const href of [
+      '/docs',
+      '/docs/',
+      '/openapi.json',
+      '/api/v1/rulebooks',
+      '/brand/logo.svg',
+      'https://example.org/docs',
+      'javascript:alert(1)',
+      '',
+    ]) {
+      expect(isClientRoute(href), href).toBe(false)
+    }
   })
 })
 

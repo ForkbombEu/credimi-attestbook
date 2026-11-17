@@ -177,6 +177,18 @@ describe('GuideMarkdown', () => {
     expect(container.querySelector('a[href^="javascript:"]')).toBeNull()
     expect(container).toHaveTextContent('[unsafe](javascript:alert(1))')
   })
+
+  test('lets the browser load a server document such as /docs', async () => {
+    const onNavigate = vi.fn()
+    render(<GuideMarkdown markdown="Read the [API reference](/docs)." onNavigate={onNavigate} />)
+
+    const reference = screen.getByRole('link', { name: 'API reference' })
+    expect(reference).toHaveAttribute('href', '/docs')
+    expect(reference).not.toHaveAttribute('target')
+
+    await userEvent.setup().click(reference)
+    expect(onNavigate).not.toHaveBeenCalled()
+  })
 })
 
 describe('product guide views', () => {

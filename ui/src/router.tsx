@@ -30,6 +30,37 @@ export const CAPTURES_PATH = '/captures'
 export const NEW_RULEBOOK_PATH = '/rulebooks/new'
 export const LOGIN_PATH = '/login'
 
+/**
+ * True when the SPA itself renders `href`; server documents such as `/docs`
+ * need a full navigation. Keep this list matched to the routes `parseRoute`
+ * recognises and to the index-document routes in `src/app.ts`.
+ */
+export function isClientRoute(href: string): boolean {
+  if (href === '') {
+    return false
+  }
+  let url: URL
+  try {
+    url = new URL(href, 'http://attestbook.invalid')
+  } catch {
+    return false
+  }
+  let path = url.pathname
+  while (path.length > 1 && path.endsWith('/')) {
+    path = path.slice(0, -1)
+  }
+  return (
+    path === CATALOG_PATH ||
+    path === GUIDE_PATH ||
+    path.startsWith(`${GUIDE_PATH}/`) ||
+    path === PLAYGROUND_PATH ||
+    path === CAPTURES_PATH ||
+    path.startsWith(`${CAPTURES_PATH}/`) ||
+    path.startsWith('/rulebooks/') ||
+    path === LOGIN_PATH
+  )
+}
+
 export function capturePath(captureId: string): string {
   return `${CAPTURES_PATH}/${encodeURIComponent(captureId)}`
 }

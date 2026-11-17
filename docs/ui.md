@@ -194,6 +194,9 @@ Implemented by these slices:
     guide means adding its Markdown file and one registry entry;
   - embedded raw HTML stays literal text, and only root-relative, `http(s)` and `mailto`
     destinations become links; a `javascript:` or `data:` destination stays text;
+  - a root-relative link to a route the SPA draws uses the in-app router, while a link to a
+    page the server sends (`/docs`, `/openapi.json`) does a full page load, so the guide's
+    API-reference link opens the Scalar page instead of the catalog fallback;
   - an unregistered slug shows an accessible guide not-found view and never falls back to
     the catalog. `/docs`, `/openapi.json` and the versioned API are untouched.
 
@@ -705,8 +708,9 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   that refuses file paths, Markdown block and inline parsing, safe-link filtering
   (root-relative, `http(s)` and `mailto` accepted; script/data/protocol-relative/backslash
   destinations rejected), raw HTML staying inert text, heading/list/code/link rendering,
-  the index and deep-link views, the unknown-slug not-found view without a catalog fallback,
-  and axe-core checks for all three views;
+  in-app links using the client router while `/docs` gets a full page load, the index and
+  deep-link views, the unknown-slug not-found view without a catalog fallback, and axe-core
+  checks for all three views;
 - an end-to-end component navigation test from the catalog to a detail page and back, from
   the catalog to the new-rulebook editor, from the catalog to the administrator sign-in
   page, a direct deep-link render of both editors and the login page, and a direct render of
@@ -779,9 +783,10 @@ no-horizontal-overflow check.
 
 The product guide is covered by `ui/e2e/guide.spec.ts` against the production Vite build: the
 `/guide` index, following its Introduction link to `/guide/introduction` with the document
-heading, body heading, code block and `/docs` link visible, a reload that keeps the deep link
-on the same document, an accessible not-found view for an unknown slug with no catalog
-fallback, and a request watcher asserting that reading the guide loads no third-party asset.
+heading, body heading, code block and `/docs` link visible, following the API-reference link
+to the full Scalar page, a reload that keeps the deep link on the same document, an accessible
+not-found view for an unknown slug with no catalog fallback, and a request watcher asserting
+that reading the guide loads no third-party asset.
 
 CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test:e2e`. The
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves

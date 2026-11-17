@@ -145,7 +145,8 @@ export function createApp(options: AppOptions = {}): Hono {
     // `/captures/*` and `/login`. Serving the entry document for those paths
     // makes a deep link and a browser reload address the same view instead of a
     // JSON 404; the API stays under `/api/*` and unknown non-UI paths keep the
-    // JSON not-found envelope.
+    // JSON not-found envelope. Keep this list matched to `isClientRoute` in
+    // `ui/src/router.tsx`.
     app.get('/rulebooks/*', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/guide', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))
     app.get('/guide/', staticFileHandler(resolve(uiRoot, 'index.html'), 'no-cache'))

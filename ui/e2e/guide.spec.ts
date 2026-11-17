@@ -59,6 +59,18 @@ test('opens the public product guide and follows the introduction link', async (
   await expectNoA11yViolations(page)
 })
 
+test('opens the API reference from the guide with a full page load', async ({ page }) => {
+  await page.goto('/guide/introduction')
+  await expect(page.getByRole('heading', { name: INTRODUCTION_HEADING, level: 1 })).toBeVisible()
+
+  await page.getByRole('link', { name: 'API reference' }).click()
+
+  await page.waitForURL(/\/docs$/)
+  await expect(page.getByRole('heading', { name: 'AttestBook product API' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'service' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Rulebook catalog' })).toHaveCount(0)
+})
+
 test('keeps a guide deep link after a reload', async ({ page }) => {
   await page.goto('/guide/introduction')
   await expect(page.getByRole('heading', { name: INTRODUCTION_HEADING, level: 1 })).toBeVisible()
