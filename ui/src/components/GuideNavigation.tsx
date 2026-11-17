@@ -3,9 +3,7 @@ import { AppLink, DOCS_PATH, GUIDE_PATH, guidePath } from '../router'
 
 /** Which guide navigation entry, if any, is the current page. */
 export type GuideNavigationState =
-  | { readonly kind: 'index' }
-  | { readonly kind: 'page'; readonly slug: string }
-  | { readonly kind: 'not-found' }
+  { readonly kind: 'page'; readonly slug: string } | { readonly kind: 'not-found' }
 
 interface GuideNavigationProps {
   readonly state: GuideNavigationState
@@ -28,12 +26,7 @@ export function GuideNavigation({ state, onNavigate }: GuideNavigationProps) {
       <p className="guide-nav__title">Guides</p>
       <ul className="guide-nav__list">
         <li>
-          <AppLink
-            className="guide-nav__link"
-            href={GUIDE_PATH}
-            onNavigate={onNavigate}
-            {...(state.kind === 'index' ? { 'aria-current': 'page' as const } : {})}
-          >
+          <AppLink className="guide-nav__link" href={GUIDE_PATH} onNavigate={onNavigate}>
             Guides overview
           </AppLink>
         </li>

@@ -229,7 +229,11 @@ Implemented by these slices:
   - `/docs` keeps the existing standalone Scalar reference and adds only a small branded
     documentation header (`Catalog`, `Guides`, the current `API reference`) plus a skip link,
     giving a way back to the product. Scalar and `/openapi.json` are not embedded, moved or
-    reimplemented;
+    reimplemented. The docs entry does not load the SPA brand stylesheet, whose unlayered global
+    rules would override Scalar's layered styles; its chrome stylesheet is scoped to the header
+    and sets Scalar's `--scalar-custom-header-height` so Scalar's sticky sidebar and anchor
+    offsets start below the header. At 640 px and below the header is static and that offset is
+    reset;
   - wide screens keep the sidebar and API-reference panel sticky under the topbar; at 1000 px
     and below the layouts become a single column, so the sidebar becomes a keyboard-reachable
     list above the article at 390 px without horizontal scrolling. The shared header wraps its
@@ -862,7 +866,10 @@ to the catalog, the current guide page in the article sidebar, following the API
 link to the Scalar page and back through the reference's own `Guides` link, and a 390 px
 check that keeps the sidebar keyboard focusable, the article readable and the page free of
 horizontal scrolling with a full axe-core scan. The reference spec also asserts its
-documentation header links to the catalog and the guides and marks `API reference` current.
+documentation header links to the catalog and the guides and marks `API reference` current; that
+the docs entry loads no SPA brand stylesheet, so Scalar's section-header rules stay untouched;
+that the sticky header's height is exposed to Scalar so its sidebar and search field stay below
+the header after scrolling; and that `/docs` has no horizontal overflow at 390 px.
 
 CI adds the `ui` job: `typecheck:ui`, `test:ui`, Chromium installation and `test:e2e`. The
 `build` job verifies `dist/ui/index.html` exists and the Docker job checks that `/` serves
