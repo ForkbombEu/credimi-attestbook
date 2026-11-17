@@ -211,7 +211,7 @@ test('opens the credential validation guide and follows its playground link', as
   await expect(article.getByText('Inconclusive', { exact: true }).first()).toBeVisible()
   for (const dimension of [
     'Cryptographic verification',
-    'Issuer trust',
+    'Issuer and trust-policy validation',
     'Protocol conformance',
     'End-to-end interoperability',
   ]) {

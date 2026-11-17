@@ -14,23 +14,23 @@ The engine can execute four of the eight validation dimensions in FR-010:
 
 - **Credential parsing** — parses a real compact SD-JWT VC, verifies its
   disclosure digests, and rejects unreferenced or duplicate disclosures.
-- **Format recognition** — identifies the credential format from the artifact,
-  or from the credential format hint you choose.
+- **Credential format recognition** — identifies the credential format from the
+  artifact, or from the credential format hint you choose.
 - **Schema validation** — applies a pinned schema reference only when its
   document can be resolved and its integrity pin verified. The playground has no
   way to attach external schema documents, so an external reference stays not
   tested; a document hosted by this deployment is read from its immutable local
   store.
-- **Attestation constraints** — checks the rulebook-observable facts: whether
-  the format is supported, the `attestationLoS` and `bindingType` vocabulary,
-  and whether an issuer-signed `cnf` key-binding entry is present.
+- **Attestation-specific constraints** — checks the rulebook-observable facts:
+  whether the format is supported, the `attestationLoS` and `bindingType`
+  vocabulary, and whether an issuer-signed `cnf` key-binding entry is present.
 
 The other four dimensions are deliberately outside this run:
 
 - **Cryptographic verification** (`NOT_TESTED`) — the issuer signature, the
   key-binding JWT proof and status-list checks.
-- **Issuer trust** (`NOT_TESTED`) — trust anchors, certificate chains and issuer
-  policy.
+- **Issuer and trust-policy validation** (`NOT_TESTED`) — trust anchors,
+  certificate chains and issuer policy.
 - **Protocol conformance** (`NOT_APPLICABLE`) — any OpenID4VCI, OpenID4VP or
   other exchange; a single artifact contains no protocol exchange.
 - **End-to-end interoperability** (`NOT_APPLICABLE`) — a real wallet, issuer or
@@ -90,7 +90,7 @@ credential size first; an incomplete request sends nothing. The real
 version, and the page shows the returned report rather than a mock.
 
 The page sends only the selected rulebook id, version, attestation type and the
-credential (plus the format hint when you chose one):
+credential:
 
 ```json
 {
@@ -101,14 +101,32 @@ credential (plus the format hint when you chose one):
 }
 ```
 
-A safe error message is shown for a `400`, `413` or `503` response, and editing
-or retrying never re-sends a stale result.
+Choosing a format hint sends the artifact as a two-member `credential` object
+instead of a bare string:
+
+```json
+{
+  "rulebookId": "<selected rulebook id>",
+  "rulebookVersion": "<selected version>",
+  "attestationType": "<selected attestation type>",
+  "credential": {
+    "format": "dc+sd-jwt",
+    "value": "<the synthetic compact SD-JWT VC you supplied>"
+  }
+}
+```
+
+A safe error message is shown for an API error response such as `400`, `413` or
+`503`, and editing or retrying never re-sends a stale result.
 
 ## Read the overall result and the dimensions
 
-**Overall result** shows the aggregate status, its plain-language explanation
-and the pinned rulebook version with its recomputed content digest. **Validation
-dimensions** lists all eight FR-010 dimensions in normative order, each with:
+**Overall result** shows the aggregate status, its plain-language explanation,
+the pinned rulebook version, the **Snapshot digest (SHA-256)**, and the
+credential facts **Credential format**, **Credential type (vct)**,
+**Disclosures** and **Key binding present**. No claim value is shown.
+**Validation dimensions** lists all eight FR-010 dimensions in normative order,
+each with:
 
 - its **Status**;
 - its **Execution** — whether an actual check ran;
@@ -129,8 +147,6 @@ Then read the supporting sections:
   interoperability where they apply.
 - **Schema references** — the pinned version's references with their integrity
   pin, detected kind and whether this run applied them.
-- **Credential facts** — format, `vct`, disclosure count and key-binding
-  presence. No claim value is shown.
 
 ## What each status means
 
@@ -179,8 +195,9 @@ curl --fail --silent \
   'http://127.0.0.1:3000/api/v1/credentials/validate'
 ```
 
-The request body uses the fields shown above; optional `schemaDocuments` supply
-the exact bytes of external schema references that the playground cannot attach.
+The request body uses the fields shown above, with the bare or two-member
+`credential` form; optional `schemaDocuments` supply the exact bytes of external
+schema references that the playground cannot attach.
 Every operation and schema, including the response envelope and error codes, is
 in the [API reference](/docs), generated from the canonical [OpenAPI
 document](/openapi.json).

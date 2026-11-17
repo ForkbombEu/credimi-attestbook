@@ -2,12 +2,15 @@ import { render, screen, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 
+import { ValidationReport } from './components/ValidationReport'
+import { EVALUATION_SUPPORT } from './compatibility'
 import { GuideMarkdown } from './GuideMarkdown'
 import { GuideEntryPage, GuideIndexPage } from './GuidePage'
 import { findGuide, GUIDE_DOCUMENTS } from './guide'
 import { parseInline, parseMarkdown, safeLinkHref } from './markdown'
 import { isClientRoute } from './router'
 import { expectNoA11yViolations } from './test/a11y'
+import { makeValidationResult } from './test/fixtures'
 
 afterEach(() => {
   window.history.replaceState({}, '', '/')
@@ -419,13 +422,16 @@ describe('product guide views', () => {
       expect(labels.length).toBeGreaterThan(0)
       expect(labels[0]).toBeVisible()
     }
-    for (const dimension of [
-      'Cryptographic verification',
-      'Issuer trust',
-      'Protocol conformance',
-      'End-to-end interoperability',
-    ]) {
-      expect(within(article).getAllByText(dimension, { exact: true }).length).toBeGreaterThan(0)
+    const untestedTitles = EVALUATION_SUPPORT.filter((dimension) =>
+      [
+        'cryptographic_verification',
+        'issuer_trust',
+        'protocol_conformance',
+        'interoperability',
+      ].includes(dimension.id),
+    ).map((dimension) => dimension.title)
+    for (const title of untestedTitles) {
+      expect(within(article).getAllByText(title, { exact: true }).length).toBeGreaterThan(0)
     }
     expect(document.title).toBe('Credential validation · AttestBook')
   })
@@ -491,6 +497,46 @@ describe('credential validation guide links', () => {
     expect(markdown).toContain('](/playground)')
     expect(markdown).toContain('](/docs)')
     expect(markdown).toContain('](/openapi.json)')
+  })
+})
+
+describe('credential validation guide accuracy', () => {
+  test('names every validation dimension with its report title', () => {
+    const markdown = findGuide('credential-validation')?.markdown ?? ''
+
+    for (const dimension of EVALUATION_SUPPORT) {
+      expect(markdown, dimension.id).toContain(`**${dimension.title}**`)
+    }
+  })
+
+  test('names only report sections and facts the rendered report really shows', () => {
+    const markdown = findGuide('credential-validation')?.markdown ?? ''
+    const reportHeadings = [
+      'Overall result',
+      'Validation dimensions',
+      'Violations',
+      'Limitations of this result',
+      'Schema references',
+    ]
+    const resultFacts = [
+      'Snapshot digest (SHA-256)',
+      'Credential format',
+      'Credential type (vct)',
+      'Disclosures',
+      'Key binding present',
+    ]
+
+    render(<ValidationReport result={makeValidationResult()} onExport={vi.fn()} />)
+
+    for (const heading of reportHeadings) {
+      expect(markdown).toContain(`**${heading}**`)
+      expect(screen.getByRole('heading', { level: 2, name: heading })).toBeInTheDocument()
+    }
+    for (const fact of resultFacts) {
+      expect(markdown).toContain(`**${fact}**`)
+      expect(screen.getByText(fact)).toBeInTheDocument()
+    }
+    expect(markdown).not.toContain('**Credential facts**')
   })
 })
 
