@@ -6,11 +6,31 @@ import { GuideMarkdown } from './GuideMarkdown'
 import { GuideEntryPage, GuideIndexPage } from './GuidePage'
 import { findGuide, GUIDE_DOCUMENTS } from './guide'
 import { parseInline, parseMarkdown, safeLinkHref } from './markdown'
+import { isClientRoute } from './router'
 import { expectNoA11yViolations } from './test/a11y'
 
 afterEach(() => {
   window.history.replaceState({}, '', '/')
 })
+
+function guideLinks(markdown: string): string[] {
+  const hrefs: string[] = []
+  const collect = (text: string): void => {
+    for (const token of parseInline(text)) {
+      if (token.type === 'link') {
+        hrefs.push(token.href)
+      }
+    }
+  }
+  for (const block of parseMarkdown(markdown)) {
+    if (block.type === 'heading' || block.type === 'paragraph') {
+      collect(block.text)
+    } else if (block.type === 'list') {
+      block.items.forEach(collect)
+    }
+  }
+  return hrefs
+}
 
 describe('bundled guide registry', () => {
   test('registers unique, URL-safe slugs with a title and description', () => {
@@ -29,6 +49,7 @@ describe('bundled guide registry', () => {
 
   test('resolves only a registered slug and never treats it as a file path', () => {
     expect(findGuide('introduction')).not.toBeNull()
+    expect(findGuide('capture-explorer')).not.toBeNull()
     expect(findGuide('../../package.json')).toBeNull()
     expect(findGuide('/etc/passwd')).toBeNull()
     expect(findGuide('introduction.md')).toBeNull()
@@ -226,6 +247,38 @@ describe('product guide views', () => {
     expect(document.title).toBe('Introduction to AttestBook · AttestBook')
   })
 
+  test('renders the capture explorer guide with its mock boundary and /captures link', () => {
+    const { container } = render(<GuideEntryPage slug="capture-explorer" onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Capture explorer' })).toBeVisible()
+    const article = container.querySelector('.guide-article')
+    expect(article).not.toBeNull()
+    const content = article as HTMLElement
+    expect(within(content).getByRole('link', { name: 'the capture explorer' })).toHaveAttribute(
+      'href',
+      '/captures',
+    )
+    expect(content).toHaveTextContent(/mock-backed/i)
+    expect(content).toHaveTextContent(/not implemented and are not claimed/i)
+    expect(content).toHaveTextContent(/no live capture-issuer or capture-verifier connector/i)
+    expect(document.title).toBe('Capture explorer · AttestBook')
+  })
+
+  test('every root-relative guide link resolves to a served route or document', () => {
+    const serverDocuments = new Set(['/docs', '/openapi.json'])
+    for (const guide of GUIDE_DOCUMENTS) {
+      for (const href of guideLinks(guide.markdown)) {
+        if (!href.startsWith('/')) {
+          continue
+        }
+        expect(
+          isClientRoute(href) || serverDocuments.has(href),
+          `${guide.slug}: ${href} is not a served route`,
+        ).toBe(true)
+      }
+    }
+  })
+
   test('shows an explicit not-found view for an unknown slug instead of the catalog', async () => {
     const onNavigate = vi.fn()
     render(<GuideEntryPage slug="no-such-guide" onNavigate={onNavigate} />)
@@ -265,6 +318,18 @@ describe('product guide views', () => {
     const items = within(list).getAllByRole('listitem')
     expect(items).toHaveLength(GUIDE_DOCUMENTS.length)
     expect(items[0]).toHaveTextContent('Introduction to AttestBook')
+  })
+
+  test('the index links to the capture explorer guide', async () => {
+    const onNavigate = vi.fn()
+    render(<GuideIndexPage onNavigate={onNavigate} />)
+
+    const list = screen.getByRole('list', { name: 'Product guides' })
+    const link = within(list).getByRole('link', { name: /Capture explorer/ })
+    expect(link).toHaveAttribute('href', '/guide/capture-explorer')
+
+    await userEvent.setup().click(link)
+    expect(onNavigate).toHaveBeenCalledWith('/guide/capture-explorer')
   })
 })
 
