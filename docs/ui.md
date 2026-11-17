@@ -58,6 +58,17 @@ API-reference panel, and `/guide/<slug>` adds a sidebar generated from the same
 reference and gains a small branded documentation header with links back to the catalog and
 the guides. No guide or Scalar content is moved or reimplemented.
 
+The concepts/quick-start slice of
+[issue #132](https://github.com/ForkbombEu/credimi-attestbook/issues/132) adds two pages to that
+same bundled guide: `docs/guides/concepts.md` defines the provider, rulebook, attestation type,
+schema reference, draft, published/historical version, immutable snapshot, content digest and
+structural-validation vocabulary, and `docs/guides/quick-start.md` walks an anonymous reader
+from the catalog through one exact version to the credential playground. Both pages are
+registered in `ui/src/guide.ts` and appear automatically in the index cards and the article
+sidebar; no renderer, route, API or layout code changes, and both pages link only to routes the
+application already serves (`/`, `/rulebooks/<rulebookId>`, `/playground`, `/docs`,
+`/guide/<slug>`).
+
 **Authoritative spec:** [`docs/specification.md`](specification.md) §14
 (UI-001/UI-002/UI-005/UI-006), §15 (authentication and authorization), §11 (FR-019) and §2.2
 (independent standalone UI).
@@ -748,6 +759,22 @@ header, sidebar and footer are unchanged.
 | Guide index (`/guide`) | [`guide-index-before.png`](ui/credential-schemas/guide-index-before.png) | [`guide-index-after.png`](ui/credential-schemas/guide-index-after.png) |
 | Credential schemas (`/guide/credential-schemas`) | [`guide-page-before.png`](ui/credential-schemas/guide-page-before.png) | [`guide-page-after.png`](ui/credential-schemas/guide-page-after.png) |
 
+The concepts/quick-start guide slice (issue #132) has before/after captures at 1440×1000 in the
+same light theme, taken from the seeded end-to-end server in an anonymous browser. The guide
+index is captured full-page so every existing guide card stays visible; the article pages use
+the viewport. The baseline is `2e62909` (`main` before this slice), where `/guide` lists the
+seven existing guides without Concepts or Quick start and `/guide/concepts` and
+`/guide/quick-start` render the guide's not-found view; the after images are from this PR's
+head and show the two new cards and the rendered pages with the same seeded API data and
+unchanged shared chrome. The guide index, renderer, route and article sidebar are unchanged;
+only the registered page set and the Markdown content differ.
+
+| View | Before (`2e62909`) | After (this slice) |
+| --- | --- | --- |
+| Guide index (`/guide`) | [`guide-index-before.png`](ui/concepts-quick-start/guide-index-before.png) | [`guide-index-after.png`](ui/concepts-quick-start/guide-index-after.png) |
+| Core concepts (`/guide/concepts`) | [`concepts-before.png`](ui/concepts-quick-start/concepts-before.png) | [`concepts-after.png`](ui/concepts-quick-start/concepts-after.png) |
+| Quick start (`/guide/quick-start`) | [`quick-start-before.png`](ui/concepts-quick-start/quick-start-before.png) | [`quick-start-after.png`](ui/concepts-quick-start/quick-start-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
@@ -922,7 +949,14 @@ a request watcher asserting that reading the guide loads no third-party asset. T
 credential-validation page added by #135 is covered by the same spec: opening it from the
 index, the visible no-over-claim and synthetic-data warnings, the named untested dimensions in
 their real report titles, the `/docs` and `/openapi.json` link targets and following its
-playground link to `/playground`.
+playground link to `/playground`. The same spec covers the two #132 pages: the index cards
+for `Core concepts` and `Quick start`, the `/guide/concepts` definitions with their `/`,
+`/playground` and `/guide/quick-start` links and its reload, and the `/guide/quick-start`
+journey whose `/playground` link reaches the public validation form (`Run validation` and the
+`Rulebook` select enabled) without a sign-in page, plus axe-core scans and the
+no-third-party-asset watcher for both. `ui/src/guide.test.tsx` covers the two registry
+entries, the index cards, both pages' heading structure and their catalog, playground and
+cross-guide links.
 
 The credential-schemas guide (#134) is covered in the same spec: opening it from the index,
 its hosted/external guidance, pin and JSON Schema sections, the catalog and `/docs` links, and

@@ -13,6 +13,8 @@ import { expect, test, type Page } from '@playwright/test'
 const INDEX_HEADING = 'AttestBook product guide'
 const INTRODUCTION_HEADING = 'Introduction to AttestBook'
 const API_INTEGRATION_HEADING = 'API integration'
+const CONCEPTS_HEADING = 'Core concepts'
+const QUICK_START_HEADING = 'Quick start'
 
 function watchRequests(page: Page, baseURL: string | undefined): { external: string[] } {
   const origin = new URL(baseURL ?? 'http://127.0.0.1:4173').origin
@@ -61,6 +63,79 @@ test('opens the public product guide and follows the introduction link', async (
   await expect(page).not.toHaveURL(/\/login/)
   expect(external).toEqual([])
 
+  await expectNoA11yViolations(page)
+})
+
+test('reads the core concepts guide from the index and reaches both live routes', async ({
+  page,
+  baseURL,
+}) => {
+  const { external } = watchRequests(page, baseURL)
+
+  await page.goto('/guide')
+  const card = page.getByRole('link', { name: /^Core concepts/ })
+  await expect(card).toHaveAttribute('href', '/guide/concepts')
+  await card.click()
+
+  await expect(page).toHaveURL(/\/guide\/concepts$/)
+  await expect(page.getByRole('heading', { name: CONCEPTS_HEADING, level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Provider' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Content digest' })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Structural-validation evidence' })).toBeVisible()
+
+  const article = page.locator('.guide-article')
+  await expect(article.getByRole('link', { name: 'rulebook catalog' })).toHaveAttribute('href', '/')
+  await expect(article.getByRole('link', { name: 'validation playground' })).toHaveAttribute(
+    'href',
+    '/playground',
+  )
+  await expect(article.getByRole('link', { name: 'Quick start' }).first()).toHaveAttribute(
+    'href',
+    '/guide/quick-start',
+  )
+
+  await page.reload()
+  expect(new URL(page.url()).pathname).toBe('/guide/concepts')
+  await expect(page.getByRole('heading', { name: CONCEPTS_HEADING, level: 1 })).toBeVisible()
+
+  await expect(page).not.toHaveURL(/\/login/)
+  expect(external).toEqual([])
+  await expectNoA11yViolations(page)
+})
+
+test('reads the quick start guide and opens the public playground without a login', async ({
+  page,
+  baseURL,
+}) => {
+  const { external } = watchRequests(page, baseURL)
+
+  await page.goto('/guide')
+  const card = page.getByRole('link', { name: /^Quick start/ })
+  await expect(card).toHaveAttribute('href', '/guide/quick-start')
+  await card.click()
+
+  await expect(page).toHaveURL(/\/guide\/quick-start$/)
+  await expect(page.getByRole('heading', { name: QUICK_START_HEADING, level: 1 })).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Step 1: Find a public rulebook' })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Step 3: Validate a credential in the playground' }),
+  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'Limitations of this journey' })).toBeVisible()
+
+  const article = page.locator('.guide-article')
+  await expect(article.getByRole('link', { name: 'rulebook catalog' }).first()).toHaveAttribute(
+    'href',
+    '/',
+  )
+  await article.getByRole('link', { name: 'validation playground' }).first().click()
+
+  await expect(page).toHaveURL(/\/playground$/)
+  await expect(page.getByRole('heading', { name: 'Credential playground', level: 1 })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Run validation' })).toBeVisible()
+  await expect(page.getByLabel('Rulebook', { exact: true })).toBeEnabled()
+  await expect(page).not.toHaveURL(/\/login/)
+
+  expect(external).toEqual([])
   await expectNoA11yViolations(page)
 })
 
