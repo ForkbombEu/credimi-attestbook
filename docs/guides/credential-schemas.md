@@ -9,12 +9,12 @@ fetch or trust a remote schema merely because a rulebook references it.
 
 ## External URLs and schemas hosted by AttestBook
 
-An **external URL** is an absolute `https` URI that already serves the schema. Record it in the
-draft's `schemaReferences`, on an attestation format or at rulebook level, together with an
-optional W3C Subresource Integrity (SRI) pin. AttestBook stores the URI and the pin as supplied:
-it does not upload, convert or fetch the document just to render the detail view. External
-content can therefore change without AttestBook noticing, and a look-alike URL, an extra path
-segment or a query on the same host stays external.
+An **external URL** is an absolute `http(s)` URI that already serves the schema; prefer `https`.
+Record it in the draft's `schemaReferences`, on an attestation format or at rulebook level,
+together with an optional W3C Subresource Integrity (SRI) pin. AttestBook stores the URI and the
+pin as supplied: it does not upload, convert or fetch the document just to render the detail
+view. External content can therefore change without AttestBook noticing, and a look-alike URL,
+an extra path segment or a query on the same host stays external.
 
 A schema **hosted by AttestBook** is registered from its exact bytes. An authorized provider,
 or an administrator using the rulebook editor, sends `POST

@@ -145,6 +145,7 @@ test('reads the API integration guide from the index and reaches both references
   // The guide is public and self-contained: no sign-in and no third-party asset.
   await expect(page).not.toHaveURL(/\/login/)
   expect(external).toEqual([])
+  await expectNoA11yViolations(page)
 })
 
 test('opens the credential-schemas guide from the index', async ({ page, baseURL }) => {
