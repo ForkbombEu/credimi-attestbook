@@ -21,9 +21,11 @@ or an administrator using the rulebook editor, sends `POST
 /api/v1/schema-documents?kind=json_schema_2020_12` with the document as the request body.
 Registration needs a provider bearer token or the administrator session with its CSRF token,
 and anonymous registration is refused. Registration returns a permanent public URL, the
-lowercase hex SHA-256 digest of the bytes and a `sha256-<base64>` SRI pin. In the editor,
-**Upload/paste schema to AttestBook** performs this registration and inserts the returned
-values; **Use existing external URL** records an external reference without uploading anything.
+lowercase hex SHA-256 digest of the bytes and a `sha256-<base64>` SRI pin. The same endpoint
+registers SD-JWT VC type metadata with `kind=sd_jwt_vc_type_metadata`; this guide covers the
+JSON Schema profile. In the editor, **Upload/paste schema to AttestBook** performs this
+registration and inserts the returned values; **Use existing external URL** records an external
+reference without uploading anything.
 
 Both options produce the same draft members: a `formatIdentifier`, a `uri` and an optional
 `integrity` pin. The hosted or external label is derived from the stored-document association
@@ -38,7 +40,10 @@ login, so an issuer, verifier or documentation page can retrieve the exact bytes
 is byte-identical to what was registered and is never re-serialized. Its `Content-Digest`,
 `ETag` and metadata `integrity` all carry SHA-256 evidence for those bytes, and
 `Cache-Control: public, max-age=31536000, immutable` tells caches that the content never
-changes. A matching `If-None-Match` answers `304`; an unknown document answers `404`.
+changes. A matching `If-None-Match` answers `304`; an unknown document answers `404`. The
+public metadata routes `GET /api/v1/schema-documents/{id}` and
+`GET /api/v1/schema-documents?limit=50&offset=0` report the same URL, media type, digest and
+pin without naming the provider.
 
 Registration is idempotent in the useful direction: registering the same bytes again for the
 same provider returns the existing document and URL unchanged, while different bytes create a
