@@ -697,13 +697,13 @@ the unchanged Scalar reference.
 The API-integration guide slice (issue #137) adds one repository-owned Markdown page to the
 existing guide, so it changes no renderer, route or layout. The before/after captures are at
 1440×1000 in the same light theme, taken from the seeded end-to-end server in an anonymous
-browser. The baseline is `14a96cf` (`main` after the guide-navigation slice), where the guide
-index lists only the Introduction and `/guide/api-integration` renders the guide's not-found
-view; the after images are from this PR's head and show the new index card and the rendered
-API-integration page. Both revisions use the same seeded data and viewport, and only the guide
-content differs.
+browser. The baseline is `1299235` (`main` after the capture-explorer guide), where the guide
+index lists the Introduction and Capture explorer and `/guide/api-integration` renders the
+guide's not-found view; the after images are from this PR's head and show the new index card
+and the rendered API-integration page. Both revisions use the same seeded data and viewport,
+and only the guide content differs.
 
-| View | Before (`14a96cf`) | After (this slice) |
+| View | Before (`1299235`) | After (this slice) |
 | --- | --- | --- |
 | Guide index (`/guide`) | [`guide-index-before.png`](ui/api-integration/guide-index-before.png) | [`guide-index-after.png`](ui/api-integration/guide-index-after.png) |
 | API integration (`/guide/api-integration`) | [`api-integration-before.png`](ui/api-integration/api-integration-before.png) | [`api-integration-after.png`](ui/api-integration/api-integration-after.png) |
