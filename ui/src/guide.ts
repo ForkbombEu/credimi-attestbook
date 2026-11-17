@@ -15,6 +15,7 @@
 // the page with its assets and never fetches Markdown from a filesystem path, a
 // remote host or the API.
 
+import apiIntegrationMarkdown from '../../docs/guides/api-integration.md?raw'
 import captureExplorerMarkdown from '../../docs/guides/capture-explorer.md?raw'
 import introductionMarkdown from '../../docs/guides/introduction.md?raw'
 
@@ -39,6 +40,13 @@ export const GUIDE_DOCUMENTS: readonly GuideDocument[] = [
     description:
       'What the mock-backed capture explorer shows, how a capture is correlated with a rulebook version, and where the verified boundary ends.',
     markdown: captureExplorerMarkdown,
+  },
+  {
+    slug: 'api-integration',
+    title: 'API integration',
+    description:
+      'How to read the public API, choose a write credential and use the generated OpenAPI reference.',
+    markdown: apiIntegrationMarkdown,
   },
 ]
 

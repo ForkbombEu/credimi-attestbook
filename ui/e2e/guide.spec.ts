@@ -12,6 +12,7 @@ import { expect, test, type Page } from '@playwright/test'
 
 const INDEX_HEADING = 'AttestBook product guide'
 const INTRODUCTION_HEADING = 'Introduction to AttestBook'
+const API_INTEGRATION_HEADING = 'API integration'
 
 function watchRequests(page: Page, baseURL: string | undefined): { external: string[] } {
   const origin = new URL(baseURL ?? 'http://127.0.0.1:4173').origin
@@ -98,6 +99,53 @@ test('opens the capture explorer guide and reaches the mock-backed explorer', as
 
   await expect(page).not.toHaveURL(/\/login/)
   expect(external).toEqual([])
+})
+
+test('reads the API integration guide from the index and reaches both references', async ({
+  page,
+  baseURL,
+}) => {
+  const { external } = watchRequests(page, baseURL)
+
+  await page.goto('/guide')
+  const card = page.getByRole('link', { name: /^API integration/ })
+  await expect(card).toHaveAttribute('href', '/guide/api-integration')
+  await card.click()
+
+  await expect(page).toHaveURL(/\/guide\/api-integration$/)
+  await expect(page.getByRole('heading', { name: API_INTEGRATION_HEADING, level: 1 })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Provider bearer token for headless clients' }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Administrator browser session for UI writes' }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Subscription management is a separate credential' }),
+  ).toBeVisible()
+
+  const article = page.locator('.guide-article')
+  const openapiLinks = article.getByRole('link', { name: 'OpenAPI 3.1 contract' })
+  await expect(openapiLinks).toHaveCount(2)
+  await expect(openapiLinks.first()).toHaveAttribute('href', '/openapi.json')
+  const referenceLinks = article.getByRole('link', { name: 'interactive Scalar reference' })
+  await expect(referenceLinks).toHaveCount(2)
+  await expect(referenceLinks.first()).toHaveAttribute('href', '/docs')
+
+  // The linked contract is the stable OpenAPI 3.1 document, not an SPA page.
+  const openapiResponse = await page.request.get('/openapi.json')
+  expect(openapiResponse.status()).toBe(200)
+  const openapiDocument = (await openapiResponse.json()) as { openapi?: string }
+  expect(openapiDocument.openapi).toMatch(/^3\.1\./)
+
+  await page.reload()
+  expect(new URL(page.url()).pathname).toBe('/guide/api-integration')
+  await expect(page.getByRole('heading', { name: API_INTEGRATION_HEADING, level: 1 })).toBeVisible()
+
+  // The guide is public and self-contained: no sign-in and no third-party asset.
+  await expect(page).not.toHaveURL(/\/login/)
+  expect(external).toEqual([])
+  await expectNoA11yViolations(page)
 })
 
 test('opens the API reference from the guide with a full page load', async ({ page }) => {

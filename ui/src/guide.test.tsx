@@ -50,6 +50,7 @@ describe('bundled guide registry', () => {
   test('resolves only a registered slug and never treats it as a file path', () => {
     expect(findGuide('introduction')).not.toBeNull()
     expect(findGuide('capture-explorer')).not.toBeNull()
+    expect(findGuide('api-integration')).not.toBeNull()
     expect(findGuide('../../package.json')).toBeNull()
     expect(findGuide('/etc/passwd')).toBeNull()
     expect(findGuide('introduction.md')).toBeNull()
@@ -277,6 +278,57 @@ describe('product guide views', () => {
         ).toBe(true)
       }
     }
+  })
+
+  test('renders the API integration guide with both write credentials and references', async () => {
+    const onNavigate = vi.fn()
+    const { container } = render(<GuideEntryPage slug="api-integration" onNavigate={onNavigate} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'API integration' })).toBeVisible()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Public reads need no credential' }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole('heading', {
+        level: 3,
+        name: 'Provider bearer token for headless clients',
+      }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole('heading', {
+        level: 3,
+        name: 'Administrator browser session for UI writes',
+      }),
+    ).toBeVisible()
+    expect(
+      screen.getByRole('heading', {
+        level: 2,
+        name: 'Subscription management is a separate credential',
+      }),
+    ).toBeVisible()
+    expect(document.title).toBe('API integration · AttestBook')
+
+    const article = container.querySelector('.guide-article')
+    expect(article).not.toBeNull()
+    const openapiLinks = within(article as HTMLElement).getAllByRole('link', {
+      name: 'OpenAPI 3.1 contract',
+    })
+    expect(openapiLinks).toHaveLength(2)
+    for (const link of openapiLinks) {
+      expect(link).toHaveAttribute('href', '/openapi.json')
+    }
+    const referenceLinks = within(article as HTMLElement).getAllByRole('link', {
+      name: 'interactive Scalar reference',
+    })
+    expect(referenceLinks).toHaveLength(2)
+    for (const link of referenceLinks) {
+      expect(link).toHaveAttribute('href', '/docs')
+    }
+
+    // A generated reference is a server document, so it gets a full page load
+    // instead of the in-app router (which would fall back to the catalog).
+    await userEvent.setup().click(openapiLinks[0]!)
+    expect(onNavigate).not.toHaveBeenCalled()
   })
 
   test('shows an explicit not-found view for an unknown slug instead of the catalog', async () => {

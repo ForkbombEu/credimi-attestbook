@@ -694,6 +694,20 @@ the unchanged Scalar reference.
 | Introduction, 390 px | [`guide-introduction-narrow-before.png`](ui/guide-navigation/guide-introduction-narrow-before.png) | [`guide-introduction-narrow-after.png`](ui/guide-navigation/guide-introduction-narrow-after.png) |
 | API reference (`/docs`) | [`docs-before.png`](ui/guide-navigation/docs-before.png) | [`docs-after.png`](ui/guide-navigation/docs-after.png) |
 
+The API-integration guide slice (issue #137) adds one repository-owned Markdown page to the
+existing guide, so it changes no renderer, route or layout. The before/after captures are at
+1440×1000 in the same light theme, taken from the seeded end-to-end server in an anonymous
+browser. The baseline is `1299235` (`main` after the capture-explorer guide), where the guide
+index lists the Introduction and Capture explorer and `/guide/api-integration` renders the
+guide's not-found view; the after images are from this PR's head and show the new index card
+and the rendered API-integration page. Both revisions use the same seeded data and viewport,
+and only the guide content differs.
+
+| View | Before (`1299235`) | After (this slice) |
+| --- | --- | --- |
+| Guide index (`/guide`) | [`guide-index-before.png`](ui/api-integration/guide-index-before.png) | [`guide-index-after.png`](ui/api-integration/guide-index-after.png) |
+| API integration (`/guide/api-integration`) | [`api-integration-before.png`](ui/api-integration/api-integration-before.png) | [`api-integration-after.png`](ui/api-integration/api-integration-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
@@ -776,7 +790,8 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   deep-link views, the unknown-slug not-found view without a catalog fallback, the
   `Catalog / Guides` and `Catalog / Guides / <page>` breadcrumbs, the registry-derived guide
   cards and sidebar order, the current-page `aria-current`, the API-reference panel and
-  sidebar links, and axe-core checks for all three views;
+  sidebar links, the API-integration page's bearer-token and administrator-session sections
+  with its `/openapi.json` and `/docs` links, and axe-core checks for all three views;
 - the shared header's documentation navigation (`ui/src/components/Layout.test.tsx`): the
   in-app `Guides` link, the plain `/docs` `API reference` link that the SPA router never
   handles, and `aria-current="page"` moving with the current view;
@@ -854,10 +869,12 @@ no-horizontal-overflow check.
 
 The product guide is covered by `ui/e2e/guide.spec.ts` against the production Vite build: the
 `/guide` index, following its Introduction link to `/guide/introduction` with the document
-heading, body heading, code block and `/docs` link visible, following the API-reference link
-to the full Scalar page, a reload that keeps the deep link on the same document, an accessible
-not-found view for an unknown slug with no catalog fallback, and a request watcher asserting
-that reading the guide loads no third-party asset.
+heading, body heading, code block and `/docs` link visible, following the API-integration card
+to `/guide/api-integration` with its bearer-token and administrator-session sections, its
+`/openapi.json` and `/docs` links and the served OpenAPI 3.1 document, following the
+API-reference link to the full Scalar page, reloads that keep both guide deep links on the
+same document, an accessible not-found view for an unknown slug with no catalog fallback, and
+a request watcher asserting that reading the guide loads no third-party asset.
 
 The documentation navigation (#131) is covered by the same spec and
 `ui/e2e/docs.spec.ts`: opening `/guide` from the catalog's primary `Guides` link, the
