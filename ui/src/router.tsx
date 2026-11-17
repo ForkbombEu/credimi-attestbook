@@ -1,16 +1,20 @@
 // Small client-side router for the standalone UI (issues #36–#38, #90).
 //
 // The server serves the built entry document for `/`, `/rulebooks/*`,
-// `/playground`, `/captures/*` and `/login`, so the browser path names the view
-// and a deep link (or a reload) still works. The rulebook editor is under
-// `/rulebooks/new` and `/rulebooks/<id>/edit`; any other path falls back to the
-// catalog rather than rendering an empty page.
+// `/guide/*`, `/playground`, `/captures/*` and `/login`, so the browser path
+// names the view and a deep link (or a reload) still works. The rulebook editor
+// is under `/rulebooks/new` and `/rulebooks/<id>/edit`; the product guide is
+// under `/guide` and `/guide/<slug>`, where an unknown slug renders the guide's
+// own not-found view instead of falling back to the catalog. Any other path
+// falls back to the catalog rather than rendering an empty page.
 
 import type { AnchorHTMLAttributes, MouseEvent } from 'react'
 import { useCallback, useEffect, useState } from 'react'
 
 export type Route =
   | { readonly name: 'catalog' }
+  | { readonly name: 'guide' }
+  | { readonly name: 'guide-page'; readonly slug: string }
   | { readonly name: 'playground' }
   | { readonly name: 'captures' }
   | { readonly name: 'capture'; readonly captureId: string }
@@ -20,6 +24,7 @@ export type Route =
   | { readonly name: 'login' }
 
 export const CATALOG_PATH = '/'
+export const GUIDE_PATH = '/guide'
 export const PLAYGROUND_PATH = '/playground'
 export const CAPTURES_PATH = '/captures'
 export const NEW_RULEBOOK_PATH = '/rulebooks/new'
@@ -27,6 +32,10 @@ export const LOGIN_PATH = '/login'
 
 export function capturePath(captureId: string): string {
   return `${CAPTURES_PATH}/${encodeURIComponent(captureId)}`
+}
+
+export function guidePath(slug: string): string {
+  return `${GUIDE_PATH}/${encodeURIComponent(slug)}`
 }
 
 export function rulebookPath(rulebookId: string): string {
@@ -54,6 +63,20 @@ export function parseRoute(pathname: string): Route {
   }
   if (path === LOGIN_PATH) {
     return { name: 'login' }
+  }
+  if (path === GUIDE_PATH) {
+    return { name: 'guide' }
+  }
+  // A guide address is a single bundled slug. A missing, malformed or nested
+  // one still reaches the guide's not-found view rather than the catalog, so a
+  // stale link never looks like the rulebook catalog.
+  const guideMatch = /^\/guide\/(.+)$/.exec(path)
+  if (guideMatch?.[1] !== undefined) {
+    try {
+      return { name: 'guide-page', slug: decodeURIComponent(guideMatch[1]) }
+    } catch {
+      return { name: 'guide-page', slug: guideMatch[1] }
+    }
   }
   const captureMatch = /^\/captures\/([^/]+)$/.exec(path)
   if (captureMatch?.[1] !== undefined) {

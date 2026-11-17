@@ -125,6 +125,16 @@ describe('built web UI', () => {
     }
   })
 
+  test('serves the UI entry document for the client-routed product guide', async () => {
+    for (const path of ['/guide', '/guide/', '/guide/introduction', '/guide/missing-slug']) {
+      const response = await uiApp.request(path)
+
+      expect(response.status, path).toBe(200)
+      expect(response.headers.get('content-type'), path).toContain('text/html')
+      expect(await response.text(), path).toContain('<title>AttestBook</title>')
+    }
+  })
+
   test('serves the UI entry document for the client-routed capture explorer', async () => {
     for (const path of ['/captures', '/captures/', '/captures/e2e-issued-credential-capture']) {
       const response = await uiApp.request(path)
@@ -200,5 +210,9 @@ describe('built web UI', () => {
     const deepLink = await createApp().request('/rulebooks/00000000-0000-4000-8000-000000000000')
     expect(deepLink.status).toBe(404)
     expect(deepLink.headers.get('content-type')).toContain('application/json')
+
+    const guide = await createApp().request('/guide/introduction')
+    expect(guide.status).toBe(404)
+    expect(guide.headers.get('content-type')).toContain('application/json')
   })
 })

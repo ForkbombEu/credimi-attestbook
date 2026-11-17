@@ -5,9 +5,11 @@ import { afterEach, describe, expect, test, vi } from 'vitest'
 import {
   AppLink,
   CAPTURES_PATH,
+  GUIDE_PATH,
   LOGIN_PATH,
   NEW_RULEBOOK_PATH,
   capturePath,
+  guidePath,
   parseRoute,
   rulebookEditorPath,
   rulebookPath,
@@ -98,6 +100,31 @@ describe('parseRoute', () => {
     expect(parseRoute('/login/')).toEqual({ name: 'login' })
     expect(parseRoute('/login/extra')).toEqual({ name: 'catalog' })
     expect(LOGIN_PATH).toBe('/login')
+  })
+
+  test('maps the product guide index and its bundled page slugs', () => {
+    expect(parseRoute('/guide')).toEqual({ name: 'guide' })
+    expect(parseRoute('/guide/')).toEqual({ name: 'guide' })
+    expect(parseRoute('/guide/introduction')).toEqual({
+      name: 'guide-page',
+      slug: 'introduction',
+    })
+    expect(parseRoute('/guide/introduction/')).toEqual({
+      name: 'guide-page',
+      slug: 'introduction',
+    })
+    expect(parseRoute('/guide/a%20b')).toEqual({ name: 'guide-page', slug: 'a b' })
+    // An unknown, nested or malformed slug stays inside the guide's own
+    // not-found view rather than falling back to the catalog.
+    expect(parseRoute('/guide/missing')).toEqual({ name: 'guide-page', slug: 'missing' })
+    expect(parseRoute('/guide/a/b')).toEqual({ name: 'guide-page', slug: 'a/b' })
+    expect(parseRoute('/guide/%E0%A4%A')).toEqual({
+      name: 'guide-page',
+      slug: '%E0%A4%A',
+    })
+    expect(GUIDE_PATH).toBe('/guide')
+    expect(guidePath('introduction')).toBe('/guide/introduction')
+    expect(guidePath('a b')).toBe('/guide/a%20b')
   })
 })
 

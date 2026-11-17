@@ -7,6 +7,9 @@ RUN bun install --frozen-lockfile
 COPY tsconfig.json ./
 COPY src ./src
 COPY migrations ./migrations
+# The UI bundles the repository-owned product guide Markdown at build time, so
+# the guide sources must be in the build stage as well as `ui/`.
+COPY docs/guides ./docs/guides
 COPY ui ./ui
 RUN bun run build
 
