@@ -85,8 +85,10 @@ A frozen draft version is a snapshot of the working copy at freeze time, but it
 is still a draft: it can be refreshed to the current content, and it can be
 published. If the working copy changed after the freeze, publishing with a stale
 digest is refused as a conflict; the provider must refresh the draft version
-first (`docs/registry.md` §6.1). A published rulebook that is edited reopens as
-`draft`, while its published versions stay retrievable.
+first (`docs/registry.md` §6.1). A published rulebook's working copy cannot be
+edited directly (the change is refused as `immutable`); creating the next draft
+version reopens the working copy as `draft`, while its published versions stay
+retrievable.
 
 ## Published and historical versions
 
@@ -149,17 +151,19 @@ This build executes the four structural dimensions and reports their evidence;
 cryptographic verification and issuer trust are `NOT_TESTED`, and protocol
 conformance and interoperability are `NOT_APPLICABLE` to a single credential
 artifact. The overall status is `FAIL` when a dimension fails, `INCONCLUSIVE`
-when warnings remain and nothing failed, and `NOT_TESTED` when an applicable
-dimension did not execute. Because cryptographic verification and issuer trust
-are always applicable and never executed here, an overall `PASS` is not
-reachable in this structural-only slice (`docs/registry.md` §7,
-`docs/standards.md` §5.1).
+when a dimension is inconclusive and nothing failed, and `NOT_TESTED` when an
+applicable dimension did not execute. Because cryptographic verification and
+issuer trust are always applicable and never executed here, an overall `PASS`
+is not reachable in this structural-only slice (`docs/registry.md` §7 and
+`src/validation/status.ts`).
 
 A structural pass never implies cryptographic validity, issuer trust, protocol
 conformance or interoperability. The result states its limitations, the pinned
 version and digest, the schema references it applied and the individual
-violations, so a reader can see what was actually checked. When a schema
-document is needed and not supplied, the schema dimension stays `NOT_TESTED`
+violations, so a reader can see what was actually checked. A schema reference
+whose URI is this deployment's canonical hosted URL is resolved from
+AttestBook's immutable store and applied; a caller-supplied document is used the
+same way. When neither is available, the schema dimension stays `NOT_TESTED`
 rather than being reported as passed.
 
 ## Standards expectations versus the product API

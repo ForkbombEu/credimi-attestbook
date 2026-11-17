@@ -302,6 +302,8 @@ describe('product guide views', () => {
     // The guide names the standards/product boundary instead of claiming conformance.
     expect(article).toHaveTextContent('not the TS11 catalogue API')
     expect(article).toHaveTextContent('an overall PASS is not reachable')
+    expect(article).toHaveTextContent('creating the next draft version reopens the working copy')
+    expect(article).not.toHaveTextContent('that is edited reopens')
     expect(document.title).toBe('Core concepts · AttestBook')
   })
 
@@ -343,7 +345,9 @@ describe('product guide views', () => {
     expect(links.getByRole('link', { name: 'playground' })).toHaveAttribute('href', '/playground')
 
     expect(article).toHaveTextContent('Overall PASS is not reachable in this build.')
-    expect(article).toHaveTextContent('The playground supplies no schema documents.')
+    expect(article).toHaveTextContent('The playground supplies no schema documents of its own.')
+    expect(article).toHaveTextContent("is resolved from AttestBook's immutable store and applied")
+    expect(article).not.toHaveTextContent('even when the pinned rulebook has schema references')
     expect(document.title).toBe('Quick start · AttestBook')
   })
 

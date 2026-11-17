@@ -112,10 +112,15 @@ be mistaken for the new input (`docs/ui.md` §3.3).
 - **Overall PASS is not reachable in this build.** Cryptographic verification
   and issuer trust are always applicable and never executed, so a run can be
   `FAIL`, `INCONCLUSIVE` or `NOT_TESTED`, never `PASS`.
-- **The playground supplies no schema documents.** The schema
-  validation dimension therefore stays `NOT_TESTED` there, even when the pinned
-  rulebook has schema references. The validation API can accept caller-supplied
-  schema documents, but this form does not collect them.
+- **The playground supplies no schema documents of its own.** For a schema
+  reference to an external URI, the schema validation dimension stays
+  `NOT_TESTED`, because the form does not collect caller-supplied schema
+  documents (the validation API accepts them). A reference whose URI is this
+  deployment's canonical hosted URL (`/api/v1/schema-documents/<id>/content`
+  under the configured `PUBLIC_BASE_URL`) is resolved from AttestBook's
+  immutable store and applied, so schema validation can execute and report
+  `PASS` or `FAIL`. The report's schema-reference list says whether each
+  reference was applied (`docs/registry.md` §6.6–§6.7).
 - **A structural result is not a compliance claim.** AttestBook does not claim
   cryptographic validity, issuer trust, protocol conformance, interoperability
   or ETSI conformance from a structural pass.
@@ -136,8 +141,9 @@ not the TS11 catalogue API (`docs/standards.md` §6).
   compatibility are **Not tested**. No rulebook-level compatibility result is
   persisted, and FR-010/FR-012 forbid inferring one.
 - Only the four structural dimensions execute: credential parsing, format
-  recognition, schema validation (when schema documents are supplied) and
-  attestation-specific constraints. Cryptographic verification, issuer trust,
+  recognition, schema validation (when a hosted schema document is resolved, or
+  when schema documents are supplied through the API) and attestation-specific
+  constraints. Cryptographic verification, issuer trust,
   protocol conformance and interoperability are not executed by this build.
 - The catalog list, search and filters operate on the loaded page, not on the
   whole server-side catalog.
