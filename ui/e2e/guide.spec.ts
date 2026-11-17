@@ -63,6 +63,43 @@ test('opens the public product guide and follows the introduction link', async (
   await expectNoA11yViolations(page)
 })
 
+test('opens the capture explorer guide and reaches the mock-backed explorer', async ({
+  page,
+  baseURL,
+}) => {
+  const { external } = watchRequests(page, baseURL)
+
+  const response = await page.goto('/guide')
+  expect(response?.status()).toBe(200)
+
+  await page
+    .getByRole('list', { name: 'Product guides' })
+    .getByRole('link', { name: /Capture explorer/ })
+    .click()
+
+  await expect(page).toHaveURL(/\/guide\/capture-explorer$/)
+  await expect(page.getByRole('heading', { name: 'Capture explorer', level: 1 })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'Mock-backed evidence is labelled, not implied' }),
+  ).toBeVisible()
+
+  // The guide names the mock boundary and links to the explorer it documents.
+  const article = page.locator('.guide-article')
+  await expect(article).toContainText('Mock-backed')
+  await expect(article).toContainText('not implemented and are not claimed')
+  await expect(
+    article.getByRole('link', { name: 'the capture explorer', exact: true }),
+  ).toHaveAttribute('href', '/captures')
+
+  await article.getByRole('link', { name: 'the capture explorer', exact: true }).click()
+  await expect(page).toHaveURL(/\/captures$/)
+  await expect(page.getByRole('heading', { name: 'Capture explorer', level: 1 })).toBeVisible()
+  await expect(page.getByText('Mock-backed explorer')).toBeVisible()
+
+  await expect(page).not.toHaveURL(/\/login/)
+  expect(external).toEqual([])
+})
+
 test('opens the API reference from the guide with a full page load', async ({ page }) => {
   await page.goto('/guide/introduction')
   await expect(page.getByRole('heading', { name: INTRODUCTION_HEADING, level: 1 })).toBeVisible()

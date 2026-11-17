@@ -15,6 +15,7 @@
 // the page with its assets and never fetches Markdown from a filesystem path, a
 // remote host or the API.
 
+import captureExplorerMarkdown from '../../docs/guides/capture-explorer.md?raw'
 import introductionMarkdown from '../../docs/guides/introduction.md?raw'
 
 export interface GuideDocument {
@@ -31,6 +32,13 @@ export const GUIDE_DOCUMENTS: readonly GuideDocument[] = [
     description:
       'What AttestBook does, how to find and validate rulebooks, and where the product API contract lives.',
     markdown: introductionMarkdown,
+  },
+  {
+    slug: 'capture-explorer',
+    title: 'Capture explorer',
+    description:
+      'What the mock-backed capture explorer shows, how a capture is correlated with a rulebook version, and where the verified boundary ends.',
+    markdown: captureExplorerMarkdown,
   },
 ]
 
