@@ -41,7 +41,7 @@ publication event feed pages with an opaque `cursor` instead. `201` responses ca
 Every error, including an unknown route, uses one envelope:
 
 ```json
-{ "error": { "code": "not_found", "message": "No route matches." } }
+{ "error": { "code": "not_found", "message": "No route matches the request path." } }
 ```
 
 `code` is stable and machine-readable, `message` is safe to display and never contains a
@@ -111,9 +111,10 @@ detail, validation playground and capture explorer stay anonymous.
    projection. `POST /api/v1/auth/logout` revokes the session server-side and needs the CSRF
    token when a live session cookie is present.
 
-Login requires a JSON body and rejects a foreign `Origin`/`Sec-Fetch-Site`; repeated failures
-are rate limited. The cookie is a browser session, not an API token: do not copy it into an
-`Authorization` header, and do not store a bearer token in the browser to avoid it.
+Login requires a JSON body and, like logout, rejects a foreign `Origin`/`Sec-Fetch-Site` with
+`403 forbidden`; repeated login failures are rate limited. The cookie is a browser session, not
+an API token: do not copy it into an `Authorization` header, and do not store a bearer token in
+the browser to avoid it.
 
 ### Which credential to use
 
