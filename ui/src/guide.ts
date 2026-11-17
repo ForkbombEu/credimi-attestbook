@@ -17,6 +17,7 @@
 
 import apiIntegrationMarkdown from '../../docs/guides/api-integration.md?raw'
 import captureExplorerMarkdown from '../../docs/guides/capture-explorer.md?raw'
+import credentialSchemasMarkdown from '../../docs/guides/credential-schemas.md?raw'
 import credentialValidationMarkdown from '../../docs/guides/credential-validation.md?raw'
 import introductionMarkdown from '../../docs/guides/introduction.md?raw'
 import publicationEventsMarkdown from '../../docs/guides/publication-events.md?raw'
@@ -71,6 +72,13 @@ export const GUIDE_DOCUMENTS: readonly GuideDocument[] = [
     description:
       'Take a rulebook from a signed-in draft through validation, readiness and immutable publication.',
     markdown: rulebookAuthoringMarkdown,
+  },
+  {
+    slug: 'credential-schemas',
+    title: 'Credential schemas',
+    description:
+      'Attach an external schema URL or register a schema hosted by AttestBook, and read its integrity pins in rulebook detail.',
+    markdown: credentialSchemasMarkdown,
   },
 ]
 
