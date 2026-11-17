@@ -473,6 +473,30 @@ describe('app catalog and detail navigation', () => {
     ).toHaveAttribute('aria-current', 'page')
   })
 
+  test('renders a deep-linked credential validation guide with its playground link', async () => {
+    installFetch()
+    window.history.replaceState({}, '', '/guide/credential-validation')
+
+    const { container } = render(<App />)
+
+    expect(
+      await screen.findByRole('heading', { name: 'Credential validation' }),
+    ).toBeInTheDocument()
+    const article = container.querySelector('.guide-article') as HTMLElement
+    expect(within(article).getByRole('link', { name: 'Validation playground' })).toHaveAttribute(
+      'href',
+      '/playground',
+    )
+    expect(
+      screen.getByText(/does not establish complete wallet or EUDI compliance/),
+    ).toBeInTheDocument()
+    expect(
+      within(screen.getByRole('navigation', { name: 'Product guides' })).getByRole('link', {
+        name: 'Credential validation',
+      }),
+    ).toHaveAttribute('aria-current', 'page')
+  })
+
   test('opens the administrator sign-in page from the shared header', async () => {
     const user = userEvent.setup()
     installFetch()

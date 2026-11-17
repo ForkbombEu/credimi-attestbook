@@ -395,6 +395,41 @@ describe('product guide views', () => {
     await expectNoA11yViolations(container)
   })
 
+  test('renders the credential validation guide with its no-over-claim warnings', () => {
+    const { container } = render(
+      <GuideEntryPage slug="credential-validation" onNavigate={vi.fn()} />,
+    )
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Credential validation' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 2, name: 'Run the validation' })).toBeVisible()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'What this evidence does not establish' }),
+    ).toBeVisible()
+
+    const article = container.querySelector('.guide-article') as HTMLElement
+    expect(within(article).getByRole('link', { name: 'Validation playground' })).toHaveAttribute(
+      'href',
+      '/playground',
+    )
+    expect(
+      within(article).getByText(/does not establish complete wallet or EUDI compliance/),
+    ).toBeVisible()
+    for (const statusLabel of ['Not tested', 'Inconclusive']) {
+      const labels = within(article).getAllByText(statusLabel, { selector: 'strong' })
+      expect(labels.length).toBeGreaterThan(0)
+      expect(labels[0]).toBeVisible()
+    }
+    for (const dimension of [
+      'Cryptographic verification',
+      'Issuer trust',
+      'Protocol conformance',
+      'End-to-end interoperability',
+    ]) {
+      expect(within(article).getAllByText(dimension, { exact: true }).length).toBeGreaterThan(0)
+    }
+    expect(document.title).toBe('Credential validation · AttestBook')
+  })
+
   test('shows an explicit not-found view for an unknown slug instead of the catalog', async () => {
     const onNavigate = vi.fn()
     render(<GuideEntryPage slug="no-such-guide" onNavigate={onNavigate} />)
@@ -446,6 +481,16 @@ describe('product guide views', () => {
 
     await userEvent.setup().click(link)
     expect(onNavigate).toHaveBeenCalledWith('/guide/capture-explorer')
+  })
+})
+
+describe('credential validation guide links', () => {
+  test('links to the playground and the API documents', () => {
+    const markdown = findGuide('credential-validation')?.markdown ?? ''
+
+    expect(markdown).toContain('](/playground)')
+    expect(markdown).toContain('](/docs)')
+    expect(markdown).toContain('](/openapi.json)')
   })
 })
 
