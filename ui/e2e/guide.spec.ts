@@ -240,6 +240,7 @@ test('opens the credential validation guide and follows its playground link', as
   expect(external).toEqual([])
 
   await expectNoA11yViolations(page)
+})
 
 test('keeps the publication-events guide readable at 390 px', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
