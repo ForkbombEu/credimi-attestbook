@@ -20,6 +20,7 @@ import captureExplorerMarkdown from '../../docs/guides/capture-explorer.md?raw'
 import credentialValidationMarkdown from '../../docs/guides/credential-validation.md?raw'
 import introductionMarkdown from '../../docs/guides/introduction.md?raw'
 import publicationEventsMarkdown from '../../docs/guides/publication-events.md?raw'
+import rulebookAuthoringMarkdown from '../../docs/guides/rulebook-authoring.md?raw'
 
 export interface GuideDocument {
   readonly slug: string
@@ -63,6 +64,13 @@ export const GUIDE_DOCUMENTS: readonly GuideDocument[] = [
     description:
       'Validate a credential against a pinned rulebook version in the playground, and read its structural evidence without over-claiming.',
     markdown: credentialValidationMarkdown,
+  },
+  {
+    slug: 'rulebook-authoring',
+    title: 'Rulebook authoring',
+    description:
+      'Take a rulebook from a signed-in draft through validation, readiness and immutable publication.',
+    markdown: rulebookAuthoringMarkdown,
   },
 ]
 

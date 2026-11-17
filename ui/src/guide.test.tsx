@@ -8,7 +8,7 @@ import { GuideMarkdown } from './GuideMarkdown'
 import { GuideEntryPage, GuideIndexPage } from './GuidePage'
 import { findGuide, GUIDE_DOCUMENTS } from './guide'
 import { parseInline, parseMarkdown, safeLinkHref } from './markdown'
-import { isClientRoute } from './router'
+import { isClientRoute, parseRoute } from './router'
 import { expectNoA11yViolations } from './test/a11y'
 import { makeValidationResult } from './test/fixtures'
 
@@ -624,5 +624,61 @@ describe('guide navigation', () => {
     const nav = screen.getByRole('navigation', { name: 'Product guides' })
     expect(within(nav).getByRole('link', { name: 'Guides overview' })).toBeVisible()
     expect(nav.querySelectorAll('[aria-current="page"]')).toHaveLength(0)
+  })
+})
+
+describe('rulebook authoring guide', () => {
+  test('is registered at the public slug and route used by the guide navigation', () => {
+    const guide = findGuide('rulebook-authoring')
+    expect(guide).not.toBeNull()
+    expect(guide?.title).toBe('Rulebook authoring')
+    expect(guide?.description.trim()).not.toBe('')
+    expect(parseRoute('/guide/rulebook-authoring')).toEqual({
+      name: 'guide-page',
+      slug: 'rulebook-authoring',
+    })
+    expect(isClientRoute('/guide/rulebook-authoring')).toBe(true)
+  })
+
+  test('renders the draft-to-publication workflow and working editor and catalog links', async () => {
+    const onNavigate = vi.fn()
+    const { container } = render(
+      <GuideEntryPage slug="rulebook-authoring" onNavigate={onNavigate} />,
+    )
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Rulebook authoring' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 2, name: 'Sign in' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 2, name: 'Freeze a draft version' })).toBeVisible()
+    expect(
+      screen.getByRole('heading', { level: 2, name: 'Check readiness and publish' }),
+    ).toBeVisible()
+
+    const article = container.querySelector<HTMLElement>('.guide-article')
+    expect(article).not.toBeNull()
+    const articleScope = within(article as HTMLElement)
+
+    const editor = articleScope.getByRole('link', { name: 'new rulebook editor' })
+    expect(editor).toHaveAttribute('href', '/rulebooks/new')
+    await userEvent.setup().click(editor)
+    expect(onNavigate).toHaveBeenCalledWith('/rulebooks/new')
+
+    const catalogLinks = articleScope.getAllByRole('link', { name: 'rulebook catalog' })
+    expect(catalogLinks.length).toBeGreaterThan(0)
+    for (const link of catalogLinks) {
+      expect(link).toHaveAttribute('href', '/')
+    }
+    expect(articleScope.getByRole('link', { name: 'administrator sign-in page' })).toHaveAttribute(
+      'href',
+      '/login',
+    )
+    const apiLinks = articleScope.getAllByRole('link', { name: 'API reference' })
+    expect(apiLinks.length).toBeGreaterThan(0)
+    for (const link of apiLinks) {
+      expect(link).toHaveAttribute('href', '/docs')
+    }
+    // Published snapshots are immutable, and the guide does not claim conformance.
+    expect(article as HTMLElement).toHaveTextContent(/immutable/)
+    expect(article as HTMLElement).toHaveTextContent(/not a conformance claim/)
+    expect(document.title).toBe('Rulebook authoring · AttestBook')
   })
 })
