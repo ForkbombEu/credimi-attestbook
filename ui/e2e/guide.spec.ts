@@ -186,6 +186,62 @@ test('opens the publication-events guide and follows the API reference', async (
   await expect(page.getByRole('heading', { name: 'AttestBook product API' })).toBeVisible()
 })
 
+test('opens the credential validation guide and follows its playground link', async ({
+  page,
+  baseURL,
+}) => {
+  const { external } = watchRequests(page, baseURL)
+
+  await page.goto('/guide')
+  await page.getByRole('link', { name: /Credential validation/ }).click()
+
+  await expect(page).toHaveURL(/\/guide\/credential-validation$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Credential validation' })).toBeVisible()
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Product guides' })
+      .getByRole('link', { name: 'Credential validation' }),
+  ).toHaveAttribute('aria-current', 'page')
+
+  const article = page.locator('.guide-article')
+  await expect(
+    article.getByText('Playground evidence does not establish complete wallet or EUDI compliance.'),
+  ).toBeVisible()
+  await expect(article.getByText('Not tested', { exact: true }).first()).toBeVisible()
+  await expect(article.getByText('Inconclusive', { exact: true }).first()).toBeVisible()
+  for (const dimension of [
+    'Cryptographic verification',
+    'Issuer and trust-policy validation',
+    'Protocol conformance',
+    'End-to-end interoperability',
+  ]) {
+    await expect(article.getByText(dimension, { exact: true }).first()).toBeVisible()
+  }
+
+  // Both API destinations the page names are real served documents.
+  await expect(article.getByRole('link', { name: 'API reference' })).toHaveAttribute(
+    'href',
+    '/docs',
+  )
+  await expect(article.getByRole('link', { name: 'OpenAPI document' })).toHaveAttribute(
+    'href',
+    '/openapi.json',
+  )
+  expect((await page.request.get('/openapi.json')).status()).toBe(200)
+
+  // The workflow link reaches the real playground view through the SPA router.
+  const playgroundLink = article.getByRole('link', { name: 'Validation playground' })
+  await expect(playgroundLink).toHaveAttribute('href', '/playground')
+  await playgroundLink.click()
+  await expect(page).toHaveURL(/\/playground$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Credential playground' })).toBeVisible()
+
+  await expect(page).not.toHaveURL(/\/login/)
+  expect(external).toEqual([])
+
+  await expectNoA11yViolations(page)
+})
+
 test('keeps the publication-events guide readable at 390 px', async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto('/guide/publication-events')

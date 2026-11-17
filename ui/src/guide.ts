@@ -17,6 +17,7 @@
 
 import apiIntegrationMarkdown from '../../docs/guides/api-integration.md?raw'
 import captureExplorerMarkdown from '../../docs/guides/capture-explorer.md?raw'
+import credentialValidationMarkdown from '../../docs/guides/credential-validation.md?raw'
 import introductionMarkdown from '../../docs/guides/introduction.md?raw'
 import publicationEventsMarkdown from '../../docs/guides/publication-events.md?raw'
 
@@ -55,6 +56,13 @@ export const GUIDE_DOCUMENTS: readonly GuideDocument[] = [
     description:
       'Follow published rulebook versions through the public event feed and signed webhook notifications.',
     markdown: publicationEventsMarkdown,
+  },
+  {
+    slug: 'credential-validation',
+    title: 'Credential validation',
+    description:
+      'Validate a credential against a pinned rulebook version in the playground, and read its structural evidence without over-claiming.',
+    markdown: credentialValidationMarkdown,
   },
 ]
 

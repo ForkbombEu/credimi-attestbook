@@ -721,6 +721,19 @@ sidebar and footer are unchanged.
 | Guide index (`/guide`) | [`guide-index-before.png`](ui/publication-events/guide-index-before.png) | [`guide-index-after.png`](ui/publication-events/guide-index-after.png) |
 | Publication events (`/guide/publication-events`) | [`guide-page-before.png`](ui/publication-events/guide-page-before.png) | [`guide-page-after.png`](ui/publication-events/guide-page-after.png) |
 
+The credential-validation guide slice (issue #135) has before/after captures at 1440×1000 in
+the same light theme, taken from the seeded end-to-end server in an anonymous browser. The
+baseline is `b52c606` (`main` after the publication-events guide), where the guide index lists
+the Introduction, Capture explorer, API integration and Publication events cards and
+`/guide/credential-validation` renders the guide's not-found view; the after images are from
+this PR's head and show the same index with the new card and the rendered credential-validation
+guide. No other view changes.
+
+| View | Before (`b52c606`) | After (this slice) |
+| --- | --- | --- |
+| Guide index (`/guide`) | [`guide-before.png`](ui/credential-validation/guide-before.png) | [`guide-after.png`](ui/credential-validation/guide-after.png) |
+| Credential validation (`/guide/credential-validation`) | [`page-before.png`](ui/credential-validation/page-before.png) | [`page-after.png`](ui/credential-validation/page-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
@@ -804,7 +817,9 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   `Catalog / Guides` and `Catalog / Guides / <page>` breadcrumbs, the registry-derived guide
   cards and sidebar order, the current-page `aria-current`, the API-reference panel and
   sidebar links, the API-integration page's bearer-token and administrator-session sections
-  with its `/openapi.json` and `/docs` links, and axe-core checks for all three views;
+  with its `/openapi.json` and `/docs` links, the credential-validation page's no-over-claim
+  and synthetic-data warnings with its named untested dimensions and its playground and
+  API-document links, and axe-core checks for all three views;
 - the shared header's documentation navigation (`ui/src/components/Layout.test.tsx`): the
   in-app `Guides` link, the plain `/docs` `API reference` link that the SPA router never
   handles, and `aria-current="page"` moving with the current view;
@@ -887,7 +902,11 @@ to `/guide/api-integration` with its bearer-token and administrator-session sect
 `/openapi.json` and `/docs` links and the served OpenAPI 3.1 document, following the
 API-reference link to the full Scalar page, reloads that keep both guide deep links on the
 same document, an accessible not-found view for an unknown slug with no catalog fallback, and
-a request watcher asserting that reading the guide loads no third-party asset.
+a request watcher asserting that reading the guide loads no third-party asset. The
+credential-validation page added by #135 is covered by the same spec: opening it from the
+index, the visible no-over-claim and synthetic-data warnings, the named untested dimensions in
+their real report titles, the `/docs` and `/openapi.json` link targets and following its
+playground link to `/playground`.
 
 The documentation navigation (#131) is covered by the same spec and
 `ui/e2e/docs.spec.ts`: opening `/guide` from the catalog's primary `Guides` link, the
