@@ -148,6 +148,53 @@ test('reads the API integration guide from the index and reaches both references
   await expectNoA11yViolations(page)
 })
 
+test('opens the credential-schemas guide from the index', async ({ page, baseURL }) => {
+  const { external } = watchRequests(page, baseURL)
+
+  await page.goto('/guide')
+  await page.getByRole('link', { name: /Credential schemas/ }).click()
+
+  await expect(page).toHaveURL(/\/guide\/credential-schemas$/)
+  await expect(page.getByRole('heading', { name: 'Credential schemas', level: 1 })).toBeVisible()
+  await expect(
+    page.getByRole('heading', { name: 'External URLs and schemas hosted by AttestBook' }),
+  ).toBeVisible()
+  await expect(page.getByRole('heading', { name: 'JSON Schema 2020-12 constraints' })).toBeVisible()
+
+  const article = page.locator('.guide-article')
+  await expect(article).toContainText('Hosted by AttestBook')
+  await expect(article).toContainText('External URL')
+  await expect(article.locator('pre code')).toContainText(
+    '"$schema": "https://json-schema.org/draft/2020-12/schema"',
+  )
+  await expect(article.getByRole('link', { name: 'rulebook catalog' })).toHaveAttribute('href', '/')
+  await expect(article.getByRole('link', { name: 'API reference' })).toHaveAttribute(
+    'href',
+    '/docs',
+  )
+
+  // The guide is public: no sign-in page and no third-party asset.
+  await expect(page).not.toHaveURL(/\/login/)
+  expect(external).toEqual([])
+
+  await expectNoA11yViolations(page)
+})
+
+test('keeps the credential-schemas guide readable at 390 px', async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto('/guide/credential-schemas')
+
+  await expect(page.getByRole('heading', { name: 'Credential schemas', level: 1 })).toBeVisible()
+  await expect(page.locator('.guide-article pre code')).toContainText('Example membership')
+
+  const horizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth - window.innerWidth,
+  )
+  expect(horizontalOverflow).toBeLessThanOrEqual(1)
+
+  await expectNoA11yViolations(page)
+})
+
 test('opens the publication-events guide and follows the API reference', async ({
   page,
   baseURL,

@@ -394,6 +394,65 @@ describe('product guide views', () => {
 
   test('the publication-events guide has no detectable accessibility violations', async () => {
     const { container } = render(<GuideEntryPage slug="publication-events" onNavigate={vi.fn()} />)
+    await expectNoA11yViolations(container)
+  })
+
+  test('links the credential-schemas guide from the guide index', () => {
+    render(<GuideIndexPage onNavigate={vi.fn()} />)
+
+    const list = screen.getByRole('list', { name: 'Product guides' })
+    expect(within(list).getByRole('link', { name: /Credential schemas/ })).toHaveAttribute(
+      'href',
+      '/guide/credential-schemas',
+    )
+  })
+
+  test('renders the credential-schemas guide with both reference options and a valid example', () => {
+    const { container } = render(<GuideEntryPage slug="credential-schemas" onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Credential schemas' })).toBeVisible()
+    for (const heading of [
+      'External URLs and schemas hosted by AttestBook',
+      'Immutable public schema URLs',
+      'SHA-256 digests and SRI pins',
+      'JSON Schema 2020-12 constraints',
+      'What a reader can inspect in rulebook detail',
+    ]) {
+      expect(screen.getByRole('heading', { level: 2, name: heading })).toBeVisible()
+    }
+    expect(document.title).toBe('Credential schemas · AttestBook')
+
+    const article = container.querySelector('.guide-article')
+    expect(article).not.toBeNull()
+    expect(article).toHaveTextContent(
+      'Neither route makes the schema trusted, signed or EUDI-compliant.',
+    )
+    expect(article).toHaveTextContent('Hosted by AttestBook')
+    expect(article).toHaveTextContent('External URL')
+    expect(article).toHaveTextContent('/api/v1/schema-documents')
+    expect(article).toHaveTextContent('/api/v1/schema-documents/<document-id>/content')
+    expect(article).toHaveTextContent('/api/v1/schema-documents?limit=50&offset=0')
+    expect(article).toHaveTextContent('503 public_base_url_unavailable')
+    expect(article).toHaveTextContent('at most 100 stored documents')
+    expect(article).toHaveTextContent('kind=sd_jwt_vc_type_metadata')
+    expect(article).toHaveTextContent('/versions/{version}/schema-references')
+    expect(article).toHaveTextContent('sha256-<base64>')
+    expect(
+      within(article as HTMLElement).getByRole('link', { name: 'rulebook catalog' }),
+    ).toHaveAttribute('href', '/')
+    expect(
+      within(article as HTMLElement).getByRole('link', { name: 'API reference' }),
+    ).toHaveAttribute('href', '/docs')
+
+    // The guide's one JSON example must stay syntactically valid.
+    const example = article?.querySelector('pre code')
+    expect(example).not.toBeNull()
+    expect(example).toHaveTextContent('"$schema": "https://json-schema.org/draft/2020-12/schema"')
+    expect(() => JSON.parse(example?.textContent ?? '')).not.toThrow()
+  })
+
+  test('the credential-schemas guide has no detectable accessibility violations', async () => {
+    const { container } = render(<GuideEntryPage slug="credential-schemas" onNavigate={vi.fn()} />)
 
     await expectNoA11yViolations(container)
   })

@@ -734,6 +734,20 @@ guide. No other view changes.
 | Guide index (`/guide`) | [`guide-before.png`](ui/credential-validation/guide-before.png) | [`guide-after.png`](ui/credential-validation/guide-after.png) |
 | Credential validation (`/guide/credential-validation`) | [`page-before.png`](ui/credential-validation/page-before.png) | [`page-after.png`](ui/credential-validation/page-after.png) |
 
+The credential-schemas guide slice (issue #134) has before/after captures at a 1440×1000 viewport
+in the same light theme, taken from the seeded end-to-end server in an anonymous browser. The
+guide index is captured full-page so every guide card stays visible. The baseline is `14a96cf`
+(`main` after the documentation-navigation slice, before this slice), where `/guide` listed only
+the Introduction card and `/guide/credential-schemas` rendered the guide not-found view. The
+after images are from this PR's head and show the new Credential schemas card alongside the
+existing guide cards and the rendered Credential schemas page over the same seeded data; the
+header, sidebar and footer are unchanged.
+
+| View | Before (`14a96cf`) | After (this slice) |
+| --- | --- | --- |
+| Guide index (`/guide`) | [`guide-index-before.png`](ui/credential-schemas/guide-index-before.png) | [`guide-index-after.png`](ui/credential-schemas/guide-index-after.png) |
+| Credential schemas (`/guide/credential-schemas`) | [`guide-page-before.png`](ui/credential-schemas/guide-page-before.png) | [`guide-page-after.png`](ui/credential-schemas/guide-page-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
@@ -819,7 +833,9 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   sidebar links, the API-integration page's bearer-token and administrator-session sections
   with its `/openapi.json` and `/docs` links, the credential-validation page's no-over-claim
   and synthetic-data warnings with its named untested dimensions and its playground and
-  API-document links, and axe-core checks for all three views;
+  API-document links, the credential-schemas page's hosted/external guidance, syntactically
+  valid JSON example and catalog/API links, and axe-core checks for the guide index, every
+  guide page and the not-found view;
 - the shared header's documentation navigation (`ui/src/components/Layout.test.tsx`): the
   in-app `Guides` link, the plain `/docs` `API reference` link that the SPA router never
   handles, and `aria-current="page"` moving with the current view;
@@ -907,6 +923,10 @@ credential-validation page added by #135 is covered by the same spec: opening it
 index, the visible no-over-claim and synthetic-data warnings, the named untested dimensions in
 their real report titles, the `/docs` and `/openapi.json` link targets and following its
 playground link to `/playground`.
+
+The credential-schemas guide (#134) is covered in the same spec: opening it from the index,
+its hosted/external guidance, pin and JSON Schema sections, the catalog and `/docs` links, and
+a 390 px check with no horizontal overflow and a full axe-core scan.
 
 The documentation navigation (#131) is covered by the same spec and
 `ui/e2e/docs.spec.ts`: opening `/guide` from the catalog's primary `Guides` link, the
