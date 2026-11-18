@@ -270,8 +270,11 @@ jobs:
       - name: Check Phase 0 documentation
         run: node scripts/check-docs.mjs
 
-      - name: Test the documentation checker
-        run: node --test scripts/check-docs.test.mjs
+      - name: Check the published product guide
+        run: node scripts/check-guides.mjs
+
+      - name: Test the documentation and guide checkers
+        run: node --test scripts/check-docs.test.mjs scripts/check-guides.test.mjs
 
   owf-compat:
     name: owf compatibility
