@@ -17,10 +17,12 @@
 
 import apiIntegrationMarkdown from '../../docs/guides/api-integration.md?raw'
 import captureExplorerMarkdown from '../../docs/guides/capture-explorer.md?raw'
+import conceptsMarkdown from '../../docs/guides/concepts.md?raw'
 import credentialSchemasMarkdown from '../../docs/guides/credential-schemas.md?raw'
 import credentialValidationMarkdown from '../../docs/guides/credential-validation.md?raw'
 import introductionMarkdown from '../../docs/guides/introduction.md?raw'
 import publicationEventsMarkdown from '../../docs/guides/publication-events.md?raw'
+import quickStartMarkdown from '../../docs/guides/quick-start.md?raw'
 import rulebookAuthoringMarkdown from '../../docs/guides/rulebook-authoring.md?raw'
 
 export interface GuideDocument {
@@ -37,6 +39,19 @@ export const GUIDE_DOCUMENTS: readonly GuideDocument[] = [
     description:
       'What AttestBook does, how to find and validate rulebooks, and where the product API contract lives.',
     markdown: introductionMarkdown,
+  },
+  {
+    slug: 'concepts',
+    title: 'Core concepts',
+    description:
+      'The provider, rulebook, version, snapshot, digest and validation vocabulary used across AttestBook.',
+    markdown: conceptsMarkdown,
+  },
+  {
+    slug: 'quick-start',
+    title: 'Quick start',
+    description: 'Browse a public rulebook and explore the credential playground, step by step.',
+    markdown: quickStartMarkdown,
   },
   {
     slug: 'capture-explorer',

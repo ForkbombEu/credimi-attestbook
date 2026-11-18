@@ -54,6 +54,8 @@ describe('bundled guide registry', () => {
     expect(findGuide('introduction')).not.toBeNull()
     expect(findGuide('capture-explorer')).not.toBeNull()
     expect(findGuide('api-integration')).not.toBeNull()
+    expect(findGuide('concepts')).not.toBeNull()
+    expect(findGuide('quick-start')).not.toBeNull()
     expect(findGuide('../../package.json')).toBeNull()
     expect(findGuide('/etc/passwd')).toBeNull()
     expect(findGuide('introduction.md')).toBeNull()
@@ -249,6 +251,104 @@ describe('product guide views', () => {
       'api/v1/rulebooks?limit=10',
     )
     expect(document.title).toBe('Introduction to AttestBook · AttestBook')
+  })
+
+  test('links to the Concepts and Quick start guides from the index', () => {
+    render(<GuideIndexPage onNavigate={vi.fn()} />)
+
+    const concepts = screen.getByRole('link', { name: /Core concepts/ })
+    expect(concepts).toHaveAttribute('href', '/guide/concepts')
+    expect(concepts).toHaveTextContent('The provider, rulebook, version')
+
+    const quickStart = screen.getByRole('link', { name: /Quick start/ })
+    expect(quickStart).toHaveAttribute('href', '/guide/quick-start')
+    expect(quickStart).toHaveTextContent('Browse a public rulebook')
+  })
+
+  test('renders the core concepts guide with precise definitions and live routes', () => {
+    const { container } = render(<GuideEntryPage slug="concepts" onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Core concepts' })).toBeVisible()
+    for (const heading of [
+      'Provider',
+      'Rulebook',
+      'Attestation type',
+      'Schema reference',
+      'Draft',
+      'Published and historical versions',
+      'Immutable snapshot',
+      'Content digest',
+      'Structural-validation evidence',
+    ]) {
+      expect(screen.getByRole('heading', { level: 2, name: heading })).toBeVisible()
+    }
+
+    const article = container.querySelector('.guide-article')
+    expect(article).not.toBeNull()
+    const links = within(article as HTMLElement)
+    expect(links.getByRole('link', { name: 'rulebook catalog' })).toHaveAttribute('href', '/')
+    expect(links.getByRole('link', { name: 'validation playground' })).toHaveAttribute(
+      'href',
+      '/playground',
+    )
+    const quickStartLinks = links.getAllByRole('link', { name: 'Quick start' })
+    expect(quickStartLinks.length).toBeGreaterThan(0)
+    for (const link of quickStartLinks) {
+      expect(link).toHaveAttribute('href', '/guide/quick-start')
+    }
+    expect(links.getByRole('link', { name: 'catalog' })).toHaveAttribute('href', '/')
+    expect(links.getByRole('link', { name: 'playground' })).toHaveAttribute('href', '/playground')
+
+    // The guide names the standards/product boundary instead of claiming conformance.
+    expect(article).toHaveTextContent('not the TS11 catalogue API')
+    expect(article).toHaveTextContent('an overall PASS is not reachable')
+    expect(article).toHaveTextContent('creating the next draft version reopens the working copy')
+    expect(article).not.toHaveTextContent('that is edited reopens')
+    expect(document.title).toBe('Core concepts · AttestBook')
+  })
+
+  test('renders the quick start guide with the catalog and playground journey', () => {
+    const { container } = render(<GuideEntryPage slug="quick-start" onNavigate={vi.fn()} />)
+
+    expect(screen.getByRole('heading', { level: 1, name: 'Quick start' })).toBeVisible()
+    for (const heading of [
+      'Before you start',
+      'Step 1: Find a public rulebook',
+      'Step 2: Read one exact version',
+      'Step 3: Validate a credential in the playground',
+      'Step 4: Read the result honestly',
+      'Limitations of this journey',
+    ]) {
+      expect(screen.getByRole('heading', { level: 2, name: heading })).toBeVisible()
+    }
+
+    const article = container.querySelector('.guide-article')
+    expect(article).not.toBeNull()
+    const links = within(article as HTMLElement)
+    const catalogLinks = links.getAllByRole('link', { name: 'rulebook catalog' })
+    expect(catalogLinks.length).toBeGreaterThan(0)
+    for (const link of catalogLinks) {
+      expect(link).toHaveAttribute('href', '/')
+    }
+    const playgroundLinks = links.getAllByRole('link', { name: 'validation playground' })
+    expect(playgroundLinks.length).toBeGreaterThan(0)
+    for (const link of playgroundLinks) {
+      expect(link).toHaveAttribute('href', '/playground')
+    }
+    const conceptsLinks = links.getAllByRole('link', { name: 'Core concepts' })
+    expect(conceptsLinks.length).toBeGreaterThan(0)
+    for (const link of conceptsLinks) {
+      expect(link).toHaveAttribute('href', '/guide/concepts')
+    }
+    expect(links.getByRole('link', { name: 'API reference' })).toHaveAttribute('href', '/docs')
+    expect(links.getByRole('link', { name: 'catalog' })).toHaveAttribute('href', '/')
+    expect(links.getByRole('link', { name: 'playground' })).toHaveAttribute('href', '/playground')
+
+    expect(article).toHaveTextContent('Overall PASS is not reachable in this build.')
+    expect(article).toHaveTextContent('The playground supplies no schema documents of its own.')
+    expect(article).toHaveTextContent("is resolved from AttestBook's immutable store and applied")
+    expect(article).not.toHaveTextContent('even when the pinned rulebook has schema references')
+    expect(document.title).toBe('Quick start · AttestBook')
   })
 
   test('renders the capture explorer guide with its mock boundary and /captures link', () => {
