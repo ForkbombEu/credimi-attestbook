@@ -12,17 +12,21 @@
 //   2. every registry entry carries the route metadata the guide index needs
 //      (a slug, a title and a one-sentence description), and the Markdown body
 //      has no level-1 heading because the registered title is the page `h1`;
-//   3. every inline and reference-style link in a rendered guide is safe and
+//   3. every link the runtime renderer turns into an anchor is safe and
 //      resolves. Root-relative links must address a route the application
 //      serves: `/guide/<slug>` must name a registered guide page, while `/docs`
 //      and `/openapi.json` are permitted because they are intentionally
-//      separate server documents. Relative links resolve against the guide's
-//      public address, exactly as the browser resolves them. Only `http(s)` and
-//      `mailto` external destinations are accepted; `javascript:`, `data:` and
-//      other schemes are rejected, matching the runtime sanitizer in
-//      `ui/src/markdown.ts`;
-//   4. repository code/image paths cited in inline code exist, and local image
-//      destinations resolve to a file the UI build serves under the site root.
+//      separate server documents. `#fragment`, `https://`, `http://` and
+//      `mailto:` destinations are accepted; any other destination is not a link
+//      in the rendered guide, so it is rejected here too;
+//   4. repository code paths cited in inline code exist. Inline images and
+//      reference-style links are not rendered by the guide, so they are
+//      rejected as well.
+//
+// Links are read with the same `parseMarkdown` and `parseInline` functions the
+// guide page uses (`ui/src/markdown.ts`), which Node loads directly by stripping
+// its TypeScript types. The authoring rules therefore cannot drift from the
+// renderer that publishes the page.
 //
 // Published guide content is exactly `docs/guides/*.md`; the source-only
 // architecture, specification and reference documents elsewhere in `docs/` are
@@ -32,20 +36,23 @@
 // Exit code 0 on success, 1 on any failure.
 
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
-import { dirname, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const root = resolve(scriptDir, '..');
 const guidesDir = resolve(root, 'docs/guides');
 const registryPath = resolve(root, 'ui/src/guide.ts');
-const publicDir = resolve(root, 'ui/public');
 
 const failures = [];
 const fail = (message) => failures.push(message);
 const lineAt = (text, index) => text.slice(0, index).split('\n').length;
 const isFile = (file) => existsSync(file) && statSync(file).isFile();
 const ORIGIN = 'http://attestbook.invalid';
+
+const { parseMarkdown, parseInline } = await import(
+  pathToFileURL(resolve(root, 'ui/src/markdown.ts')).href
+);
 
 /**
  * A guide slug is the URL path segment and the Markdown file stem: lowercase
@@ -54,29 +61,12 @@ const ORIGIN = 'http://attestbook.invalid';
 const SLUG_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
 /**
- * Repository paths cited in inline code (and images) must exist. Only the
- * repository's own top-level source and documentation trees are considered;
- * upstream paths quoted from another repository are not.
+ * Repository paths cited in inline code must exist. Only the repository's own
+ * top-level source and documentation trees are considered; upstream paths
+ * quoted from another repository are not.
  */
 const CITATION_PATTERN =
   /^(?:docs|src|ui|scripts|research|migrations)\/[A-Za-z0-9_./-]+\.(?:md|markdown|ts|tsx|mjs|cjs|js|jsx|json|css|html|png|jpe?g|svg|webp|gif|ya?ml|toml)$/;
-
-const FENCED_CODE_PATTERN = /^ {0,3}(`{3,}|~{3,})[^\n]*\n[\s\S]*?^ {0,3}\1[ \t]*$/gm;
-const INLINE_CODE_PATTERN = /`[^`\n]*`/g;
-const INLINE_CODE_CONTENT_PATTERN = /`([^`\n]+)`/g;
-const LINK_PATTERN = /(?<!!)\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
-const IMAGE_PATTERN = /!\[[^\]]*\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/g;
-const REFERENCE_DEFINITION_PATTERN = /^ {0,3}\[([^\]]+)\]:\s*(?:<([^>]+)>|(\S+))/gm;
-
-/** Replaces fenced code blocks with spaces, keeping newlines and offsets. */
-function maskFencedCode(text) {
-  return text.replace(FENCED_CODE_PATTERN, (block) => block.replace(/[^\n]/g, ' '));
-}
-
-/** Replaces inline code spans with spaces, keeping newlines and offsets. */
-function maskInlineCode(text) {
-  return text.replace(INLINE_CODE_PATTERN, (span) => ' '.repeat(span.length));
-}
 
 /** Reads one quoted registry value, tolerating escaped quotes and line wraps. */
 function readRegistryString(block, field) {
@@ -232,12 +222,12 @@ for (const name of guideFiles) {
 // ---------------------------------------------------------------------------
 
 /** True for the routes the application serves for guide pages and app views. */
-function checkInternalPath(pathname, raw, source, line, slugs) {
+function checkInternalPath(pathname, raw, source, location, slugs) {
   let path = pathname;
   try {
     path = decodeURIComponent(path);
   } catch {
-    fail(`${source}:${line}: malformed percent-encoding in link -> ${raw}`);
+    fail(`${source}${location}: malformed percent-encoding in link -> ${raw}`);
     return false;
   }
   while (path.length > 1 && path.endsWith('/')) {
@@ -253,14 +243,14 @@ function checkInternalPath(pathname, raw, source, line, slugs) {
     const slug = path.slice('/guide/'.length);
     if (slug.includes('/')) {
       fail(
-        `${source}:${line}: missing guide target -> ${raw} ` +
+        `${source}${location}: missing guide target -> ${raw} ` +
           '(a guide address is /guide/<slug> and has one slug segment)',
       );
       return false;
     }
     if (!slugs.has(slug)) {
       fail(
-        `${source}:${line}: missing guide target -> ${raw} ` +
+        `${source}${location}: missing guide target -> ${raw} ` +
           `(no registered guide page for "${slug}")`,
       );
       return false;
@@ -287,122 +277,13 @@ function checkInternalPath(pathname, raw, source, line, slugs) {
     return true;
   }
   fail(
-    `${source}:${line}: unknown internal link target -> ${raw} ` +
+    `${source}${location}: unknown internal link target -> ${raw} ` +
       '(the guide may only link to a route the application serves)',
   );
   return false;
 }
 
-/**
- * Classifies a link destination and validates an internal one. Returns
- * `"external"`, `"internal"` or `null` when the destination is unsafe.
- */
-function checkLinkDestination(raw, source, line, slug, slugs) {
-  let destination = raw.trim();
-  if (destination.startsWith('<') && destination.endsWith('>')) {
-    destination = destination.slice(1, -1);
-  }
-  if (destination === '') {
-    fail(`${source}:${line}: empty link destination`);
-    return null;
-  }
-  const unsafeCharacter = [...destination].find((character) => {
-    const code = character.codePointAt(0) ?? 0;
-    return code <= 0x20 || code === 0x7f || character === '\\';
-  });
-  if (unsafeCharacter !== undefined) {
-    fail(
-      `${source}:${line}: unsafe link destination -> ${destination} ` +
-        '(whitespace, control characters and backslashes are not allowed)',
-    );
-    return null;
-  }
-  if (destination.startsWith('//')) {
-    fail(`${source}:${line}: unsafe link destination -> ${destination} (protocol-relative)`);
-    return null;
-  }
-  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(destination);
-  if (scheme !== null) {
-    const name = scheme[1].toLowerCase();
-    if (name === 'http' || name === 'https' || name === 'mailto') {
-      return 'external';
-    }
-    fail(
-      `${source}:${line}: unsafe link scheme "${name}:" -> ${destination} ` +
-        '(only http(s), mailto and application routes become links)',
-    );
-    return null;
-  }
-
-  let url;
-  try {
-    url = new URL(destination, `${ORIGIN}/guide/${encodeURIComponent(slug)}`);
-  } catch {
-    fail(`${source}:${line}: malformed link destination -> ${destination}`);
-    return null;
-  }
-  if (url.origin !== ORIGIN) {
-    fail(`${source}:${line}: unsafe link destination -> ${destination}`);
-    return null;
-  }
-  checkInternalPath(url.pathname, destination, source, line, slugs);
-  return 'internal';
-}
-
-/** Validates an image destination against the files the UI build serves. */
-function checkImageDestination(raw, source, line, slug) {
-  const destination = raw.trim();
-  if (destination === '') {
-    fail(`${source}:${line}: empty image destination`);
-    return;
-  }
-  const unsafeCharacter = [...destination].find((character) => {
-    const code = character.codePointAt(0) ?? 0;
-    return code <= 0x20 || code === 0x7f || character === '\\';
-  });
-  if (unsafeCharacter !== undefined) {
-    fail(`${source}:${line}: unsafe image destination -> ${destination}`);
-    return;
-  }
-  if (destination.startsWith('//')) {
-    fail(`${source}:${line}: unsafe image destination -> ${destination} (protocol-relative)`);
-    return;
-  }
-  const scheme = /^([A-Za-z][A-Za-z0-9+.-]*):/.exec(destination);
-  if (scheme !== null) {
-    const name = scheme[1].toLowerCase();
-    if (name === 'http' || name === 'https') {
-      return;
-    }
-    fail(`${source}:${line}: unsafe image scheme "${name}:" -> ${destination}`);
-    return;
-  }
-
-  let path;
-  try {
-    path = decodeURIComponent(
-      new URL(destination, `${ORIGIN}/guide/${encodeURIComponent(slug)}`).pathname,
-    );
-  } catch {
-    fail(`${source}:${line}: malformed image destination -> ${destination}`);
-    return;
-  }
-  // Vite copies `ui/public/<path>` to `dist/ui/<path>`, so a root-relative image
-  // path is served from the public directory.
-  const candidate = resolve(publicDir, `.${path}`);
-  if (candidate !== publicDir && !candidate.startsWith(`${publicDir}${sep}`)) {
-    fail(`${source}:${line}: image destination escapes ui/public -> ${destination}`);
-    return;
-  }
-  if (!isFile(candidate)) {
-    fail(
-      `${source}:${line}: missing local image asset -> ${destination} ` +
-        `(expected ui/public${path})`,
-    );
-  }
-}
-
-/** Validates the rendered Markdown links and assets of one registered guide. */
+/** Validates the rendered Markdown links and inline-code citations of one guide. */
 function checkGuideContent(file, slug, slugs) {
   if (!isFile(resolve(root, file))) {
     fail(`${file}: registered guide Markdown file does not exist`);
@@ -414,62 +295,116 @@ function checkGuideContent(file, slug, slugs) {
     return { internal: 0, external: 0, assets: 0 };
   }
 
-  const withoutFences = maskFencedCode(markdown);
-  const withoutCode = maskInlineCode(withoutFences);
-  if (/^ {0,3}#[ \t]+\S/m.test(withoutFences)) {
-    fail(
-      `${file}: the guide body must not have a level-1 heading; ` +
-        'the registered title is the page h1',
-    );
-  }
+  const location = (snippet) => {
+    const index = markdown.indexOf(snippet);
+    return index < 0 ? '' : `:${lineAt(markdown, index)}`;
+  };
 
   let internal = 0;
   let external = 0;
   let assets = 0;
 
-  for (const match of withoutCode.matchAll(LINK_PATTERN)) {
-    const result = checkLinkDestination(
-      match[1],
-      file,
-      lineAt(markdown, match.index),
-      slug,
-      slugs,
-    );
-    if (result === 'internal') internal += 1;
-    if (result === 'external') external += 1;
-  }
-  for (const match of withoutCode.matchAll(REFERENCE_DEFINITION_PATTERN)) {
-    const target = match[2] ?? match[3];
-    const result = checkLinkDestination(
-      target,
-      file,
-      lineAt(markdown, match.index),
-      slug,
-      slugs,
-    );
-    if (result === 'internal') internal += 1;
-    if (result === 'external') external += 1;
-  }
-  for (const match of withoutCode.matchAll(IMAGE_PATTERN)) {
-    checkImageDestination(match[1], file, lineAt(markdown, match.index), slug);
-    assets += 1;
-  }
-  for (const match of withoutFences.matchAll(INLINE_CODE_CONTENT_PATTERN)) {
-    const citation = match[1].trim();
-    if (!CITATION_PATTERN.test(citation)) {
-      continue;
+  for (const block of parseMarkdown(markdown)) {
+    if (block.type === 'code') {
+      continue; // Fenced code is displayed, never rendered as Markdown.
     }
-    assets += 1;
-    if (!isFile(resolve(root, citation))) {
+    if (block.type === 'heading' && block.level === 1) {
       fail(
-        `${file}:${lineAt(markdown, match.index)}: cited local code/image asset ` +
-          `does not exist -> ${citation}`,
+        `${file}${location(block.text)}: the guide body must not have a level-1 heading; ` +
+          'the registered title is the page h1',
       );
+    }
+
+    const texts = block.type === 'list' ? block.items : [block.text];
+    for (const text of texts) {
+      // The renderer has no image support. It shows `![alt](...)` as the
+      // literal `!` followed by the link text, so an image is always broken.
+      const image = /!\[[^\]]*\]\([^)]*\)/.exec(text);
+      if (image !== null) {
+        fail(
+          `${file}${location(image[0])}: image syntax is not rendered by the guide -> ${image[0]}`,
+        );
+      }
+
+      for (const token of parseInline(text)) {
+        if (token.type === 'link') {
+          if (token.href.startsWith('#')) {
+            internal += 1;
+            continue;
+          }
+          if (token.href.startsWith('/')) {
+            checkInternalPath(
+              new URL(token.href, ORIGIN).pathname,
+              token.href,
+              file,
+              location(token.href),
+              slugs,
+            );
+            internal += 1;
+            continue;
+          }
+          external += 1;
+          continue;
+        }
+
+        if (token.type === 'code') {
+          const citation = token.text.trim();
+          if (!CITATION_PATTERN.test(citation)) {
+            continue;
+          }
+          assets += 1;
+          if (!isFile(resolve(root, citation))) {
+            fail(
+              `${file}${location(citation)}: cited local code/image asset ` +
+                `does not exist -> ${citation}`,
+            );
+          }
+          continue;
+        }
+
+        if (token.type !== 'text') {
+          continue;
+        }
+        // Anything the renderer refused to turn into a link stays literal text
+        // in the published page; that is a broken guide link, not a valid one.
+        for (const match of token.text.matchAll(/\[[^\]]*\]\(([^)]*)\)/g)) {
+          const destination = match[1].trim();
+          const lower = destination.toLowerCase();
+          const unsafe =
+            /^(javascript|data|vbscript|file):/.test(lower) ||
+            lower.startsWith('//') ||
+            [...destination].some((character) => {
+              const code = character.codePointAt(0) ?? 0;
+              return code < 0x20 || code === 0x7f || character === '\\';
+            });
+          if (unsafe) {
+            fail(
+              `${file}${location(match[0])}: unsafe link destination -> ${destination}` +
+                (lower.startsWith('//') ? ' (protocol-relative)' : ''),
+            );
+          } else {
+            fail(
+              `${file}${location(match[0])}: link renders as literal text -> ${destination} ` +
+                '(use a root-relative /guide/<slug>, #fragment, https://, http:// or ' +
+                'mailto: link with a non-empty label and no title)',
+            );
+          }
+        }
+        if (
+          /^\s*\[[^\]]+\]:\s*\S/.test(token.text) ||
+          /\[[^\]]+\]\[[^\]]*\]/.test(token.text)
+        ) {
+          fail(
+            `${file}${location(token.text)}: reference-style links are not rendered by the guide`,
+          );
+        }
+      }
     }
   }
 
   return { internal, external, assets };
 }
+
 
 const slugs = new Set(guidesBySlug.keys());
 let internalLinks = 0;

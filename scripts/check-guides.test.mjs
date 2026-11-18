@@ -10,7 +10,7 @@ import {
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { test } from 'node:test';
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -25,15 +25,13 @@ function defaultGuides() {
       slug: 'introduction',
       title: 'Introduction to the guide',
       description: 'Where to start reading.',
-      body: `Start with [Core concepts](concepts), the [guide overview](/guide), the
+      body: `Start with [Core concepts](/guide/concepts), the [guide overview](/guide), the
 [API reference](/docs), the [OpenAPI contract](/openapi.json), the
 [playground](/playground), a [new rulebook](/rulebooks/new), or an
-[external site](https://example.org).
+[external site](https://example.org). Jump to [Concepts](#concepts).
 
 Write to [the team](mailto:team@example.org) and read
 \`docs/ui.md\` for the UI notes and \`src/example.ts\` for the sample.
-
-![Guide diagram](assets/diagram.png)
 `,
     },
     {
@@ -42,7 +40,7 @@ Write to [the team](mailto:team@example.org) and read
       description: 'The guide vocabulary.',
       body: `## Concepts
 
-Return to the [introduction](introduction) and read
+Return to the [introduction](/guide/introduction) and read
 the [rulebook routes](/rulebooks/new).
 `,
     },
@@ -57,14 +55,13 @@ function makeFixture(guides = defaultGuides()) {
   const root = mkdtempSync(join(tmpdir(), 'attestbook-guide-check-'));
   mkdirSync(join(root, 'scripts'), { recursive: true });
   mkdirSync(join(root, 'ui', 'src'), { recursive: true });
-  mkdirSync(join(root, 'ui', 'public', 'guide', 'assets'), { recursive: true });
   mkdirSync(join(root, 'docs', 'guides'), { recursive: true });
   mkdirSync(join(root, 'src'), { recursive: true });
 
   cpSync(join(repoRoot, 'scripts', 'check-guides.mjs'), join(root, 'scripts', 'check-guides.mjs'));
+  cpSync(join(repoRoot, 'ui', 'src', 'markdown.ts'), join(root, 'ui', 'src', 'markdown.ts'));
   writeFileSync(join(root, 'docs', 'ui.md'), '# UI notes\n\nThe source-only documentation check.\n');
   writeFileSync(join(root, 'src', 'example.ts'), 'export {};\n');
-  writeFileSync(join(root, 'ui', 'public', 'guide', 'assets', 'diagram.png'), 'fixture image\n');
 
   const imports = [];
   const blocks = [];
@@ -137,10 +134,10 @@ test('passes on valid guide links, route metadata and local assets', () => {
   });
 });
 
-test('accepts reference-style links and same-page fragments', () => {
+test('accepts root-relative and same-page fragment links', () => {
   withFixture((root) => {
     mutate(root, 'docs/guides/concepts.md', (text) =>
-      `${text}\n[guide]: /guide\n[concepts]: concepts\n[jump](#concepts)\n`,
+      `${text}\n[g](/guide)\n[jump](#concepts)\n`,
     );
     const result = runChecker(root);
     assert.equal(result.status, 0, result.stderr);
@@ -158,12 +155,12 @@ test('fails on a link to an unregistered guide page', () => {
   });
 });
 
-test('fails on a relative link whose resolved guide page is not registered', () => {
+test('fails on a relative link, which the guide renders as literal text', () => {
   withFixture((root) => {
     mutate(root, 'docs/guides/introduction.md', (text) => `${text}\n[missing](does-not-exist)\n`);
     const result = runChecker(root);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /missing guide target -> does-not-exist/);
+    assert.match(result.stderr, /link renders as literal text -> does-not-exist/);
   });
 });
 
@@ -183,7 +180,7 @@ test('fails on a javascript: link', () => {
     );
     const result = runChecker(root);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /unsafe link scheme "javascript:"/);
+    assert.match(result.stderr, /unsafe link destination/);
   });
 });
 
@@ -194,7 +191,7 @@ test('fails on a data: link', () => {
     );
     const result = runChecker(root);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /unsafe link scheme "data:"/);
+    assert.match(result.stderr, /unsafe link destination/);
   });
 });
 
@@ -289,6 +286,15 @@ test('fails when a guide body has a level-1 heading', () => {
   });
 });
 
+test('fails on a level-1 heading named Title', () => {
+  withFixture((root) => {
+    mutate(root, 'docs/guides/concepts.md', (text) => `# Title\n\n${text}`);
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /level-1 heading/);
+  });
+});
+
 test('does not treat an unregistered internal document as guide content', () => {
   withFixture((root) => {
     writeFileSync(
@@ -319,11 +325,80 @@ test('fails when a guide cites a missing local code asset', () => {
   });
 });
 
-test('fails when a guide references a missing local image asset', () => {
+test('fails on image syntax, which the guide renders as literal text', () => {
   withFixture((root) => {
     mutate(root, 'docs/guides/concepts.md', (text) => `${text}\n![gone](assets/gone.png)\n`);
     const result = runChecker(root);
     assert.equal(result.status, 1);
-    assert.match(result.stderr, /missing local image asset -> assets\/gone\.png/);
+    assert.match(result.stderr, /image syntax is not rendered/);
   });
+});
+
+test('fails on a reference-style link definition', () => {
+  withFixture((root) => {
+    mutate(root, 'docs/guides/concepts.md', (text) => `${text}\n[g]: /guide\n`);
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /reference-style links are not rendered/);
+  });
+});
+
+test('fails on a reference-style link use', () => {
+  withFixture((root) => {
+    mutate(root, 'docs/guides/concepts.md', (text) => `${text}\nSee [the guide][g].\n`);
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /reference-style links are not rendered/);
+  });
+});
+
+test('fails on a titled link', () => {
+  withFixture((root) => {
+    mutate(root, 'docs/guides/concepts.md', (text) => `${text}\n[a](/guide "Title")\n`);
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /renders as literal text/);
+  });
+});
+
+test('fails on http: without the double slash', () => {
+  withFixture((root) => {
+    mutate(root, 'docs/guides/concepts.md', (text) => `${text}\n[x](http:foo)\n`);
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /renders as literal text/);
+  });
+});
+
+test('fails on a vbscript: destination', () => {
+  withFixture((root) => {
+    mutate(root, 'docs/guides/concepts.md', (text) => `${text}\n[x](vbscript:msgbox)\n`);
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /unsafe link destination/);
+  });
+});
+
+test('fails on a backslash destination', () => {
+  withFixture((root) => {
+    mutate(root, 'docs/guides/concepts.md', (text) => `${text}\n[x](/\\evil.example)\n`);
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /unsafe link destination/);
+  });
+});
+
+test('the positive fixture links are the links the runtime renderer produces', async () => {
+  const { parseInline } = await import(
+    pathToFileURL(join(repoRoot, 'ui', 'src', 'markdown.ts')).href
+  );
+  const source = defaultGuides()[0].body;
+  const linkLines = source.split('\n').filter((line) => line.includes(']('));
+  assert.ok(linkLines.length >= 5, 'the positive fixture must contain link lines');
+  for (const line of linkLines) {
+    assert.ok(
+      parseInline(line).some((token) => token.type === 'link'),
+      `renderer must produce a link for: ${line}`,
+    );
+  }
 });

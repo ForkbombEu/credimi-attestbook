@@ -577,17 +577,16 @@ source-only documentation and are not served at `/guide`. Add a page by:
 3. starting the body at `##`: the registered title is the page's single `h1`, so the
    document must not carry its own level-1 heading.
 
-Links in a guide follow the runtime renderer in `ui/src/markdown.ts`. Use root-relative
-application routes (`/`, `/guide`, `/guide/<registered-slug>`, `/playground`, `/captures`,
-`/rulebooks/*` and `/login`); `/docs` and `/openapi.json` are the intentionally separate API
-reference and contract, so a guide may link to them without a fallback to the catalog.
-Relative links resolve against the guide's `/guide/<slug>` address, exactly as the browser
-resolves them. External links must use `https:`, `http:` or `mailto:`; `javascript:`,
-`data:`, `vbscript:`, protocol-relative and backslash destinations are rejected. Reference
-repository files in inline code instead of linking to them, because a repository path is not
-a served route: an inline code path such as `docs/ui.md` or `src/editor/draft.ts` must exist.
-A local image is served from the UI public directory, so `assets/diagram.png` on a guide page
-must exist at `ui/public/guide/assets/diagram.png`.
+A guide link becomes a link only when its destination is a root-relative application path
+(`/...`), a same-page `#fragment`, `https://`, `http://` or `mailto:`, with a non-empty label
+and no title. Use root-relative routes (`/`, `/guide`, `/guide/<registered-slug>`,
+`/playground`, `/captures`, `/rulebooks/*` and `/login`); `/docs` and `/openapi.json` are the
+intentionally separate API reference and contract, so a guide may link to them. Relative
+destinations, images, reference-style links, titled links and `javascript:`, `data:`,
+`vbscript:`, protocol-relative or backslash destinations are not rendered by the guide, so
+the check rejects them. Reference repository files in inline code instead of linking to them,
+because a repository path is not a served route: an inline code path such as `docs/ui.md` or
+`src/editor/draft.ts` must exist.
 
 `scripts/check-guides.mjs` enforces all of the above offline against the registry and
 `docs/guides/*.md`. It runs from the existing documentation gate:
@@ -600,8 +599,8 @@ node --test scripts/check-guides.test.mjs
 ```
 
 `docs:check` is also what the `docs` CI job runs, so a guide-only pull request fails before
-merge on a missing target, an unsafe link, a duplicate or malformed slug, missing page
-metadata or an asset the build cannot serve.
+merge on a missing target, an unsafe link, unrendered link syntax, a duplicate or malformed
+slug, missing page metadata or a missing inline-code path.
 
 ## 4. Build, serve and develop
 
