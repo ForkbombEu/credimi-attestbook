@@ -1218,3 +1218,37 @@ describe('rulebook draft editor', () => {
     await expectNoA11yViolations(container)
   })
 })
+
+describe('editor contextual help', () => {
+  test('links the rulebook authoring guide in a new tab from the new-rulebook editor', async () => {
+    renderEditor(editor())
+
+    await screen.findByRole('heading', { name: 'New rulebook draft' })
+    const link = screen.getByRole('link', { name: /rulebook authoring guide/i })
+    expect(link).toHaveAttribute('href', '/guide/rulebook-authoring')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(link).toHaveAccessibleName('rulebook authoring guide (opens in a new tab)')
+
+    // Kernel of the UAT: the link is keyboard-reachable and leaves the form in place.
+    link.focus()
+    expect(link).toHaveFocus()
+    expect(screen.getByLabelText('Name')).toBeEnabled()
+  })
+
+  test('links the credential schemas guide beside the schema-reference controls', async () => {
+    renderEditor(editor(), { rulebookId: DRAFT.id })
+
+    const heading = await screen.findByRole('heading', { name: 'Schema references' })
+    const section = heading.closest('section')
+    expect(section).not.toBeNull()
+
+    const link = within(section as HTMLElement).getByRole('link', {
+      name: /credential schemas guide/i,
+    })
+    expect(link).toHaveAttribute('href', '/guide/credential-schemas')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(link).toHaveAccessibleName('credential schemas guide (opens in a new tab)')
+  })
+})

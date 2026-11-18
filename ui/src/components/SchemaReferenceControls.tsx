@@ -10,6 +10,7 @@ import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from 'r
 
 import { isSessionAuthError, type EditorApi } from '../api'
 import { formatDigest, hostedIntegrityState, hostedSchemaDownloadName } from '../detail'
+import { GuideLink } from './GuideLink'
 import {
   HOSTED_SCHEMA_KIND,
   MAX_HOSTED_SCHEMA_BYTES,
@@ -561,7 +562,9 @@ export function SchemaReferenceControls({
       <h2 id={`${prefix}-heading`}>Schema references</h2>
       <p className="field-hint schema-reference-intro">
         Add one schema reference per attestation format. The controls update the Draft JSON above;
-        the raw editor stays the source of truth.
+        the raw editor stays the source of truth. Read the{' '}
+        <GuideLink slug="credential-schemas">credential schemas guide</GuideLink> for hosted and
+        external references.
       </p>
 
       {disabled && disabledReason === null ? (

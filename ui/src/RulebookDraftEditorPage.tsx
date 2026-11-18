@@ -6,6 +6,7 @@ import { SeverityBadge } from './components/Badges'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import { CreateVersionPanel } from './components/CreateVersionPanel'
 import { DraftLifecyclePanel } from './components/DraftLifecyclePanel'
+import { GuideLink } from './components/GuideLink'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { SchemaReferenceControls } from './components/SchemaReferenceControls'
 import { SessionRenewalForm, SignInRequiredNotice } from './components/SessionPrompt'
@@ -533,6 +534,10 @@ export function RulebookDraftEditorPage({
             {creatingNextVersion
               ? 'This rulebook is published and immutable. Create a new draft version to reopen the working copy for editing; the published artifact is not changed.'
               : 'Edit the rulebook metadata and its attestation JSON. Validation runs as you type; saving a draft never changes a frozen or published version.'}
+          </p>
+          <p className="page-help">
+            New to rulebook authoring? Read the{' '}
+            <GuideLink slug="rulebook-authoring">rulebook authoring guide</GuideLink>.
           </p>
         </div>
 
