@@ -264,9 +264,9 @@ Implemented by these slices:
     never navigates away. The accessible name says that a new tab opens, and the component's
     `slug` is the `GuideSlug` union derived from the registry, so a contextual link cannot name
     an unregistered page;
-  - no link is added to the rulebook detail view: `/guide/concepts` is not a registered guide
-    page, and the acceptance criteria prefer omitting a detail help link over adding a new
-    panel.
+  - no link is added to the rulebook detail view: the view has no existing help affordance
+    to hold a `/guide/concepts` link, and the acceptance criteria prefer omitting a detail
+    help link over adding a new panel.
 
 Deliberately **not** in these slices:
 
@@ -803,12 +803,12 @@ only the registered page set and the Markdown content differ.
 
 The contextual-help slice (issue #139) has before/after captures at 1440×1000 (and 390×844 for
 the narrow pairs) in the same light theme, taken from the seeded end-to-end server. The
-baseline is `2e62909` (`main` before the slice), which renders the same editor and playground
-without the help lines; the after images are from this PR's head. Both revisions use the same
-seeded API data, the same signed-in `Example Issuer` administrator for the editor pairs (with
-the same unsaved name and description) and the same anonymous browser for the playground
-pairs. Only the contextual help line and the schema card's guide link differ; the surrounding
-layout, spacing and responsive behaviour are unchanged.
+baseline is `2e62909` (`main` when the captures were taken), which renders the same editor and
+playground without the help lines; the after images are from this PR's head. Both revisions use
+the same seeded API data, the same signed-in `Example Issuer` administrator for the editor
+pairs (with the same unsaved name and description) and the same anonymous browser for the
+playground pairs. Only the contextual help line and the schema card's guide link differ; the
+surrounding layout, spacing and responsive behaviour are unchanged.
 
 | View | Before (`2e62909`) | After (this slice) |
 | --- | --- | --- |
