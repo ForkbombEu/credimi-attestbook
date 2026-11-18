@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { CatalogApiError, isAbortError, type CatalogApi, type ValidationApi } from './api'
 import { EmptyState, ErrorState, LoadingState } from './components/CatalogStates'
+import { GuideLink } from './components/GuideLink'
 import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { PlaygroundForm } from './components/PlaygroundForm'
 import { ValidationReport } from './components/ValidationReport'
@@ -324,6 +325,10 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
             Run the real structural validation API against a pinned rulebook version. Inspect the
             per-dimension evidence and violations, then export the typed result. This page never
             reports an untested dimension as a pass.
+          </p>
+          <p className="page-help">
+            Read the <GuideLink slug="credential-validation">credential validation guide</GuideLink>{' '}
+            for what each result and its limits mean.
           </p>
         </div>
 

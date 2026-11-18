@@ -443,3 +443,19 @@ describe('playground validation results', () => {
     ])
   })
 })
+
+describe('playground contextual help', () => {
+  test('links the credential validation guide in a new tab before any run', async () => {
+    const { container } = renderPlayground()
+
+    const link = screen.getByRole('link', { name: /credential validation guide/i })
+    expect(link).toHaveAttribute('href', '/guide/credential-validation')
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
+    expect(link).toHaveAccessibleName(/credential validation guide\s*\(opens in a new tab\)/)
+
+    // The help link must not displace the form or introduce an a11y violation.
+    expect(await screen.findByLabelText('Rulebook')).toBeInTheDocument()
+    await expectNoA11yViolations(container)
+  })
+})

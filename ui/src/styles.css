@@ -396,6 +396,15 @@ dd {
   line-height: var(--lh-md);
 }
 
+/* One unobtrusive contextual-help line under a page's lede. */
+.page-help {
+  max-width: 75ch;
+  margin: var(--space-3) 0 0;
+  color: var(--fg-subtle);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-sm);
+}
+
 .page-heading__actions {
   margin: var(--space-5) 0 0;
 }

@@ -32,7 +32,7 @@ export interface GuideDocument {
   readonly markdown: string
 }
 
-export const GUIDE_DOCUMENTS: readonly GuideDocument[] = [
+export const GUIDE_DOCUMENTS = [
   {
     slug: 'introduction',
     title: 'Introduction to AttestBook',
@@ -95,7 +95,10 @@ export const GUIDE_DOCUMENTS: readonly GuideDocument[] = [
       'Attach an external schema URL or register a schema hosted by AttestBook, and read its integrity pins in rulebook detail.',
     markdown: credentialSchemasMarkdown,
   },
-]
+] as const satisfies readonly GuideDocument[]
+
+/** A registered guide slug, so a contextual link cannot name a missing page. */
+export type GuideSlug = (typeof GUIDE_DOCUMENTS)[number]['slug']
 
 /** Resolves a URL slug to exactly one bundled document, never a file path. */
 export function findGuide(slug: string): GuideDocument | null {

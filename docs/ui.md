@@ -250,6 +250,23 @@ Implemented by these slices:
     list above the article at 390 px without horizontal scrolling. The shared header wraps its
     navigation at 960 px and lets the primary nav scroll horizontally, so the `Guides` and
     `API reference` links stay reachable at tablet widths.
+- contextual help links from the working views into the product guide (#139):
+  - the draft editor adds one unobtrusive line under its lede linking the
+    `/guide/rulebook-authoring` page, and the **Schema references** card links
+    `/guide/credential-schemas` in its intro beside the schema controls, so both are
+    contextual rather than a general documentation menu;
+  - `/playground` links `/guide/credential-validation` under its lede, next to the statement
+    of what a result and its untested dimensions do and do not mean. A developer can read it
+    before running anything, and it needs no session;
+  - every link is a plain root-relative anchor rendered by the shared `GuideLink` component
+    with `target="_blank"` and `rel="noopener noreferrer"`. Activating help opens the bundled
+    guide in a new tab, so the editor tab keeps its unsaved working copy and the current view
+    never navigates away. The accessible name says that a new tab opens, and the component's
+    `slug` is the `GuideSlug` union derived from the registry, so a contextual link cannot name
+    an unregistered page;
+  - no link is added to the rulebook detail view: the view has no existing help affordance
+    to hold a `/guide/concepts` link, and the acceptance criteria prefer omitting a detail
+    help link over adding a new panel.
 
 Deliberately **not** in these slices:
 
@@ -432,7 +449,11 @@ Neither **Not tested** nor **Not applicable** is presented as a pass.
   kind and whether this run applied them. The playground supplies no schema documents, so the
   schema dimension stays **not tested** (see §6);
 - `Export result (JSON)` downloads the typed result as a Blob named from the run identity. It
-  contains the API result only: no credential artifact and no claim values.
+  contains the API result only: no credential artifact and no claim values;
+- one contextual help line under the lede links the credential validation guide. It is an
+  ordinary new-tab anchor next to the page's statement of what a result and its limits mean,
+  and it is rendered before any validation run, so an anonymous developer can read the guide
+  first; it adds no modal, tour or extra panel.
 
 API failures use the safe message of the product API error envelope (for example a `400`, `413`
 or `503` message) and never echo the credential. An unexpected failure shows a generic message.
@@ -489,6 +510,11 @@ dimensions.
   draft (the registry stores profile enumerations as extensible text, decision D-5). An
   unknown `applicableSpec` reports that no standards checks ran instead of validating it
   against the wrong baseline;
+- two contextual help links put the guide beside the authoring work rather than in a tour: the
+  page heading links the rulebook authoring guide and the **Schema references** card intro
+  links the credential schemas guide. Both are plain new-tab anchors (see §1), so help never
+  navigates the editor or discards unsaved metadata and JSON; the links are keyboard-focusable
+  and do not change the surrounding layout or spacing at either viewport;
 - the view is protected by the administrator session: an anonymous deep link renders a
   **Sign in to author rulebooks** panel with a `Sign in` link whose validated `next` value is
   the current editor path. The form is not rendered and no draft is read until
@@ -775,6 +801,23 @@ only the registered page set and the Markdown content differ.
 | Core concepts (`/guide/concepts`) | [`concepts-before.png`](ui/concepts-quick-start/concepts-before.png) | [`concepts-after.png`](ui/concepts-quick-start/concepts-after.png) |
 | Quick start (`/guide/quick-start`) | [`quick-start-before.png`](ui/concepts-quick-start/quick-start-before.png) | [`quick-start-after.png`](ui/concepts-quick-start/quick-start-after.png) |
 
+The contextual-help slice (issue #139) has before/after captures at 1440×1000 (and 390×844 for
+the narrow pairs) in the same light theme, taken from the seeded end-to-end server. The
+baseline is `2e62909` (`main` when the captures were taken), which renders the same editor and
+playground without the help lines; the after images are from this PR's head. Both revisions use
+the same seeded API data, the same signed-in `Example Issuer` administrator for the editor
+pairs (with the same unsaved name and description) and the same anonymous browser for the
+playground pairs. Only the contextual help line and the schema card's guide link differ; the
+surrounding layout, spacing and responsive behaviour are unchanged.
+
+| View | Before (`2e62909`) | After (this slice) |
+| --- | --- | --- |
+| Draft editor: authoring help | [`editor-before.png`](ui/contextual-help/editor-before.png) | [`editor-after.png`](ui/contextual-help/editor-after.png) |
+| Draft editor: schema-reference help | [`schema-before.png`](ui/contextual-help/schema-before.png) | [`schema-after.png`](ui/contextual-help/schema-after.png) |
+| Playground: validation help | [`playground-before.png`](ui/contextual-help/playground-before.png) | [`playground-after.png`](ui/contextual-help/playground-after.png) |
+| Draft editor: authoring help, 390 px | [`editor-narrow-before.png`](ui/contextual-help/editor-narrow-before.png) | [`editor-narrow-after.png`](ui/contextual-help/editor-narrow-after.png) |
+| Playground: validation help, 390 px | [`playground-narrow-before.png`](ui/contextual-help/playground-narrow-before.png) | [`playground-narrow-after.png`](ui/contextual-help/playground-narrow-after.png) |
+
 ## 5. Tests and evidence
 
 Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
@@ -848,6 +891,12 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   `/guide`, `/guide/<slug>`, `/rulebooks/new`, `/rulebooks/<id>/edit` and `/login`), encoded
   ids and slugs, malformed paths, history navigation including a query-bearing login path,
   and modified clicks keeping native anchor behaviour;
+- contextual help (#139): the editor's rulebook-authoring link and the schema card's
+  credential-schemas link are root-relative anchors with `target="_blank"`,
+  `rel="noopener noreferrer"` and an accessible name that announces the new tab, the
+  authoring link is keyboard-focusable and leaves the form enabled, and the playground shows
+  the credential-validation link before any run
+  (`ui/src/PlaygroundPage.test.tsx`, `ui/src/RulebookDraftEditorPage.test.tsx`);
 - the product guide (`ui/src/guide.test.tsx`): the registered page conventions (unique
   URL-safe slugs, non-empty title/description, body starting at `##`), exact-slug resolution
   that refuses file paths, Markdown block and inline parsing, safe-link filtering
@@ -961,6 +1010,13 @@ cross-guide links.
 The credential-schemas guide (#134) is covered in the same spec: opening it from the index,
 its hosted/external guidance, pin and JSON Schema sections, the catalog and `/docs` links, and
 a 390 px check with no horizontal overflow and a full axe-core scan.
+
+The contextual help links (#139) are covered in `ui/e2e/guide.spec.ts`: the signed-in
+`/rulebooks/new` editor with an unsaved name and description opens
+`/guide/rulebook-authoring` in a new tab from a keyboard-focused help link, and the original
+tab remains the editor with both values intact; the anonymous playground's help link opens
+`/guide/credential-validation` in a new tab without a sign-in page, and the playground tab
+keeps its own view.
 
 The documentation navigation (#131) is covered by the same spec and
 `ui/e2e/docs.spec.ts`: opening `/guide` from the catalog's primary `Guides` link, the

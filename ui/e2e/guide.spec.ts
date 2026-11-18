@@ -10,6 +10,8 @@
 import { AxeBuilder } from '@axe-core/playwright'
 import { expect, test, type Page } from '@playwright/test'
 
+import { signInAsAdmin } from './session'
+
 const INDEX_HEADING = 'AttestBook product guide'
 const INTRODUCTION_HEADING = 'Introduction to AttestBook'
 const API_INTEGRATION_HEADING = 'API integration'
@@ -511,4 +513,66 @@ test('keeps the guide navigation keyboard reachable and the article readable at 
   expect(horizontalOverflow).toBeLessThanOrEqual(1)
 
   await expectNoA11yViolations(page)
+})
+
+// Contextual help links from the editor and the playground (#139): help opens
+// the bundled guide in a new tab, so the editor keeps its unsaved working copy.
+test('opens the authoring guide from the editor without losing an unsaved draft', async ({
+  page,
+}) => {
+  await signInAsAdmin(page)
+  await page.goto('/rulebooks/new')
+  await expect(page.getByRole('heading', { name: 'New rulebook draft', level: 1 })).toBeVisible()
+
+  await page.getByLabel('Name').fill('Unsaved contextual-help draft')
+  await page.getByLabel('Description').fill('Unsaved text that must survive the help link.')
+
+  const help = page.getByRole('link', { name: /rulebook authoring guide/ })
+  await expect(help).toHaveAttribute('href', '/guide/rulebook-authoring')
+  await expect(help).toHaveAttribute('target', '_blank')
+  await expect(help).toHaveAccessibleName('rulebook authoring guide (opens in a new tab)')
+
+  const popupPromise = page.waitForEvent('popup')
+  await help.focus()
+  await expect(help).toBeFocused()
+  await page.keyboard.press('Enter')
+  const guide = await popupPromise
+  await guide.waitForLoadState()
+
+  expect(new URL(guide.url()).pathname).toBe('/guide/rulebook-authoring')
+  await expect(guide.getByRole('heading', { name: 'Rulebook authoring', level: 1 })).toBeVisible()
+
+  // The original tab is still the editor, with both unsaved fields intact.
+  expect(new URL(page.url()).pathname).toBe('/rulebooks/new')
+  await expect(page.getByLabel('Name')).toHaveValue('Unsaved contextual-help draft')
+  await expect(page.getByLabel('Description')).toHaveValue(
+    'Unsaved text that must survive the help link.',
+  )
+  await guide.close()
+})
+
+test('opens the validation guide from the anonymous playground', async ({ page }) => {
+  await page.goto('/playground')
+  await expect(page.getByRole('heading', { name: 'Credential playground', level: 1 })).toBeVisible()
+
+  const help = page.getByRole('link', { name: /credential validation guide/ })
+  await expect(help).toHaveAttribute('href', '/guide/credential-validation')
+  await expect(help).toHaveAttribute('target', '_blank')
+  await expect(help).toHaveAccessibleName('credential validation guide (opens in a new tab)')
+
+  const popupPromise = page.waitForEvent('popup')
+  await help.click()
+  const guide = await popupPromise
+  await guide.waitForLoadState()
+
+  expect(new URL(guide.url()).pathname).toBe('/guide/credential-validation')
+  await expect(
+    guide.getByRole('heading', { name: 'Credential validation', level: 1 }),
+  ).toBeVisible()
+  await expect(guide).not.toHaveURL(/\/login/)
+
+  // The playground tab stays put and still renders its own heading.
+  expect(new URL(page.url()).pathname).toBe('/playground')
+  await expect(page.getByRole('heading', { name: 'Credential playground', level: 1 })).toBeVisible()
+  await guide.close()
 })
