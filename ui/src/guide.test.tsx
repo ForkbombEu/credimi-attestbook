@@ -679,6 +679,14 @@ describe('rulebook authoring guide', () => {
     // Published snapshots are immutable, and the guide does not claim conformance.
     expect(article as HTMLElement).toHaveTextContent(/immutable/)
     expect(article as HTMLElement).toHaveTextContent(/not a conformance claim/)
+    // A new draft belongs to the session's provider, so New rulebook is not
+    // restricted to the provider that owns an existing rulebook.
+    expect(article as HTMLElement).toHaveTextContent(
+      /New rulebook action appears for any signed-in administrator/,
+    )
+    expect(article as HTMLElement).not.toHaveTextContent(
+      /hidden for anonymous readers and for an administrator of another provider/,
+    )
     expect(document.title).toBe('Rulebook authoring · AttestBook')
   })
 })

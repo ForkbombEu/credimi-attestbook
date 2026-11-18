@@ -18,12 +18,13 @@ owns the rulebook. Signing in is required to:
   `/rulebooks/<id>/edit`;
 - use `Create draft`, `Save draft` and hosted schema registration;
 - use `Freeze as draft version`, `Refresh` and `Publish` in the editor's
-  lifecycle panel.
+  lifecycle panel, and `Create new version` on a published rulebook.
 
 The header shows `Log in` when anonymous, and the signed-in provider's name with
-`Log out` when authenticated. The catalogue's `New rulebook` action and the
-detail page's `Edit draft` and `Create new version` actions appear only for the
-administrator bound to the owning provider.
+`Log out` when authenticated. The catalogue's `New rulebook` action appears for
+any signed-in administrator; the new draft belongs to that administrator's
+provider. The detail page's `Edit draft` and `Create new version` actions
+appear only for the administrator bound to the provider that owns the rulebook.
 
 ## Sign in
 
@@ -51,8 +52,7 @@ different: it is an ownership refusal, not an expired session.
 ## Create a draft
 
 1. Sign in, open the [rulebook catalog](/) and choose `New rulebook`. The action
-   is hidden for anonymous readers and for an administrator of another provider;
-   the editor opens at `/rulebooks/new`.
+   is hidden for anonymous readers; the editor opens at `/rulebooks/new`.
 2. In **Rulebook metadata**, enter a required **Name** and **Applicable
    specification** (a new draft starts at `ts11@1.0.1`). **Description** and
    **Source URL** are optional. The source URL records provenance and is not
