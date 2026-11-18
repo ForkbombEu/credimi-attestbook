@@ -530,6 +530,7 @@ test('opens the authoring guide from the editor without losing an unsaved draft'
   const help = page.getByRole('link', { name: /rulebook authoring guide/ })
   await expect(help).toHaveAttribute('href', '/guide/rulebook-authoring')
   await expect(help).toHaveAttribute('target', '_blank')
+  await expect(help).toHaveAccessibleName('rulebook authoring guide (opens in a new tab)')
 
   const popupPromise = page.waitForEvent('popup')
   await help.focus()
@@ -557,6 +558,7 @@ test('opens the validation guide from the anonymous playground', async ({ page }
   const help = page.getByRole('link', { name: /credential validation guide/ })
   await expect(help).toHaveAttribute('href', '/guide/credential-validation')
   await expect(help).toHaveAttribute('target', '_blank')
+  await expect(help).toHaveAccessibleName('credential validation guide (opens in a new tab)')
 
   const popupPromise = page.waitForEvent('popup')
   await help.click()

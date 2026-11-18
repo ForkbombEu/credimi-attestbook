@@ -261,7 +261,9 @@ Implemented by these slices:
   - every link is a plain root-relative anchor rendered by the shared `GuideLink` component
     with `target="_blank"` and `rel="noopener noreferrer"`. Activating help opens the bundled
     guide in a new tab, so the editor tab keeps its unsaved working copy and the current view
-    never navigates away. The accessible name says that a new tab opens;
+    never navigates away. The accessible name says that a new tab opens, and the component's
+    `slug` is the `GuideSlug` union derived from the registry, so a contextual link cannot name
+    an unregistered page;
   - no link is added to the rulebook detail view: `/guide/concepts` is not a registered guide
     page, and the acceptance criteria prefer omitting a detail help link over adding a new
     panel.

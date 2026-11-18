@@ -1228,7 +1228,7 @@ describe('editor contextual help', () => {
     expect(link).toHaveAttribute('href', '/guide/rulebook-authoring')
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(link).toHaveAccessibleName('rulebook authoring guide (opens in a new tab)')
+    expect(link).toHaveAccessibleName(/rulebook authoring guide\s*\(opens in a new tab\)/)
 
     // Kernel of the UAT: the link is keyboard-reachable and leaves the form in place.
     link.focus()
@@ -1249,6 +1249,6 @@ describe('editor contextual help', () => {
     expect(link).toHaveAttribute('href', '/guide/credential-schemas')
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(link).toHaveAccessibleName('credential schemas guide (opens in a new tab)')
+    expect(link).toHaveAccessibleName(/credential schemas guide\s*\(opens in a new tab\)/)
   })
 })

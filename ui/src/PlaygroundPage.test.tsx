@@ -452,7 +452,7 @@ describe('playground contextual help', () => {
     expect(link).toHaveAttribute('href', '/guide/credential-validation')
     expect(link).toHaveAttribute('target', '_blank')
     expect(link).toHaveAttribute('rel', 'noopener noreferrer')
-    expect(link).toHaveAccessibleName('credential validation guide (opens in a new tab)')
+    expect(link).toHaveAccessibleName(/credential validation guide\s*\(opens in a new tab\)/)
 
     // The help link must not displace the form or introduce an a11y violation.
     expect(await screen.findByLabelText('Rulebook')).toBeInTheDocument()

@@ -8,11 +8,12 @@
 
 import type { ReactNode } from 'react'
 
+import type { GuideSlug } from '../guide'
 import { guidePath } from '../router'
 
 interface GuideLinkProps {
   /** Registry slug of the guide page; never an arbitrary path. */
-  readonly slug: string
+  readonly slug: GuideSlug
   readonly children: ReactNode
   readonly className?: string
 }
@@ -20,7 +21,8 @@ interface GuideLinkProps {
 export function GuideLink({ slug, children, className }: GuideLinkProps) {
   return (
     <a className={className} href={guidePath(slug)} target="_blank" rel="noopener noreferrer">
-      {children} <span className="sr-only">(opens in a new tab)</span>
+      {children}
+      <span className="sr-only"> (opens in a new tab)</span>
     </a>
   )
 }
