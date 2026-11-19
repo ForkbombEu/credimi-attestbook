@@ -584,9 +584,10 @@ and no title. Use root-relative routes (`/`, `/guide`, `/guide/<registered-slug>
 intentionally separate API reference and contract, so a guide may link to them. Relative
 destinations, images, reference-style links, titled links and `javascript:`, `data:`,
 `vbscript:`, protocol-relative or backslash destinations are not rendered by the guide, so
-the check rejects them. Reference repository files in inline code instead of linking to them,
-because a repository path is not a served route: an inline code path such as `docs/ui.md` or
-`src/editor/draft.ts` must exist.
+the check rejects them. Links inside `**bold**` or `*italic*` text are not rendered either;
+put the emphasis outside the link. Reference repository files in inline code instead of
+linking to them, because a repository path is not a served route: an inline code path such as
+`docs/ui.md` or `src/editor/draft.ts` must exist.
 
 `scripts/check-guides.mjs` enforces all of the above offline against the registry and
 `docs/guides/*.md`. It runs from the existing documentation gate:

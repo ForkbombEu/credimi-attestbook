@@ -18,7 +18,9 @@
 //      and `/openapi.json` are permitted because they are intentionally
 //      separate server documents. `#fragment`, `https://`, `http://` and
 //      `mailto:` destinations are accepted; any other destination is not a link
-//      in the rendered guide, so it is rejected here too;
+//      in the rendered guide, so it is rejected here too. The same applies to
+//      link syntax inside `**bold**` or `*italic*` text, which the renderer
+//      shows verbatim rather than parsing again;
 //   4. repository code paths cited in inline code exist. Inline images and
 //      reference-style links are not rendered by the guide, so they are
 //      rejected as well.
@@ -362,9 +364,15 @@ function checkGuideContent(file, slug, slugs) {
           continue;
         }
 
-        if (token.type !== 'text') {
+        // text, strong and emphasis tokens are all displayed verbatim: link
+        // syntax inside any of them is literal text on the published page.
+        if (token.type !== 'text' && token.type !== 'strong' && token.type !== 'emphasis') {
           continue;
         }
+        const inside =
+          token.type === 'text'
+            ? ''
+            : ' (links inside **bold** or *italic* text are not rendered)';
         // Anything the renderer refused to turn into a link stays literal text
         // in the published page; that is a broken guide link, not a valid one.
         for (const match of token.text.matchAll(/\[[^\]]*\]\(([^)]*)\)/g)) {
@@ -380,13 +388,14 @@ function checkGuideContent(file, slug, slugs) {
           if (unsafe) {
             fail(
               `${file}${location(match[0])}: unsafe link destination -> ${destination}` +
-                (lower.startsWith('//') ? ' (protocol-relative)' : ''),
+                (lower.startsWith('//') ? ' (protocol-relative)' : '') +
+                inside,
             );
           } else {
             fail(
               `${file}${location(match[0])}: link renders as literal text -> ${destination} ` +
                 '(use a root-relative /guide/<slug>, #fragment, https://, http:// or ' +
-                'mailto: link with a non-empty label and no title)',
+                `mailto: link with a non-empty label and no title)${inside}`,
             );
           }
         }

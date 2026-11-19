@@ -388,6 +388,66 @@ test('fails on a backslash destination', () => {
   });
 });
 
+test('fails on a link inside bold text', () => {
+  withFixture((root) => {
+    mutate(
+      root,
+      'docs/guides/concepts.md',
+      (text) => `${text}\n**[Quick start](/guide/introduction)**\n`,
+    );
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /renders as literal text -> \/guide\/introduction.*bold/);
+  });
+});
+
+test('fails on a link inside italic text', () => {
+  withFixture((root) => {
+    mutate(root, 'docs/guides/concepts.md', (text) => `${text}\n*See [x](concepts) here*\n`);
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /renders as literal text -> concepts/);
+  });
+});
+
+test('fails on a link swallowed by a stray emphasis marker', () => {
+  withFixture((root) => {
+    mutate(
+      root,
+      'docs/guides/concepts.md',
+      (text) => `${text}\nUse 2 * 3 and [x](/guide/introduction) * here\n`,
+    );
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /renders as literal text/);
+  });
+});
+
+test('fails on an unsafe link inside bold text', () => {
+  withFixture((root) => {
+    mutate(
+      root,
+      'docs/guides/concepts.md',
+      (text) => `${text}\n**[run](javascript:alert(1))**\n`,
+    );
+    const result = runChecker(root);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /unsafe link destination/);
+  });
+});
+
+test('accepts emphasis next to a rendered link', () => {
+  withFixture((root) => {
+    mutate(
+      root,
+      'docs/guides/concepts.md',
+      (text) => `${text}\n**Bold** then [ok](/guide/introduction) and *italic*.\n`,
+    );
+    const result = runChecker(root);
+    assert.equal(result.status, 0, result.stderr);
+  });
+});
+
 test('the positive fixture links are the links the runtime renderer produces', async () => {
   const { parseInline } = await import(
     pathToFileURL(join(repoRoot, 'ui', 'src', 'markdown.ts')).href
