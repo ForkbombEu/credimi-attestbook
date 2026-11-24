@@ -590,6 +590,45 @@ delivered by #88; it is not a provider-bearer-token form:
   link, so the same-origin return target is validated by the shared `safeRedirectPath`
   guard.
 
+### 3.6 Product guide authoring and checks
+
+The published guide is `docs/guides/*.md`, and only those files are guide content: the
+architecture, specification, standards and reference documents elsewhere in `docs/` stay
+source-only documentation and are not served at `/guide`. Add a page by:
+
+1. creating `docs/guides/<slug>.md`, where `<slug>` is lowercase kebab-case
+   (`^[a-z0-9]+(?:-[a-z0-9]+)*$`) and unique;
+2. registering that exact slug with a short title and a one-sentence description in
+   `ui/src/guide.ts`, importing the file with `?raw`;
+3. starting the body at `##`: the registered title is the page's single `h1`, so the
+   document must not carry its own level-1 heading.
+
+A guide link becomes a link only when its destination is a root-relative application path
+(`/...`), a same-page `#fragment`, `https://`, `http://` or `mailto:`, with a non-empty label
+and no title. Use root-relative routes (`/`, `/guide`, `/guide/<registered-slug>`,
+`/playground`, `/captures`, `/rulebooks/*` and `/login`); `/docs` and `/openapi.json` are the
+intentionally separate API reference and contract, so a guide may link to them. Relative
+destinations, images, reference-style links, titled links and `javascript:`, `data:`,
+`vbscript:`, protocol-relative or backslash destinations are not rendered by the guide, so
+the check rejects them. Links inside `**bold**` or `*italic*` text are not rendered either;
+put the emphasis outside the link. Reference repository files in inline code instead of
+linking to them, because a repository path is not a served route: an inline code path such as
+`docs/ui.md` or `src/editor/draft.ts` must exist.
+
+`scripts/check-guides.mjs` enforces all of the above offline against the registry and
+`docs/guides/*.md`. It runs from the existing documentation gate:
+
+```bash
+mise install                    # install the pinned Node and Bun versions
+mise exec -- bun run docs:check # check-docs.mjs, check-guides.mjs and their tests
+node scripts/check-guides.mjs   # guide check alone
+node --test scripts/check-guides.test.mjs
+```
+
+`docs:check` is also what the `docs` CI job runs, so a guide-only pull request fails before
+merge on a missing target, an unsafe link, unrendered link syntax, a duplicate or malformed
+slug, missing page metadata or a missing inline-code path.
+
 ## 4. Build, serve and develop
 
 ```bash
