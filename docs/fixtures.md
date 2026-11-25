@@ -47,6 +47,9 @@ Deliberately **not** implemented:
 - synthesis from SD-JWT VC Type Metadata alone. Type Metadata describes claims and display
   values, but not attribute types or value constraints, so guessing a payload from it would
   not be grounded in the rulebook;
+- derived-type or `aka_vcts` synthesis. A rulebook version snapshot has no credential type or
+  base-type field, and a fixture is an unsigned JSON Schema-derived payload, so no alias is
+  invented or emitted ([`docs/validation.md`](validation.md) §10);
 - persistence of generated fixtures, schema documents or generation history;
 - an exhaustive conformance suite. The negative cases exercise the supported schema subset,
   not every possible issuer or verifier behavior;

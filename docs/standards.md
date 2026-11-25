@@ -179,6 +179,12 @@ Cross-field rules:
 | `meta` for `dc+sd-jwt` | yes | `{ vct, credential_metadata?, sd_jwt_vc_metadata? }`; `sd_jwt_vc_metadata.vct` must match `vct` |
 | `meta` for `mso_mdoc` | yes | `{ doctype_value, credential_metadata? }` |
 
+The `dc+sd-jwt` `meta` object carries only the credential `vct`: it has no
+`aka_vcts` alias list and no base-type relation, so a derived-type relationship
+cannot be declared in a 0.5.4 `SchemaMeta` document. EC erratum #684 places the
+relationship in the credential's `aka_vcts` claim instead
+([`docs/validation.md`](validation.md) §10).
+
 ### 4.3 `TrustAuthority`
 
 - `etsi_tl`: `{ frameworkType: 'etsi_tl', value: <trust-list URI>, verificationMethod: { type: 'X509Certificate', x509Certificate: <base64 DER> } }`
@@ -342,6 +348,11 @@ Documented limitations that remain in the code:
 - Stable machine-readable validation codes, severity or dimension reporting.
 - Form-dependent mdoc/mDL parsing or CBOR/COSE credential handling.
 - Support for the TS11 formats `jwt_vc_json`, `jwt_vc_json-ld` and `ldp_vc`.
+- Validation or interpretation of the SD-JWT VC `aka_vcts` derived-type claim.
+  The model carries no `aka_vcts` or base-type relation, and the Type Metadata
+  `extends` chain is metadata inheritance, not type matching (SD-JWT VC
+  draft-27 §5.4). AttestBook applies the EC erratum #684 structural rule itself
+  in its credential parser ([`docs/validation.md`](validation.md) §10).
 
 ## 6. Compatibility with EC TS11 v1.0.1
 

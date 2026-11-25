@@ -41,6 +41,10 @@ Deliberately **not** in #45:
 - fetching referenced schema documents. As in credential validation and issuer fixtures, the
   caller supplies the exact bytes and no remote schema is retrieved;
 - converting SD-JWT VC Type Metadata into guessed JSON Schema value constraints;
+- matching a requested type against a credential's `vct`/`aka_vcts` (the EC erratum #681
+  inheritance rule) or emitting DCQL `meta` without a stored `vct`/doctype value; credential
+  validation checks the `aka_vcts` structural rule itself
+  ([`docs/validation.md`](validation.md) §10);
 - persisting verifier policies, generated fragments or schema documents;
 - an exhaustive conformance suite. The extracted subset is bounded by the keywords listed in
   §4 and does not execute any keyword.

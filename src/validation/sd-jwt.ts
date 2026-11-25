@@ -6,7 +6,8 @@
 //   * a `vct` claim is required and must be a non-empty string;
 //   * protected claims must be issuer-signed, not selectively disclosed;
 //   * reserved members must not reappear in unpacked claims;
-//   * the disclosure hash algorithm must be one this runtime can execute.
+//   * the disclosure hash algorithm must be one this runtime can execute;
+//   * derived-type aliases follow EC erratum #684 (issue #152).
 //
 // Signatures, issuer trust, status lists and key-binding proofs are NOT
 // verified here. The cryptographic and trust dimensions stay NOT_TESTED.
@@ -24,10 +25,29 @@ import {
 
 import type { ValidationFinding } from './types'
 
-/** SD-JWT VC claims that must be carried in the issuer-signed payload. */
-const PROTECTED_CLAIMS = ['iss', 'nbf', 'exp', 'cnf', 'vct', 'vct#integrity', 'status'] as const
+/**
+ * SD-JWT VC claims that must be carried in the issuer-signed payload.
+ * `aka_vcts` is listed by SD-JWT VC draft-27 clause 2.2.2.3 among the claims
+ * that cannot be selectively disclosed, and EC erratum #684 repeats the rule.
+ */
+const PROTECTED_CLAIMS = [
+  'iss',
+  'nbf',
+  'exp',
+  'cnf',
+  'vct',
+  'vct#integrity',
+  'aka_vcts',
+  'status',
+] as const
 
 const RESERVED_MEMBERS = new Set(['_sd', '_sd_alg', '_sd_decoy', '...'])
+
+/** Base type every domestic PID SD-JWT VC derives from (EC erratum #684). */
+export const DOMESTIC_PID_BASE_VCT = 'urn:eudi:pid:1'
+
+/** Prefix shared by the base PID type and its domestic derived types. */
+const PID_VCT_PREFIX = 'urn:eudi:pid:'
 
 /** Depth bound for recursive claim inspection. */
 const MAX_CLAIM_DEPTH = 64
@@ -58,6 +78,11 @@ export interface ParsedSdJwtVc {
   /** Disclosures keyed by their decoded digest, for type-metadata checks. */
   readonly disclosureMap: Readonly<Record<string, Disclosure>>
   readonly vct: string
+  /**
+   * The validated `aka_vcts` aliases, or `undefined` when the claim is absent.
+   * The aliases are type identifiers, not personal data.
+   */
+  readonly akaVcts: readonly string[] | undefined
   readonly disclosureCount: number
   readonly keyBindingPresent: boolean
 }
@@ -136,6 +161,103 @@ function containsReservedMember(value: unknown): boolean {
   )
 }
 
+/** True for a PID type the erratum treats as domestic, such as `urn:eudi:pid:de:1`. */
+function isDomesticPidVct(vct: string): boolean {
+  return vct.startsWith(PID_VCT_PREFIX) && vct !== DOMESTIC_PID_BASE_VCT
+}
+
+/**
+ * Applies the derived-type structural rule of EC erratum #684: a present
+ * `aka_vcts` must be a non-empty array of non-empty strings, must not repeat the
+ * credential's own `vct`, and a domestic PID type must declare the base PID type.
+ * The rule does not establish that the Issuer is authorised for an alias, so the
+ * result is structural evidence only.
+ *
+ * Each alias array element is reported with a JSON Pointer index path.
+ */
+function checkDerivedTypeAliases(
+  claims: Readonly<Record<string, unknown>>,
+  vct: string,
+  findings: ValidationFinding[],
+): readonly string[] | undefined {
+  const missingBaseAlias = (): void => {
+    findings.push(
+      finding(
+        'missing_domestic_pid_base_alias',
+        `A domestic PID type must declare the base type "${DOMESTIC_PID_BASE_VCT}" in \`aka_vcts\`.`,
+        'error',
+        '/aka_vcts',
+        `aka_vcts contains "${DOMESTIC_PID_BASE_VCT}"`,
+      ),
+    )
+  }
+
+  const value = claims.aka_vcts
+  if (value === undefined) {
+    if (isDomesticPidVct(vct)) {
+      missingBaseAlias()
+    }
+    return undefined
+  }
+
+  if (!Array.isArray(value) || value.length === 0) {
+    findings.push(
+      finding(
+        'invalid_aka_vcts_shape',
+        '`aka_vcts` must be a non-empty array of strings.',
+        'error',
+        '/aka_vcts',
+        'a non-empty array of non-empty strings',
+      ),
+    )
+    return undefined
+  }
+
+  const aliases: string[] = []
+  let shapeValid = true
+  for (const [index, entry] of value.entries()) {
+    if (typeof entry !== 'string' || entry === '') {
+      shapeValid = false
+      findings.push(
+        finding(
+          'invalid_aka_vcts_entry',
+          'Every `aka_vcts` entry must be a non-empty string type identifier.',
+          'error',
+          `/aka_vcts/${String(index)}`,
+          'a non-empty string type identifier',
+        ),
+      )
+      continue
+    }
+    aliases.push(entry)
+  }
+
+  // A malformed array is already a failure; do not also infer a missing alias
+  // from entries that could not be read.
+  if (!shapeValid) {
+    return undefined
+  }
+
+  const ownVctIndex = aliases.indexOf(vct)
+  if (ownVctIndex !== -1) {
+    findings.push(
+      finding(
+        'aka_vcts_contains_vct',
+        'The `aka_vcts` array must not contain the credential `vct` value.',
+        'error',
+        `/aka_vcts/${String(ownVctIndex)}`,
+        'a type identifier different from the credential vct',
+      ),
+    )
+  }
+
+  if (isDomesticPidVct(vct) && !aliases.includes(DOMESTIC_PID_BASE_VCT)) {
+    missingBaseAlias()
+  }
+
+  return aliases
+}
+
 const SAFE_ERROR_MESSAGES: readonly (readonly [string, string])[] = [
   [
     'missing SD-JWT separator',
@@ -186,6 +308,7 @@ function finding(
   message: string,
   severity: 'error' | 'warning' = 'error',
   path?: string,
+  expected?: string,
 ): ValidationFinding {
   return {
     code,
@@ -193,6 +316,7 @@ function finding(
     severity,
     dimension: 'credential_parsing',
     ...(path === undefined ? {} : { path }),
+    ...(expected === undefined ? {} : { expected }),
   }
 }
 
@@ -393,6 +517,7 @@ export async function parseSdJwtVc(credential: string): Promise<SdJwtParseOutcom
   }
 
   const findings: ValidationFinding[] = []
+  const akaVcts = checkDerivedTypeAliases(claims, vct, findings)
   for (const name of PROTECTED_CLAIMS) {
     if (name in claims && !(name in decoded.jwt.payload)) {
       findings.push(
@@ -439,6 +564,7 @@ export async function parseSdJwtVc(credential: string): Promise<SdJwtParseOutcom
       disclosures: decoded.disclosures,
       disclosureMap,
       vct,
+      akaVcts,
       disclosureCount: decoded.disclosures.length,
       keyBindingPresent: decoded.kbJwt !== undefined,
     },

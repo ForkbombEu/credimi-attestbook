@@ -121,6 +121,11 @@ describe('CredentialValidator with a pinned rulebook version', () => {
       'interoperability',
     ])
     expect(dimension(result, 'credential_parsing').status).toBe('PASS')
+    expect(dimension(result, 'credential_parsing').evidence.details).toMatchObject({
+      aka_vcts_present: false,
+      aka_vcts_count: 0,
+      aka_vcts_non_disclosability_observable: true,
+    })
     expect(dimension(result, 'format_recognition').status).toBe('PASS')
     expect(dimension(result, 'schema_validation').status).toBe('PASS')
     expect(dimension(result, 'attestation_constraints').status).toBe('PASS')
@@ -274,6 +279,45 @@ describe('CredentialValidator with a pinned rulebook version', () => {
     expect(dimension(result, 'attestation_constraints').status).toBe('FAIL')
     const violation = result.violations.find((entry) => entry.code === 'missing_key_binding')
     expect(violation?.path).toBe('/cnf')
+  })
+
+  test('fails a domestic PID that omits the base type alias', async () => {
+    const { seeded, validator } = setup()
+    const credential = await issueTestCredential({
+      claims: defaultCredentialClaims({ vct: 'urn:eudi:pid:de:1' }),
+    })
+    const result = await validator.validate(request(seeded, credential, []))
+
+    expect(result.overallStatus).toBe('FAIL')
+    expect(dimension(result, 'credential_parsing').status).toBe('FAIL')
+    const violation = result.violations.find(
+      (entry) => entry.code === 'missing_domestic_pid_base_alias',
+    )
+    expect(violation?.dimension).toBe('credential_parsing')
+    expect(violation?.path).toBe('/aka_vcts')
+  })
+
+  test('accepts a derived domestic PID with aliases and reports the structural evidence', async () => {
+    const { seeded, validator } = setup()
+    const credential = await issueTestCredential({
+      claims: defaultCredentialClaims({
+        vct: 'urn:eudi:pid:de:1',
+        aka_vcts: ['urn:eudi:pid:1'],
+      }),
+    })
+    const result = await validator.validate(request(seeded, credential, []))
+
+    expect(result.overallStatus).toBe('NOT_TESTED')
+    expect(dimension(result, 'credential_parsing').status).toBe('PASS')
+    expect(dimension(result, 'credential_parsing').evidence.details).toMatchObject({
+      aka_vcts_present: true,
+      aka_vcts_count: 1,
+      aka_vcts_non_disclosability_observable: true,
+    })
+    expect(result.credential.vct).toBe('urn:eudi:pid:de:1')
+    expect(result.violations.map((entry) => entry.code)).not.toContain(
+      'missing_domestic_pid_base_alias',
+    )
   })
 
   test('fails a credential whose format the selected attestation type does not support', async () => {

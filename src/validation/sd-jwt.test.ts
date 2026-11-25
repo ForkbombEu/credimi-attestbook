@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test'
 
-import { parseSdJwtVc } from './sd-jwt'
+import { DOMESTIC_PID_BASE_VCT, parseSdJwtVc } from './sd-jwt'
 import { defaultCredentialClaims, issueTestCredential, TEST_VCT } from './test-support'
+
+const DOMESTIC_PID_VCT = 'urn:eudi:pid:de:1'
 
 function decodeSegment(segment: string): Record<string, unknown> {
   return JSON.parse(Buffer.from(segment, 'base64url').toString('utf8')) as Record<string, unknown>
@@ -55,6 +57,7 @@ describe('parseSdJwtVc', () => {
       return
     }
     expect(outcome.value.vct).toBe(TEST_VCT)
+    expect(outcome.value.akaVcts).toBeUndefined()
     expect(outcome.value.disclosureCount).toBe(3)
     expect(outcome.value.claims.given_name).toBe('Ada')
     expect(outcome.value.claims.birthdate).toBe('1815-12-10')
@@ -230,5 +233,132 @@ describe('parseSdJwtVc', () => {
       return
     }
     expect(outcome.value.keyBindingPresent).toBe(true)
+  })
+
+  test('accepts a derived domestic PID that declares its base type aliases', async () => {
+    const claims = defaultCredentialClaims({
+      vct: DOMESTIC_PID_VCT,
+      aka_vcts: [DOMESTIC_PID_BASE_VCT, 'urn:example:pid:base'],
+    })
+    const credential = await issueTestCredential({ claims })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(true)
+    if (!outcome.ok) {
+      return
+    }
+    expect(outcome.value.vct).toBe(DOMESTIC_PID_VCT)
+    expect(outcome.value.akaVcts).toEqual([DOMESTIC_PID_BASE_VCT, 'urn:example:pid:base'])
+  })
+
+  test('rejects a non-array aka_vcts claim', async () => {
+    const claims = defaultCredentialClaims({ aka_vcts: DOMESTIC_PID_BASE_VCT })
+    const credential = await issueTestCredential({ claims })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    expect(outcome.findings.map((entry) => entry.code)).toContain('invalid_aka_vcts_shape')
+  })
+
+  test('rejects an empty aka_vcts array', async () => {
+    const claims = defaultCredentialClaims({ aka_vcts: [] })
+    const credential = await issueTestCredential({ claims })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    expect(outcome.findings.map((entry) => entry.code)).toContain('invalid_aka_vcts_shape')
+  })
+
+  test('rejects an aka_vcts entry that is not a non-empty string', async () => {
+    const claims = defaultCredentialClaims({ aka_vcts: [DOMESTIC_PID_BASE_VCT, 42] })
+    const credential = await issueTestCredential({ claims })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    const entryFinding = outcome.findings.find((entry) => entry.code === 'invalid_aka_vcts_entry')
+    expect(entryFinding?.path).toBe('/aka_vcts/1')
+  })
+
+  test('rejects an aka_vcts array that repeats the credential vct', async () => {
+    const claims = defaultCredentialClaims({ aka_vcts: [TEST_VCT] })
+    const credential = await issueTestCredential({ claims })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    const ownVctFinding = outcome.findings.find((entry) => entry.code === 'aka_vcts_contains_vct')
+    expect(ownVctFinding?.path).toBe('/aka_vcts/0')
+  })
+
+  test('requires the base PID alias on a domestic PID even without aka_vcts', async () => {
+    const claims = defaultCredentialClaims({ vct: DOMESTIC_PID_VCT })
+    const credential = await issueTestCredential({ claims })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    const aliasFinding = outcome.findings.find(
+      (entry) => entry.code === 'missing_domestic_pid_base_alias',
+    )
+    expect(aliasFinding?.path).toBe('/aka_vcts')
+    expect(aliasFinding?.expected?.includes(DOMESTIC_PID_BASE_VCT)).toBe(true)
+  })
+
+  test('requires the base PID alias when aka_vcts omits it', async () => {
+    const claims = defaultCredentialClaims({
+      vct: DOMESTIC_PID_VCT,
+      aka_vcts: ['urn:example:pid:base'],
+    })
+    const credential = await issueTestCredential({ claims })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    expect(outcome.findings.map((entry) => entry.code)).toContain('missing_domestic_pid_base_alias')
+  })
+
+  test('rejects a selectively disclosed aka_vcts alias', async () => {
+    const claims = defaultCredentialClaims({
+      vct: DOMESTIC_PID_VCT,
+      aka_vcts: [DOMESTIC_PID_BASE_VCT],
+    })
+    const credential = await issueTestCredential({ claims, selectiveClaims: ['aka_vcts'] })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    const disclosureFinding = outcome.findings.find(
+      (entry) => entry.code === 'protected_claim_selectively_disclosed',
+    )
+    expect(disclosureFinding?.path).toBe('/aka_vcts')
+  })
+
+  test('rejects a selectively disclosable aka_vcts array element', async () => {
+    const claims = defaultCredentialClaims({
+      vct: DOMESTIC_PID_VCT,
+      aka_vcts: [DOMESTIC_PID_BASE_VCT, 'urn:example:pid:base'],
+    })
+    const credential = await issueTestCredential({
+      claims,
+      disclosureFrame: { aka_vcts: { _sd: [0] } },
+    })
+    const outcome = await parseSdJwtVc(credential)
+    expect(outcome.ok).toBe(false)
+    if (outcome.ok) {
+      return
+    }
+    const disclosureFinding = outcome.findings.find(
+      (entry) => entry.code === 'protected_claim_selectively_disclosable',
+    )
+    expect(disclosureFinding?.path).toBe('/aka_vcts')
   })
 })
