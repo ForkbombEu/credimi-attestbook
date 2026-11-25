@@ -2,7 +2,9 @@
 
 **Status:** Phase 1 implementation for
 [issue #32](https://github.com/ForkbombEu/credimi-attestbook/issues/32) and
-[issue #33](https://github.com/ForkbombEu/credimi-attestbook/issues/33). This document
+[issue #33](https://github.com/ForkbombEu/credimi-attestbook/issues/33), extended by
+[issue #152](https://github.com/ForkbombEu/credimi-attestbook/issues/152) with the derived-type
+`aka_vcts` structural rule (§10). This document
 describes the checks that actually run, the typed API, the per-dimension applicability
 model and the evidence it returns. It makes no cryptographic, trust, protocol,
 interoperability or standards-conformance claim.
@@ -29,7 +31,8 @@ published or draft rulebook version**. The engine:
 2. resolves the selected attestation type from that snapshot, not from the current draft;
 3. recognises the credential format from the artifact (or an explicit caller hint);
 4. parses a real SD-JWT VC with the pinned `@sd-jwt/core` 0.24.1 parser, including disclosure
-   digest verification, unreferenced/duplicate disclosure detection and protected-claim rules;
+   digest verification, unreferenced/duplicate disclosure detection, protected-claim rules and
+   the derived-type `aka_vcts` structural rule (§10);
 5. resolves each pinned schema reference to its deterministic source: a canonical
    AttestBook-hosted URL is read from the immutable local store (never over HTTP), while an
    external reference uses the caller-supplied `schemaDocuments`; applies the verified
@@ -59,7 +62,7 @@ unexecuted dimension; `INCONCLUSIVE` requires an executed check with a warning a
 
 | # | Dimension | Owner | Executed here | Applicability to one credential artifact | Evidence detail |
 | --- | --- | --- | --- | --- | --- |
-| 1 | `credential_parsing` | AttestBook | yes | conditional on a recognised format with a structural parser | parser outcome, disclosure count and bounds |
+| 1 | `credential_parsing` | AttestBook | yes | conditional on a recognised format with a structural parser | parser outcome, disclosure count and bounds, derived-type alias shape/count and non-disclosability observability |
 | 2 | `format_recognition` | AttestBook | yes | required | recognised format, detection source, parser availability |
 | 3 | `cryptographic_verification` | external | no | required | explicitly records issuer JWS signature, KB-JWT proof and status-list checks as not executed |
 | 4 | `schema_validation` | AttestBook | yes | conditional on a matching pinned reference and a resolvable document (hosted store or caller-supplied) | reference count, documents supplied/applied, hosted references applied, findings |
@@ -252,8 +255,10 @@ per process; it never changes persisted artifacts
 Tests execute the real pinned libraries and a real migrated SQLite registry:
 
 - `src/validation/sd-jwt.test.ts` — real SD-JWT VC parsing, disclosure integrity, protected
-  claims, unsupported hash algorithm, key-binding detection, `typ` header and claim-depth/
-  disclosure-count bounds;
+  claims, unsupported hash algorithm, key-binding detection, `typ` header, claim-depth/
+  disclosure-count bounds, and derived-type aliases: a valid domestic PID with base aliases,
+  non-array/empty/non-string shapes, a repeated `vct`, a missing domestic PID base alias and a
+  selectively disclosed `aka_vcts`;
 - `src/validation/schema.test.ts` — Type Metadata positive/negative attribute checks, JSON
   Schema positive/negative checks, SRI mismatch/unsupported algorithm/missing pin, rejection
   of catastrophic-regex, format, uniqueItems, legacy `dependencies` and `$ref` routes,
@@ -311,3 +316,77 @@ belongs to the attestation but not to the credential's format is ignored rather 
 A `vct#integrity` claim on the credential is not compared with the supplied Type Metadata in
 this slice; only the rulebook reference `#integrity` is verified. That is part of the
 `CRYPTO (integrity)` dimension and remains `NOT_TESTED`.
+
+## 10. Derived SD-JWT VC types (`aka_vcts`)
+
+EC erratum [#684](https://github.com/eu-digital-identity-wallet/eudi-doc-standards-and-technical-specifications/issues/684)
+(ETSI TS 119 472-1 v1.2.1, clause 5.2.1.2) requires an SD-JWT VC whose type is derived from
+another type to carry the `aka_vcts` claim: a non-empty array of strings with every type from
+which `vct` is derived. The claim and its entries must not be selectively disclosable, and a
+domestic PID type must list the base type `urn:eudi:pid:1`. The matching erratum
+[#681](https://github.com/eu-digital-identity-wallet/eudi-doc-standards-and-technical-specifications/issues/681)
+defines type matching on `vct`/`aka_vcts` for Wallet Units and Relying Parties. SD-JWT VC
+draft-27 clause 2.2.2.2 defines the claim shape and clause 2.2.2.3 lists it among the claims
+that cannot be selectively disclosed.
+
+The existing structural parser enforces the issuance-side rule in the
+`credential_parsing` dimension:
+
+- a present `aka_vcts` must be a non-empty array of non-empty strings
+  (`invalid_aka_vcts_shape` for a non-array or empty array, `invalid_aka_vcts_entry` for a
+  non-string or empty entry, with `/aka_vcts` or `/aka_vcts/<index>` paths);
+- its entries must not repeat the credential's own `vct` (`aka_vcts_contains_vct`);
+- `aka_vcts` and selectively disclosable structure inside it are protected claims, so a
+  disclosure of the whole claim or of an alias is rejected
+  (`protected_claim_selectively_disclosed` / `protected_claim_selectively_disclosable`);
+- a domestic PID type, detected structurally as a `vct` under `urn:eudi:pid:` that is not the
+  base `urn:eudi:pid:1`, must list the base type in `aka_vcts`
+  (`missing_domestic_pid_base_alias`);
+- an ordinary credential without `aka_vcts` produces no alias finding and is otherwise
+  unchanged.
+
+A compact SD-JWT VC always carries the issuer-signed payload and the disclosures, so
+non-disclosability is observable and checked. If a future FR-009 parsed-credential input
+supplies only unpacked claims, the check must be reported `NOT_TESTED` as a limitation and
+must never be inferred from the absence of a signed payload; no such input path exists in this
+slice. The parsing dimension's evidence records `aka_vcts_present`, `aka_vcts_count` and
+`aka_vcts_non_disclosability_observable`.
+
+### 10.1 Rulebook and library model assessment
+
+The existing models cannot express a derived-type relationship, and this slice adds no field
+to them:
+
+- a rulebook version snapshot stores each attestation type's `name`, `attestationLoS`,
+  `bindingType`, `supportedFormats` and schema references; it stores no `vct`, base type or
+  alias list;
+- the canonical `SchemaMeta` projection carries a `vct` in the `dc+sd-jwt` schema-reference
+  `meta` only: neither `aka_vcts` nor a base-type relation exists in the model;
+- the pinned `@owf/eudi-attestation-schema` 0.5.4 / `@sd-jwt/sd-jwt-vc` 0.24.1 packages do not
+  expose or validate `aka_vcts`. The Type Metadata `extends` property they resolve is a
+  metadata-inheritance chain; draft-27 §5.4 makes it orthogonal to `aka_vcts`, and AttestBook
+  still reports an `extends` chain as `type_metadata_extends_unsupported` rather than treating
+  it as a derived-type declaration.
+
+Consequently AttestBook enforces only the base alias that the erratum specifies normatively,
+the domestic PID `urn:eudi:pid:1`. For any other derived type it validates the alias shape but
+cannot determine the base type from the credential or the rulebook, so it does not invent a
+required base alias.
+
+Deliberately not implemented in this slice:
+
+- matching a requested type against `vct`/`aka_vcts` (the #681 holder/verifier rule) and
+  attestation-type/rulebook matching; the verifier policy slice still reports a missing
+  `vct`/`doctype` for DCQL `meta`;
+- any inference that an `aka_vcts` alias authorizes the Issuer to issue that type (draft-27
+  §7.7);
+- derived-type or `aka_vcts` synthesis in issuer fixtures: fixtures are unsigned payloads
+  synthesized from JSON Schema references, so no credential type, alias or base type is
+  produced ([`docs/fixtures.md`](fixtures.md) §1);
+- any registry redesign, new proprietary rulebook field, normative-artifact edit or issuer
+  signing.
+
+Tests are in `src/validation/sd-jwt.test.ts` (valid aliases, invalid shape, repeated `vct`,
+missing domestic PID base alias, selectively disclosed alias) and
+`src/validation/engine.test.ts` (the finding's dimension/path and the evidence for an ordinary
+credential and a valid derived PID).

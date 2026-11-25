@@ -86,6 +86,8 @@ export function defaultCredentialClaims(
 export interface IssueCredentialOptions {
   readonly claims?: Readonly<Record<string, unknown>>
   readonly selectiveClaims?: readonly string[]
+  /** Full disclosure frame; overrides `selectiveClaims` when supplied. */
+  readonly disclosureFrame?: Readonly<Record<string, unknown>>
 }
 
 let cachedSigner: Promise<(data: string) => Promise<string>> | undefined
@@ -116,8 +118,11 @@ export async function issueTestCredential(options: IssueCredentialOptions = {}):
   const claims = (options.claims ?? defaultCredentialClaims()) as SdJwtVcPayload
   const selectiveClaims = options.selectiveClaims ?? ['given_name', 'family_name', 'birthdate']
   // The pinned package's DisclosureFrame generic cannot infer an index-signature
-  // payload; the frame is a plain `_sd` list at this level.
-  const frame = selectiveClaims.length === 0 ? undefined : { _sd: [...selectiveClaims] }
+  // payload; the frame is a plain `_sd` list at this level unless a test needs
+  // nested or array-element disclosures.
+  const frame =
+    options.disclosureFrame ??
+    (selectiveClaims.length === 0 ? undefined : { _sd: [...selectiveClaims] })
   return instance.issue(claims, frame as never)
 }
 

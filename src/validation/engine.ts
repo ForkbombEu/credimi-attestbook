@@ -397,11 +397,16 @@ export class CredentialValidator {
               '/credential',
             ),
           ],
-          'The credential parsed as SD-JWT VC and its disclosure structure was verified.',
+          'The credential parsed as SD-JWT VC and its disclosure structure and derived-type aliases were verified.',
           {
             format: 'dc+sd-jwt',
             disclosure_count: outcome.value.disclosureCount,
             max_disclosures: MAX_DISCLOSURES,
+            aka_vcts_present: outcome.value.akaVcts !== undefined,
+            aka_vcts_count: outcome.value.akaVcts?.length ?? 0,
+            // The compact artifact carries both the issuer-signed payload and the
+            // disclosures, so the non-disclosability rule is observable here.
+            aka_vcts_non_disclosability_observable: true,
           },
         )
       } else if (outcome.kind === 'unsupported') {
