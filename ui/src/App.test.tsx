@@ -419,7 +419,7 @@ describe('app catalog and detail navigation', () => {
     expect(
       await screen.findByRole('heading', { name: 'Sign in to author rulebooks' }),
     ).toBeInTheDocument()
-    expect(screen.queryByLabelText('Draft JSON')).not.toBeInTheDocument()
+    expect(screen.queryByRole('heading', { name: 'Attestation types' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: 'New rulebook' })).not.toBeInTheDocument()
   })
 

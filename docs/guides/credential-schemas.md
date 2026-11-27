@@ -30,7 +30,7 @@ values; **Use existing external URL** records an external reference without uplo
 Both options produce the same draft members: a `formatIdentifier`, a `uri` and an optional
 `integrity` pin. The hosted or external label is derived from the stored-document association
 when a read projection is produced. It is never guessed from the URL prefix, and it is not
-written into the Draft JSON or a version snapshot.
+written into the draft document or a version snapshot.
 
 ## Immutable public schema URLs
 
@@ -87,8 +87,9 @@ limit before they are stored.
 
 The document is compiled in a bounded schema sandbox. AttestBook refuses constructs it cannot
 apply safely instead of storing them and ignoring them later: `$ref`, `$dynamicRef`,
-`$recursiveRef`, `dependencies`, `format`, `pattern`, `patternProperties` and `uniqueItems` are
-unsupported, and unknown keywords are rejected instead of skipped. Remote references are never
+`$recursiveRef`, `dependencies`, `pattern`, `patternProperties` and `uniqueItems` are
+unsupported, and unknown keywords are rejected instead of skipped. `format` is accepted only
+for `date` and `date-time`; any other format value is unsupported. Remote references are never
 resolved. An unsupported or malformed document answers `400 invalid_request` and nothing is
 stored.
 
@@ -108,6 +109,38 @@ contains no personal data:
   "additionalProperties": false
 }
 ```
+
+## Credential types (vct and docType)
+
+AttestBook stores the credential type inside the hosted JSON Schema; it is never a bare
+keyword at the schema root. The editor's hosted form asks for **Credential type (vct)** on a
+`dc+sd-jwt` attestation and **Document type (docType)** on an `mso_mdoc` one. The value is
+optional while drafting and required before publication, and registration merges it as:
+
+- `dc+sd-jwt`: `properties.vct.const = "<vct>"` and `"vct"` in the root `required` array;
+- `mso_mdoc`: `properties.docType.const = "<docType>"` and `"docType"` in the root `required`
+  array.
+
+When the schema already declares `properties.<vct|docType>.const` or an `enum`, the entered
+value must match it; a different value is refused and nothing is merged. The editor prefills
+the field from an existing `const`. A boolean or non-object schema cannot carry a credential
+type.
+
+An `mso_mdoc` schema must declare at least one **namespace**: a top-level `properties` member
+other than `docType` whose subschema is an object schema (`type: "object"` and/or a
+`properties` member). Its data elements are that member's properties. The editor blocks the
+registration of an mdoc schema without a namespace.
+
+For mdoc CBOR, `format: "date"` maps to CBOR full-date (tag 1004), `format: "date-time"` to
+CBOR tdate (tag 0) and `contentEncoding: "base64"` to bstr. Any other `format` or
+`contentEncoding` value is warned about in the preview and is not supported for credential
+validation.
+
+The publication-readiness check `credential_types` fails when a declared format has no schema
+reference, when a hosted SD-JWT VC JSON Schema has no non-empty `properties.vct.const`, or
+when a hosted mdoc JSON Schema has no non-empty `properties.docType.const` or no namespace.
+An external reference cannot be inspected, so it produces a warning: its schema must declare
+the credential type itself. Publication is refused while this check fails.
 
 ## What a reader can inspect in rulebook detail
 
@@ -131,7 +164,7 @@ carries a `hostedSchema` object with the public document fields, and an external
 carries `hostedSchema: null`. The version response also names the version label, content digest,
 status and publication time, so a reader can identify the exact snapshot that pins the
 reference. The version history's **Inspect references** action reads that frozen snapshot;
-neither the Draft JSON nor the snapshot gains a proprietary member.
+neither the draft document nor the snapshot gains a proprietary member.
 
 ## Where to go next
 

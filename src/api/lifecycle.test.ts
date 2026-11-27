@@ -11,6 +11,7 @@ import type { ValidateFunction } from 'ajv'
 import type { Hono } from 'hono'
 
 import { createApp, type ErrorEnvelope } from '../app'
+import { credentialSchemaDocumentUrl, sha256Sri } from '../public-urls'
 import { provisionProvider } from '../registry/bootstrap'
 import { sha256Hex } from '../registry/digest'
 import { createRegistryFixture, type RegistryFixture } from '../registry/test-support'
@@ -82,6 +83,62 @@ function setup(): Setup {
     database: fixture.database,
     token: owner.token.secret,
     otherToken: other.token.secret,
+    rulebookId: rulebook.id,
+  }
+}
+
+const PUBLIC_BASE_URL = 'https://schemas.example'
+
+/**
+ * Creates a rulebook whose attestation declares the given formats and pins the
+ * one hosted schema document for every format reference.
+ */
+async function setupWithHostedSchema(
+  schemaText: string,
+  formats: readonly string[],
+): Promise<{
+  readonly app: Hono
+  readonly registry: RegistryFixture['registry']
+  readonly token: string
+  readonly rulebookId: string
+}> {
+  fixture = createRegistryFixture()
+  const owner = provisionProvider(fixture.database, {
+    name: 'Hosted Lifecycle Provider',
+    publicationAuthority: 'hosted-lifecycle-provider',
+  })
+  const document = await fixture.registry.registerCredentialSchemaDocument(owner.actor, {
+    kind: 'json_schema_2020_12',
+    bytes: new TextEncoder().encode(schemaText),
+    provenance: { source: 'lifecycle-test' },
+  })
+  const uri = credentialSchemaDocumentUrl(PUBLIC_BASE_URL, document.id)
+  const base = content()
+  const attestation = base.attestations[0]
+  if (attestation === undefined) {
+    throw new Error('the content fixture must define an attestation type')
+  }
+  const rulebook = fixture.registry.createRulebook(owner.actor, {
+    ...base,
+    attestations: [
+      {
+        name: attestation.name,
+        attestationLoS: attestation.attestationLoS,
+        bindingType: attestation.bindingType,
+        supportedFormats: formats,
+        schemaReferences: formats.map((formatIdentifier) => ({
+          formatIdentifier,
+          uri,
+          integrity: sha256Sri(document.contentDigest),
+        })),
+      },
+    ],
+  })
+  fixture.registry.createRulebookVersion(owner.actor, rulebook.id, { version: '1.0' })
+  return {
+    app: createApp({ registry: fixture.registry, publicBaseUrl: PUBLIC_BASE_URL }),
+    registry: fixture.registry,
+    token: owner.token.secret,
     rulebookId: rulebook.id,
   }
 }
@@ -229,8 +286,18 @@ describe('publication readiness API', () => {
       'content_valid',
       'standards_profile',
       'attestation_types',
+      'credential_types',
     ])
-    expect(ready.data.checks.every((check) => check.status === 'pass')).toBe(true)
+    expect(ready.data.checks.map((check) => check.status)).toEqual([
+      'pass',
+      'pass',
+      'pass',
+      'pass',
+      'pass',
+      'pass',
+      'pass',
+      'warn',
+    ])
     expect(ready.data.limitations.length).toBeGreaterThan(0)
 
     const beforeDigest = registry.getRulebookVersion(rulebookId, '1.0')?.contentDigest
@@ -316,7 +383,7 @@ describe('readiness matches the publish transition', () => {
     expect(
       body.data.checks
         .filter((check) => check.id !== 'rulebook_status')
-        .every((check) => check.status === 'pass'),
+        .every((check) => check.status === 'pass' || check.status === 'warn'),
     ).toBe(true)
 
     const rejected = await postEmpty(
@@ -431,6 +498,111 @@ describe('published artifacts stay immutable', () => {
     )
     expect(republishHistorical.status).toBe(409)
     expect((await errorJson(republishHistorical)).error.code).toBe('immutable')
+  })
+})
+
+describe('publish enforces the credential type', () => {
+  const hostedSchema = (properties: Record<string, unknown>, required?: readonly string[]) =>
+    JSON.stringify({
+      $schema: 'https://json-schema.org/draft/2020-12/schema',
+      type: 'object',
+      ...(required === undefined ? {} : { required }),
+      properties,
+    })
+
+  test('rejects a hosted dc+sd-jwt schema without properties.vct.const', async () => {
+    const { app, registry, token, rulebookId } = await setupWithHostedSchema(
+      hostedSchema({ family_name: { type: 'string' } }),
+      ['dc+sd-jwt'],
+    )
+
+    const readiness = await app.request(
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publication-readiness`,
+    )
+    const body = await json<{ data: PublicationReadinessResource }>(readiness)
+    assertSchema('PublicationReadinessResponse', body)
+    const credentialTypes = body.data.checks.find((check) => check.id === 'credential_types')
+    expect(credentialTypes?.status).toBe('fail')
+    expect(credentialTypes?.message).toContain('properties.vct.const')
+    expect(body.data.ready).toBe(false)
+
+    const rejected = await postEmpty(
+      app,
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publish`,
+      token,
+    )
+    expect(rejected.status).toBe(409)
+    const failure = await errorJson(rejected)
+    expect(failure.error.code).toBe('conflict')
+    expect(failure.error.message).toContain('credential type')
+    expect(failure.error.message).toContain('properties.vct.const')
+    expect(registry.getRulebookVersion(rulebookId, '1.0')?.status).toBe('draft')
+    expect(registry.getRulebook(rulebookId)?.publicationStatus).toBe('draft')
+  })
+
+  test('rejects a hosted mso_mdoc schema without docType or a namespace', async () => {
+    const { app, registry, token, rulebookId } = await setupWithHostedSchema(
+      hostedSchema({ family_name: { type: 'string' } }),
+      ['mso_mdoc'],
+    )
+
+    const rejected = await postEmpty(
+      app,
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publish`,
+      token,
+    )
+    expect(rejected.status).toBe(409)
+    const failure = await errorJson(rejected)
+    expect(failure.error.code).toBe('conflict')
+    expect(failure.error.message).toContain('properties.docType.const')
+    expect(failure.error.message).toContain('namespace')
+    expect(registry.getRulebookVersion(rulebookId, '1.0')?.status).toBe('draft')
+  })
+
+  test('publishes when the hosted dc+sd-jwt schema declares properties.vct.const', async () => {
+    const { app, registry, token, rulebookId } = await setupWithHostedSchema(
+      hostedSchema({ vct: { const: 'https://example.org/vct/pid' } }, ['vct']),
+      ['dc+sd-jwt'],
+    )
+
+    const readiness = await app.request(
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publication-readiness`,
+    )
+    const body = await json<{ data: PublicationReadinessResource }>(readiness)
+    expect(body.data.checks.find((check) => check.id === 'credential_types')?.status).toBe('pass')
+
+    const published = await postEmpty(
+      app,
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publish`,
+      token,
+    )
+    expect(published.status).toBe(200)
+    expect(registry.getRulebookVersion(rulebookId, '1.0')?.status).toBe('published')
+    expect(registry.getRulebook(rulebookId)?.publicationStatus).toBe('published')
+  })
+
+  test('publishes when the hosted mso_mdoc schema declares docType and a namespace', async () => {
+    const { app, registry, token, rulebookId } = await setupWithHostedSchema(
+      hostedSchema(
+        {
+          docType: { const: 'org.iso.18013.5.1.mDL' },
+          'org.iso.18013.5.1': {
+            type: 'object',
+            properties: { family_name: { type: 'string' } },
+          },
+        },
+        ['docType'],
+      ),
+      ['mso_mdoc'],
+    )
+
+    const published = await postEmpty(
+      app,
+      `/api/v1/rulebooks/${rulebookId}/versions/1.0/publish`,
+      token,
+    )
+    expect(published.status).toBe(200)
+    expect(registry.getRulebookVersion(rulebookId, '1.0')?.status).toBe('published')
   })
 })
 

@@ -128,14 +128,20 @@ A document with a string `vct` is treated as SD-JWT VC Type Metadata and any oth
 JSON Schema 2020-12; type metadata with an `extends` parent is applied for its own claims
 but reported `INCONCLUSIVE` with `type_metadata_extends_unsupported` because the parent
 chain is not resolved yet. JSON Schema is executed only when it declares JSON Schema 2020-12
-(or no `$schema`) and uses no keyword AttestBook cannot bound safely. `format`, `pattern`,
+(or no `$schema`) and uses no keyword AttestBook cannot bound safely. `format`
+supports exactly `date` and `date-time`, evaluated by fixed linear validators:
+an input longer than 64 characters is rejected before any pattern, then an
+anchored RFC 3339 check applies (a Gregorian calendar day for `date`; hours
+0-23, minutes 0-59, seconds 0-60, an optional fraction and `Z`/`±hh:mm` for
+`date-time`). Every other `format` value (and a non-string value) is reported
+`NOT_TESTED` with `unsupported_schema_keyword`, as are `pattern`,
 `patternProperties`, `uniqueItems`, the legacy `dependencies` applicator and the
-`$ref`/`$dynamicRef`/`$recursiveRef` family are reported `NOT_TESTED` with
-`unsupported_schema_keyword`; unknown keywords and other dialects are also `NOT_TESTED`
-instead of being ignored and reported as validated. A document that mixes a root `vct`
-with JSON Schema keywords is `NOT_TESTED` as `ambiguous_schema_document` because either
-classification would skip constraints. JSON Schema and Type Metadata evaluation runs in a
-separate Bun worker process with a 2-second hard timeout and a 256 MiB RSS watchdog; hitting
+`$ref`/`$dynamicRef`/`$recursiveRef` family; unknown keywords and other dialects
+are also `NOT_TESTED` instead of being ignored and reported as validated. A
+document that mixes a root `vct` with JSON Schema keywords is `NOT_TESTED` as
+`ambiguous_schema_document` because either classification would skip
+constraints. JSON Schema and Type Metadata evaluation runs in a separate Bun
+worker process with a 2-second hard timeout and a 256 MiB RSS watchdog; hitting
 either limit is reported as `NOT_TESTED`, not as a credential failure.
 
 A reference with no resolved document makes schema validation `NOT_TESTED`. A reference whose
@@ -262,10 +268,11 @@ Tests execute the real pinned libraries and a real migrated SQLite registry:
   selectively disclosed `aka_vcts`;
 - `src/validation/schema.test.ts` — Type Metadata positive/negative attribute checks, JSON
   Schema positive/negative checks, SRI mismatch/unsupported algorithm/missing pin, rejection
-  of catastrophic-regex, format, uniqueItems, legacy `dependencies` and `$ref` routes,
-  unsupported dialects, unknown keywords and ambiguous `vct`/JSON Schema documents,
-  unresolved Type Metadata `extends`, oversized credential claim sets, the sandbox timeout
-  path and missing documents;
+  of catastrophic-regex, unsupported `format` values, `uniqueItems`, legacy `dependencies` and
+  `$ref` routes, the bounded `date`/`date-time` validators (calendar, leap year, time and
+  offset ranges, length bound), unsupported dialects, unknown keywords and ambiguous
+  `vct`/JSON Schema documents, unresolved Type Metadata `extends`, oversized credential claim
+  sets, the sandbox timeout path and missing documents;
 - `src/validation/dimensions.test.ts` — the eight-dimension catalogue, the exhaustive
   applicability table, table-driven status-semantics tests and rejection of every
   contradictory applicability/execution/status combination;

@@ -45,13 +45,15 @@ const MAX_SCHEMA_DEPTH = 64
 const MAX_CREDENTIAL_CLAIM_NODES = 4_096
 
 /**
- * Keywords whose evaluation AttestBook cannot bound yet. `pattern`/`format`
- * run JavaScript regular expressions or format validators over attacker
- * controlled strings (catastrophic backtracking), and `uniqueItems` is
- * super-linear. `$ref`/`$dynamicRef`/`$recursiveRef` can reach a hidden
- * `pattern` anywhere in the document, including unknown members and `enum`
- * values, so references are rejected until a safe resolver is pinned. All of
- * them are reported unsupported instead of executed or silently ignored.
+ * Keywords whose evaluation AttestBook cannot bound yet. `pattern` runs a
+ * caller-authored JavaScript regular expression over attacker-controlled
+ * strings (catastrophic backtracking), and `uniqueItems` is super-linear.
+ * `format` is supported only for the two values with fixed, linear validators
+ * below; every other value stays unsupported. `$ref`/`$dynamicRef`/
+ * `$recursiveRef` can reach a hidden `pattern` anywhere in the document,
+ * including unknown members and `enum` values, so references are rejected until
+ * a safe resolver is pinned. All of them are reported unsupported instead of
+ * executed or silently ignored.
  */
 const UNSUPPORTED_SCHEMA_KEYWORDS = [
   '$dynamicRef',
@@ -149,11 +151,95 @@ function looksLikeJsonSchema(document: Record<string, unknown>): boolean {
 }
 
 /**
+ * Bound applied before any format regular expression. RFC 3339 `full-date` is
+ * 10 characters; this leaves room for a fraction and an offset in a
+ * `date-time` value while keeping every scan linear in a small constant.
+ */
+const MAX_FORMAT_VALUE_LENGTH = 64
+
+const DATE_FORMAT_PATTERN = /^(\d{4})-(\d{2})-(\d{2})$/
+
+/**
+ * RFC 3339 §5.6 `date-time`: `full-date` then `full-time`, where the offset is
+ * `Z`/`z` or `±hh:mm`. Lowercase `t`/`z` are accepted as the RFC permits. The
+ * pattern has no nested quantifiers, so it cannot backtrack catastrophically.
+ */
+const DATE_TIME_FORMAT_PATTERN =
+  /^(\d{4})-(\d{2})-(\d{2})[Tt](\d{2}):(\d{2}):(\d{2})(?:\.(\d+))?(?:[Zz]|([+-])(\d{2}):(\d{2}))$/
+
+const SUPPORTED_FORMAT_VALUES: Readonly<Record<string, true>> = {
+  date: true,
+  'date-time': true,
+}
+
+function isLeapYear(year: number): boolean {
+  return year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0)
+}
+
+function daysInMonth(year: number, month: number): number {
+  switch (month) {
+    case 2:
+      return isLeapYear(year) ? 29 : 28
+    case 4:
+    case 6:
+    case 9:
+    case 11:
+      return 30
+    default:
+      return 31
+  }
+}
+
+function hasValidCalendarDate(year: number, month: number, day: number): boolean {
+  return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month)
+}
+
+/** RFC 3339 `full-date` with a real Gregorian calendar day. */
+function isValidDateFormat(value: unknown): boolean {
+  if (typeof value !== 'string' || value.length > MAX_FORMAT_VALUE_LENGTH) {
+    return false
+  }
+  const match = DATE_FORMAT_PATTERN.exec(value)
+  if (match === null) {
+    return false
+  }
+  return hasValidCalendarDate(Number(match[1]), Number(match[2]), Number(match[3]))
+}
+
+/**
+ * RFC 3339 `date-time` with calendar and time range checks: hours 0-23,
+ * minutes 0-59, seconds 0-60 (leap second) and an offset of at most 23:59.
+ */
+function isValidDateTimeFormat(value: unknown): boolean {
+  if (typeof value !== 'string' || value.length > MAX_FORMAT_VALUE_LENGTH) {
+    return false
+  }
+  const match = DATE_TIME_FORMAT_PATTERN.exec(value)
+  if (match === null) {
+    return false
+  }
+  if (!hasValidCalendarDate(Number(match[1]), Number(match[2]), Number(match[3]))) {
+    return false
+  }
+  if (Number(match[4]) > 23 || Number(match[5]) > 59 || Number(match[6]) > 60) {
+    return false
+  }
+  if (match[8] !== undefined && (Number(match[9]) > 23 || Number(match[10]) > 59)) {
+    return false
+  }
+  return true
+}
+
+/**
  * A fresh Ajv instance per document: caller-supplied schemas are untrusted and
  * may reuse `$id` values, so compiled state must not leak between requests.
+ *
+ * Format validation is enabled only for the two bounded validators registered
+ * here. Every other `format` value is refused by the unsupported-keyword scan
+ * before a document can reach Ajv.
  */
 function createAjv(): Ajv2020 {
-  return new Ajv2020({
+  const ajv = new Ajv2020({
     // Stop after the first violation: building every error for an untrusted
     // schema applied to an attacker-controlled claim set is itself unbounded.
     allErrors: false,
@@ -161,9 +247,12 @@ function createAjv(): Ajv2020 {
     // Reject unknown keywords instead of silently ignoring them: ignoring a
     // constraint would report PASS without evaluating it.
     strictSchema: true,
-    validateFormats: false,
+    validateFormats: true,
     allowUnionTypes: true,
   })
+  ajv.addFormat('date', { type: 'string', validate: isValidDateFormat })
+  ajv.addFormat('date-time', { type: 'string', validate: isValidDateTimeFormat })
+  return ajv
 }
 
 /** A schema reference that has been matched to a supplied document. */
@@ -246,6 +335,14 @@ function scanSchemaNode(schema: unknown, path: readonly string[]): UnsupportedSc
   }
   for (const keyword of UNSUPPORTED_SCHEMA_KEYWORDS) {
     if (keyword in schema) {
+      const value = schema[keyword]
+      if (
+        keyword === 'format' &&
+        typeof value === 'string' &&
+        SUPPORTED_FORMAT_VALUES[value] === true
+      ) {
+        continue
+      }
       return { keyword, path: [...path, keyword] }
     }
   }

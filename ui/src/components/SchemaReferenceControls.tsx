@@ -1,7 +1,7 @@
 // Per-attestation schema-reference controls for the draft editor (issue #100).
 //
-// The component is a builder over the existing Draft JSON, not a second source
-// of truth: every insert or removal transforms the JSON text the page owns.
+// The component is a builder over the serialized draft document the page owns,
+// not a second source of truth: every insert or removal rewrites that text.
 // Hosted documents are registered through the administrator session and its
 // CSRF token, then the API's canonical URI and SRI pin become ordinary
 // `schemaReferences` values. External references are entered directly.
@@ -12,11 +12,15 @@ import { isSessionAuthError, type EditorApi } from '../api'
 import { formatDigest, hostedIntegrityState, hostedSchemaDownloadName } from '../detail'
 import { Alert } from './Alert'
 import { CODE_OUTPUT_CLASS } from './CodeOutput'
-import { GuideLink } from './GuideLink'
 import {
   HOSTED_SCHEMA_KIND,
   MAX_HOSTED_SCHEMA_BYTES,
+  cborKeywordWarnings,
+  credentialTypeKeyword,
+  declaredCredentialType,
   insertSchemaReference,
+  mdocNamespaces,
+  mergeCredentialType,
   previewHostedSchema,
   referenceForFormat,
   removeSchemaReference,
@@ -31,9 +35,9 @@ type SchemaSource = 'hosted' | 'external'
 interface SchemaReferenceControlsProps {
   readonly document: DraftContentDocument
   readonly documentText: string
+  /** Attestation whose format rows this instance renders. */
+  readonly attestationIndex: number
   readonly disabled: boolean
-  /** Why the controls are disabled, when the reason is not simply read-only. */
-  readonly disabledReason: string | null
   /** Null means the administrator session cannot authorize a registration. */
   readonly csrfToken: string | null
   readonly api: EditorApi
@@ -73,8 +77,8 @@ function formatName(formatIdentifier: string): string {
 export function SchemaReferenceControls({
   document,
   documentText,
+  attestationIndex,
   disabled,
-  disabledReason,
   csrfToken,
   api,
   hostedSchemas,
@@ -83,7 +87,13 @@ export function SchemaReferenceControls({
 }: SchemaReferenceControlsProps) {
   const fieldId = useId()
   const prefix = `schema-${fieldId.replaceAll(':', '')}`
-  const attestations = useMemo(() => schemaControlAttestations(document), [document])
+  const attestation = useMemo(
+    () =>
+      schemaControlAttestations(document).find(
+        (candidate) => candidate.index === attestationIndex,
+      ) ?? null,
+    [attestationIndex, document],
+  )
   // Registrations made in this view are known associations even though the
   // inserted JSON is the ordinary URI/integrity pair. Loaded associations come
   // from the API, so the row never has to guess from a URL prefix.
@@ -107,6 +117,7 @@ export function SchemaReferenceControls({
   const [fileName, setFileName] = useState<string | null>(null)
   const [externalUri, setExternalUri] = useState('')
   const [externalIntegrity, setExternalIntegrity] = useState('')
+  const [credentialType, setCredentialType] = useState('')
   const [fieldErrors, setFieldErrors] = useState<{
     readonly uri?: string
     readonly integrity?: string
@@ -115,8 +126,9 @@ export function SchemaReferenceControls({
   const [working, setWorking] = useState(false)
   const [result, setResult] = useState<ResultNotice | null>(null)
   const [status, setStatus] = useState<string | null>(null)
-  // Registration is asynchronous and the Draft JSON stays editable, so a
-  // reference must be inserted into the latest text, never the click-time copy.
+  // Registration is asynchronous and the attestation section stays editable,
+  // so a reference must be inserted into the latest text, never the click-time
+  // copy.
   const documentTextRef = useRef(documentText)
   useEffect(() => {
     documentTextRef.current = documentText
@@ -130,20 +142,79 @@ export function SchemaReferenceControls({
     setFileName(null)
     setExternalUri('')
     setExternalIntegrity('')
+    setCredentialType('')
     setFieldErrors({})
     setFormError(null)
   }
 
+  /**
+   * Replaces the hosted schema text and prefills the credential-type field from
+   * an existing `properties.<vct|docType>.const`, so re-registering a schema
+   * that already declares it does not ask for the same value twice.
+   */
+  const applySchemaText = (text: string, formatIdentifier: string) => {
+    setSchemaText(text)
+    setFileName(null)
+    setFormError(null)
+    const keyword = credentialTypeKeyword(formatIdentifier)
+    setCredentialType(keyword === null ? '' : (declaredCredentialType(text, keyword) ?? ''))
+  }
+
+  // The stored-document read started by an edit; a newer edit or a closed form
+  // aborts it so a late response never fills the wrong row.
+  const pendingLoad = useRef<AbortController | null>(null)
+  const [loadingStored, setLoadingStored] = useState(false)
+  useEffect(() => () => pendingLoad.current?.abort(), [])
+
+  /**
+   * Opens the row's form. Editing an existing reference starts from its current
+   * values: an external reference fills the URL and SRI pin, and a hosted one
+   * loads the exact stored schema (and so its vct/docType) for editing. Saving
+   * a changed hosted schema registers a new immutable document.
+   */
   const openForm = (attestation: SchemaControlAttestation, formatIdentifier: string) => {
     const reference = referenceForFormat(attestation, formatIdentifier)
+    const hosted = hostedFor(reference)
+    pendingLoad.current?.abort()
+    setLoadingStored(false)
     setOpenKey(rowKey(attestation.index, formatIdentifier))
-    setMode(defaultMode(hostedFor(reference)))
+    setMode(defaultMode(hosted))
     setResult(null)
     setStatus(null)
     resetForm()
+    if (reference === null) {
+      return
+    }
+    if (hosted === null) {
+      setExternalUri(reference.uri)
+      setExternalIntegrity(reference.integrity ?? '')
+      return
+    }
+    const controller = new AbortController()
+    pendingLoad.current = controller
+    setLoadingStored(true)
+    api
+      .getSchemaDocumentContent(hosted.id, controller.signal)
+      .then((text) => {
+        if (!controller.signal.aborted) {
+          applySchemaText(text, formatIdentifier)
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setFormError('The stored schema could not be loaded. Paste or choose it again.')
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoadingStored(false)
+        }
+      })
   }
 
   const closeForm = () => {
+    pendingLoad.current?.abort()
+    setLoadingStored(false)
     setOpenKey(null)
     resetForm()
   }
@@ -156,7 +227,7 @@ export function SchemaReferenceControls({
     resetForm()
   }
 
-  const handleFile = async (event: ChangeEvent<HTMLInputElement>) => {
+  const handleFile = async (event: ChangeEvent<HTMLInputElement>, formatIdentifier: string) => {
     const file = event.target.files?.[0]
     if (file === undefined) {
       return
@@ -187,6 +258,8 @@ export function SchemaReferenceControls({
       }
       setSchemaText(text)
       setFileName(file.name)
+      const keyword = credentialTypeKeyword(formatIdentifier)
+      setCredentialType(keyword === null ? '' : (declaredCredentialType(text, keyword) ?? ''))
     } catch {
       setFormError('The file could not be read. Choose it again.')
     }
@@ -201,6 +274,25 @@ export function SchemaReferenceControls({
       setFormError(current.message)
       return
     }
+    const keyword = credentialTypeKeyword(formatIdentifier)
+    if (keyword === 'docType' && mdocNamespaces(schemaText).length === 0) {
+      setFormError(
+        'An mso_mdoc schema must declare at least one namespace: a top-level properties member other than docType whose subschema is an object schema.',
+      )
+      return
+    }
+    // The entered credential type is written into the exact bytes that are
+    // registered. A mismatching existing const/enum stops the registration.
+    let textToRegister = schemaText
+    const enteredCredentialType = credentialType.trim()
+    if (keyword !== null && enteredCredentialType !== '') {
+      const merged = mergeCredentialType(schemaText, keyword, enteredCredentialType)
+      if (!merged.ok) {
+        setFormError(merged.message)
+        return
+      }
+      textToRegister = merged.text
+    }
     if (csrfToken === null) {
       onSessionExpired()
       setFormError('Sign in again to register this schema with your administrator session.')
@@ -209,7 +301,11 @@ export function SchemaReferenceControls({
     setWorking(true)
     setFormError(null)
     try {
-      const registered = await api.registerSchemaDocument(HOSTED_SCHEMA_KIND, schemaText, csrfToken)
+      const registered = await api.registerSchemaDocument(
+        HOSTED_SCHEMA_KIND,
+        textToRegister,
+        csrfToken,
+      )
       registeredSchemas.current.set(registered.url, registered)
       const edit = insertSchemaReference(
         documentTextRef.current,
@@ -311,10 +407,14 @@ export function SchemaReferenceControls({
     const formId = `${prefix}-${attestation.index}-${encodeURIComponent(formatIdentifier)}`
     const reference = referenceForFormat(attestation, formatIdentifier)
     const hosted = mode === 'hosted'
+    const keyword = credentialTypeKeyword(formatIdentifier)
+    const namespaces = preview.ok && keyword === 'docType' ? mdocNamespaces(schemaText) : []
+    const missingNamespace = preview.ok && keyword === 'docType' && namespaces.length === 0
+    const keywordWarnings = preview.ok ? cborKeywordWarnings(schemaText) : []
     return (
       <div className="schema-form" key={key}>
         <p className="schema-form__title">
-          {reference === null ? 'Add a schema for' : 'Replace the schema for'}{' '}
+          {reference === null ? 'Add a schema for' : 'Edit the schema for'}{' '}
           <strong>{attestation.name}</strong> · <code>{formatName(formatIdentifier)}</code>
         </p>
         <fieldset className="schema-mode">
@@ -373,11 +473,9 @@ export function SchemaReferenceControls({
                 spellCheck={false}
                 value={schemaText}
                 onChange={(event) => {
-                  setSchemaText(event.target.value)
-                  setFileName(null)
-                  setFormError(null)
+                  applySchemaText(event.target.value, formatIdentifier)
                 }}
-                disabled={working || disabled}
+                disabled={working || disabled || loadingStored}
                 aria-describedby={
                   showPreview && !preview.ok
                     ? `${formId}-preview ${formId}-preview-error`
@@ -386,8 +484,11 @@ export function SchemaReferenceControls({
                 aria-invalid={showPreview && !preview.ok}
               />
               <p className="field-hint" id={`${formId}-preview`}>
-                JSON Schema 2020-12. The exact text is registered; the API compiles it before it is
-                stored.
+                {loadingStored ? (
+                  <span role="status">Loading the stored schema…</span>
+                ) : (
+                  'JSON Schema 2020-12. The exact text is registered; the API compiles it before it is stored. A changed schema is stored as a new document.'
+                )}
               </p>
             </div>
             <div className="field">
@@ -397,7 +498,7 @@ export function SchemaReferenceControls({
                 type="file"
                 accept=".json,application/json,application/schema+json"
                 onChange={(event) => {
-                  void handleFile(event)
+                  void handleFile(event, formatIdentifier)
                 }}
                 disabled={working || disabled}
               />
@@ -419,6 +520,27 @@ export function SchemaReferenceControls({
                       <span className="muted"> · {preview.dialect}</span>
                     )}
                   </p>
+                  {keyword !== 'docType' || namespaces.length === 0 ? null : (
+                    <p className="schema-preview__status">
+                      Namespaces: <code>{namespaces.join(', ')}</code>
+                    </p>
+                  )}
+                  {keywordWarnings.length === 0 ? null : (
+                    <Alert variant="warning" title="CBOR values to check" className="schema-lint">
+                      <ul>
+                        {keywordWarnings.map((warning) => (
+                          <li key={`${warning.kind}-${warning.path}`}>
+                            <code>{warning.path}</code> <code>{warning.value}</code> is not a
+                            supported CBOR{' '}
+                            {warning.kind === 'format'
+                              ? 'format; use date or date-time'
+                              : 'contentEncoding; use base64'}
+                            .
+                          </li>
+                        ))}
+                      </ul>
+                    </Alert>
+                  )}
                   <pre className={CODE_OUTPUT_CLASS} tabIndex={0} aria-label="Schema preview">
                     {schemaText}
                   </pre>
@@ -431,10 +553,53 @@ export function SchemaReferenceControls({
               )}
             </div>
 
+            {keyword === 'docType' ? (
+              <Alert variant="info" title="CBOR encoding guidance for mso_mdoc">
+                <p>
+                  In an mso_mdoc schema, <code>format: "date"</code> maps to CBOR full-date (tag
+                  1004) and <code>format: "date-time"</code> to CBOR tdate (tag 0). Use{' '}
+                  <code>contentEncoding: "base64"</code> for byte strings. Other format or
+                  contentEncoding values are not supported for mdoc credentials.
+                </p>
+              </Alert>
+            ) : null}
+
+            {missingNamespace ? (
+              <p className="field-error">
+                This mso_mdoc schema declares no namespace. Add a top-level properties member other
+                than <code>docType</code> whose subschema is an object schema (
+                <code>type: "object"</code> and/or <code>properties</code>) for each namespace.
+              </p>
+            ) : null}
+
+            {keyword === null ? null : (
+              <div className="field">
+                <label htmlFor={`${formId}-credential-type`}>
+                  {keyword === 'vct' ? 'Credential type (vct)' : 'Document type (docType)'}
+                </label>
+                <input
+                  id={`${formId}-credential-type`}
+                  value={credentialType}
+                  onChange={(event) => {
+                    setCredentialType(event.target.value)
+                    setFormError(null)
+                  }}
+                  placeholder={keyword === 'vct' ? 'urn:eudi:pid:1' : 'eu.europa.ec.eudi.pid.1'}
+                  disabled={working || disabled}
+                  aria-describedby={`${formId}-credential-type-hint`}
+                />
+                <p className="field-hint" id={`${formId}-credential-type-hint`}>
+                  Optional while drafting; required before publication. The value is written into
+                  the schema as <code>properties.{keyword}.const</code> and added to the root{' '}
+                  <code>required</code> array. It must match an existing const or enum.
+                </p>
+              </div>
+            )}
+
             {csrfToken === null ? (
               <p className="field-hint">
-                Sign in again before registering; the draft JSON is not changed until the
-                registration succeeds.
+                Sign in again before registering; the draft is not changed until the registration
+                succeeds.
               </p>
             ) : null}
 
@@ -445,7 +610,14 @@ export function SchemaReferenceControls({
                 onClick={() => {
                   void handleRegister(attestation, formatIdentifier)
                 }}
-                disabled={working || disabled || csrfToken === null || !preview.ok}
+                disabled={
+                  working ||
+                  disabled ||
+                  loadingStored ||
+                  csrfToken === null ||
+                  !preview.ok ||
+                  missingNamespace
+                }
                 aria-label={`Register and insert schema for ${attestation.name} (${formatName(formatIdentifier)})`}
               >
                 {working ? 'Registering…' : 'Register and insert schema'}
@@ -462,6 +634,15 @@ export function SchemaReferenceControls({
           </div>
         ) : (
           <div className="schema-form__body" key="external">
+            {keyword === null ? null : (
+              <Alert variant="info">
+                <p>
+                  AttestBook cannot inspect an external schema. It must declare{' '}
+                  <code>properties.{keyword}.const</code> itself, so publication readiness can only
+                  warn that the credential type cannot be verified.
+                </p>
+              </Alert>
+            )}
             <div className="field">
               <label htmlFor={`${formId}-uri`}>Schema URL</label>
               <input
@@ -559,23 +740,12 @@ export function SchemaReferenceControls({
     )
   }
 
+  if (attestation === null) {
+    return <p className="field-hint">This attestation is no longer in the draft.</p>
+  }
+
   return (
-    <section className="content-section" aria-labelledby={`${prefix}-heading`}>
-      <h2 id={`${prefix}-heading`}>Schema references</h2>
-      <p className="field-hint schema-reference-intro">
-        Add one schema reference per attestation format. The controls update the Draft JSON above;
-        the raw editor stays the source of truth. Read the{' '}
-        <GuideLink slug="credential-schemas">credential schemas guide</GuideLink> for hosted and
-        external references.
-      </p>
-
-      {disabled && disabledReason === null ? (
-        <p className="field-hint">
-          Read-only: schema references can be changed only while the rulebook is a draft.
-        </p>
-      ) : null}
-      {disabledReason === null ? null : <p className="field-hint">{disabledReason}</p>}
-
+    <div className="schema-rows">
       {result === null ? null : (
         <Alert variant="success" role="status" title={result.title}>
           <p className="schema-result__value">
@@ -602,129 +772,112 @@ export function SchemaReferenceControls({
         </Alert>
       )}
 
-      {attestations.length === 0 ? (
+      {attestation.formats.length === 0 ? (
         <p className="field-hint">
-          Add an attestation to the Draft JSON first; schema references attach to an attestation
-          type and one of its supported formats.
+          Choose a supported format in the attestation form to attach a schema.
         </p>
       ) : null}
 
-      <div className="schema-attestations">
-        {attestations.map((attestation) => (
-          <div className="schema-attestation" key={attestation.index}>
-            <h3 className="schema-attestation__title">
-              {attestation.name}
-              <span className="schema-attestation__position">
-                Attestation {attestation.index + 1}
-              </span>
-            </h3>
-            {attestation.formats.length === 0 ? (
-              <p className="field-hint">
-                Add a supported format for this attestation in the Draft JSON to attach a schema.
-              </p>
-            ) : null}
-            {attestation.formats.map((formatIdentifier) => {
-              const key = rowKey(attestation.index, formatIdentifier)
-              const reference = referenceForFormat(attestation, formatIdentifier)
-              const hosted = hostedFor(reference)
-              const pinState = hostedIntegrityState({
-                integrity: reference?.integrity ?? null,
-                hostedSchema: hosted,
-              })
-              const open = openKey === key
-              return (
-                <div className="schema-row" key={formatIdentifier}>
-                  <div className="schema-row__details">
-                    <p className="schema-row__format">
-                      <code>{formatName(formatIdentifier)}</code>
-                      {reference === null ? (
-                        <span className="schema-row__missing">No schema attached</span>
-                      ) : (
-                        <span
-                          className={`schema-row__source schema-row__source--${hosted === null ? 'external' : 'hosted'}`}
-                        >
-                          {hosted === null ? 'External URL' : 'Hosted by AttestBook'}
-                        </span>
-                      )}
-                    </p>
-                    {reference === null ? null : (
-                      <>
-                        <p className="schema-row__uri">
-                          <span className="data">{reference.uri}</span>
-                        </p>
-                        <p className="schema-row__integrity">
-                          {reference.integrity === null ? (
-                            'No integrity pin'
-                          ) : (
-                            <span className="data">{reference.integrity}</span>
-                          )}
-                          {pinState === 'matches' ? (
-                            <span className="schema-row__pin schema-row__pin--ok">
-                              {' '}
-                              · Pin matches stored digest
-                            </span>
-                          ) : null}
-                          {pinState === 'mismatch' ? (
-                            <span className="schema-row__pin schema-row__pin--mismatch">
-                              {' '}
-                              · Pin does not match stored digest
-                            </span>
-                          ) : null}
-                        </p>
-                        {hosted === null ? null : (
-                          <p className="schema-row__hosted">
-                            <span>{kindLabel(hosted.kind)}</span>
-                            <span>
-                              <code>{hosted.mediaType}</code>
-                            </span>
-                            <span title={hosted.contentDigest}>
-                              SHA-256{' '}
-                              <span className="data">{formatDigest(hosted.contentDigest)}</span>
-                            </span>
-                            <a
-                              href={hosted.url}
-                              download={hostedSchemaDownloadName(hosted)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              aria-label={`Download the hosted ${kindLabel(hosted.kind)} document for ${attestation.name} (${formatName(formatIdentifier)})`}
-                            >
-                              Download
-                            </a>
-                          </p>
-                        )}
-                      </>
-                    )}
-                  </div>
-                  <div className="schema-row__actions">
-                    <button
-                      type="button"
-                      className="btn btn-outline btn-sm"
-                      onClick={() => openForm(attestation, formatIdentifier)}
-                      disabled={disabled}
-                      aria-expanded={open}
-                      aria-label={`${reference === null ? 'Add' : 'Replace'} schema for ${attestation.name} (${formatName(formatIdentifier)})`}
+      <div className="schema-attestation">
+        {attestation.formats.map((formatIdentifier) => {
+          const key = rowKey(attestation.index, formatIdentifier)
+          const reference = referenceForFormat(attestation, formatIdentifier)
+          const hosted = hostedFor(reference)
+          const pinState = hostedIntegrityState({
+            integrity: reference?.integrity ?? null,
+            hostedSchema: hosted,
+          })
+          const open = openKey === key
+          return (
+            <div className="schema-row" key={formatIdentifier}>
+              <div className="schema-row__details">
+                <p className="schema-row__format">
+                  <code>{formatName(formatIdentifier)}</code>
+                  {reference === null ? (
+                    <span className="schema-row__missing">No schema attached</span>
+                  ) : (
+                    <span
+                      className={`schema-row__source schema-row__source--${hosted === null ? 'external' : 'hosted'}`}
                     >
-                      {reference === null ? 'Add schema' : 'Replace schema'}
-                    </button>
-                    {reference === null ? null : (
-                      <button
-                        type="button"
-                        className="btn btn-outline btn-sm"
-                        onClick={() => handleRemove(attestation, formatIdentifier)}
-                        disabled={disabled}
-                        aria-label={`Remove schema for ${attestation.name} (${formatName(formatIdentifier)})`}
-                      >
-                        Remove
-                      </button>
+                      {hosted === null ? 'External URL' : 'Hosted by AttestBook'}
+                    </span>
+                  )}
+                </p>
+                {reference === null ? null : (
+                  <>
+                    <p className="schema-row__uri">
+                      <span className="data">{reference.uri}</span>
+                    </p>
+                    <p className="schema-row__integrity">
+                      {reference.integrity === null ? (
+                        'No integrity pin'
+                      ) : (
+                        <span className="data">{reference.integrity}</span>
+                      )}
+                      {pinState === 'matches' ? (
+                        <span className="schema-row__pin schema-row__pin--ok">
+                          {' '}
+                          · Pin matches stored digest
+                        </span>
+                      ) : null}
+                      {pinState === 'mismatch' ? (
+                        <span className="schema-row__pin schema-row__pin--mismatch">
+                          {' '}
+                          · Pin does not match stored digest
+                        </span>
+                      ) : null}
+                    </p>
+                    {hosted === null ? null : (
+                      <p className="schema-row__hosted">
+                        <span>{kindLabel(hosted.kind)}</span>
+                        <span>
+                          <code>{hosted.mediaType}</code>
+                        </span>
+                        <span title={hosted.contentDigest}>
+                          SHA-256 <span className="data">{formatDigest(hosted.contentDigest)}</span>
+                        </span>
+                        <a
+                          href={hosted.url}
+                          download={hostedSchemaDownloadName(hosted)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          aria-label={`Download the hosted ${kindLabel(hosted.kind)} document for ${attestation.name} (${formatName(formatIdentifier)})`}
+                        >
+                          Download
+                        </a>
+                      </p>
                     )}
-                  </div>
-                  {open ? renderForm(attestation, formatIdentifier) : null}
-                </div>
-              )
-            })}
-          </div>
-        ))}
+                  </>
+                )}
+              </div>
+              <div className="schema-row__actions">
+                <button
+                  type="button"
+                  className="btn btn-outline btn-sm"
+                  onClick={() => openForm(attestation, formatIdentifier)}
+                  disabled={disabled}
+                  aria-expanded={open}
+                  aria-label={`${reference === null ? 'Add' : 'Edit'} schema for ${attestation.name} (${formatName(formatIdentifier)})`}
+                >
+                  {reference === null ? 'Add schema' : 'Edit schema'}
+                </button>
+                {reference === null ? null : (
+                  <button
+                    type="button"
+                    className="btn btn-outline btn-sm"
+                    onClick={() => handleRemove(attestation, formatIdentifier)}
+                    disabled={disabled}
+                    aria-label={`Remove schema for ${attestation.name} (${formatName(formatIdentifier)})`}
+                  >
+                    Remove
+                  </button>
+                )}
+              </div>
+              {open ? renderForm(attestation, formatIdentifier) : null}
+            </div>
+          )
+        })}
       </div>
-    </section>
+    </div>
   )
 }

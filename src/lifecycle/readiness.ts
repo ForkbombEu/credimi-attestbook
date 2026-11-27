@@ -11,7 +11,9 @@
 //   4. the snapshot content passes the same structural and TS11 v1.0.1
 //      standards validation the editor runs before saving;
 //   5. the rulebook defines at least one attestation type, without which no
-//      credential can be validated against it.
+//      credential can be validated against it;
+//   6. every declared dc+sd-jwt / mso_mdoc format has a credential type that
+//      can be verified from a hosted schema (or is explicitly external).
 //
 // Remote schema documents, issuer trust, signing and interoperability are not
 // verified here; they are listed as explicit limitations instead.
@@ -21,6 +23,7 @@ import { sha256Hex } from '../registry/digest'
 import { isRulebookTransitionAllowed } from '../registry/transitions'
 import type { PublicationStatus, RulebookVersion } from '../registry/types'
 import type { RulebookVersionDocument } from '../registry/versioning'
+import { assessCredentialTypes, type CredentialSchemaResolver } from './credential-types'
 
 export const PUBLICATION_READINESS_CHECK_STATUSES = [
   'pass',
@@ -39,6 +42,7 @@ export const PUBLICATION_READINESS_CHECK_IDS = [
   'content_valid',
   'standards_profile',
   'attestation_types',
+  'credential_types',
 ] as const
 export type PublicationReadinessCheckId = (typeof PUBLICATION_READINESS_CHECK_IDS)[number]
 
@@ -65,6 +69,8 @@ export interface PublicationReadinessInput {
   /** Snapshot bytes the current working copy would freeze under this label. */
   readonly currentBytes: Uint8Array
   readonly document: RulebookVersionDocument
+  /** Resolves a canonical hosted schema reference to its stored document. */
+  readonly resolveCredentialSchema: CredentialSchemaResolver
 }
 
 const BASE_LIMITATIONS: readonly string[] = [
@@ -195,6 +201,8 @@ export function assessPublicationReadiness(input: PublicationReadinessInput): Pu
           'A publishable rulebook must define at least one attestation type.',
         ),
   )
+  const credentialTypes = assessCredentialTypes(document, input.resolveCredentialSchema)
+  checks.push(check('credential_types', credentialTypes.status, credentialTypes.message))
 
   const limitations = [...BASE_LIMITATIONS, ...report.limitations]
 

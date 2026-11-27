@@ -7,6 +7,7 @@
 // validate locally before it sends anything, and so the tests can exercise the
 // exact transformations.
 
+import type { AttestationDraft } from './draft'
 import type { DraftContentDocument, DraftSchemaReference, DraftSchemaReferenceInput } from './types'
 
 /** Profile sent for a JSON Schema document accepted by the hosted workflow. */
@@ -150,6 +151,8 @@ export function validateExternalSchema(uri: string, integrity: string): External
 export interface SchemaControlAttestation {
   readonly index: number
   readonly name: string
+  readonly attestationLoS: string | null
+  readonly bindingType: string | null
   /** Supported formats first, then formats only present on existing references. */
   readonly formats: readonly string[]
   readonly references: readonly DraftSchemaReference[]
@@ -164,8 +167,8 @@ function attestationName(record: Record<string, unknown>, index: number): string
 /**
  * Projects the parsed draft document into the attestation/format rows the
  * controls render. Malformed members are tolerated rather than throwing: the
- * raw JSON editor is the authoritative source and the server reports the
- * structural findings.
+ * serialized draft document is the authoritative source and the server reports
+ * the structural findings.
  */
 export function schemaControlAttestations(
   document: DraftContentDocument,
@@ -203,7 +206,14 @@ export function schemaControlAttestations(
         formats.push(format)
       }
     }
-    return { index, name, formats, references }
+    return {
+      index,
+      name,
+      attestationLoS: typeof record.attestationLoS === 'string' ? record.attestationLoS : null,
+      bindingType: typeof record.bindingType === 'string' ? record.bindingType : null,
+      formats,
+      references,
+    }
   })
 }
 
@@ -304,12 +314,12 @@ export function insertSchemaReference(
   if (document === null) {
     return {
       ok: false,
-      message: 'Fix the Draft JSON before adding a schema reference.',
+      message: 'The draft document could not be read; add the schema reference again.',
     }
   }
   const attestation = readAttestationForEdit(document.attestations, attestationIndex)
   if (attestation === null) {
-    return { ok: false, message: 'That attestation is no longer in the Draft JSON.' }
+    return { ok: false, message: 'That attestation is no longer in the draft.' }
   }
   if (
     expectedName !== undefined &&
@@ -325,7 +335,7 @@ export function insertSchemaReference(
   if (references === null) {
     return {
       ok: false,
-      message: 'Fix the attestation schemaReferences array before adding a reference.',
+      message: 'Fix the attestation schemaReferences array in the draft before adding a reference.',
     }
   }
   const next = [...references]
@@ -350,25 +360,313 @@ export function removeSchemaReference(
   if (document === null) {
     return {
       ok: false,
-      message: 'Fix the Draft JSON before removing a schema reference.',
+      message: 'The draft document could not be read; remove the schema reference again.',
     }
   }
   const attestation = readAttestationForEdit(document.attestations, attestationIndex)
   if (attestation === null) {
-    return { ok: false, message: 'That attestation is no longer in the Draft JSON.' }
+    return { ok: false, message: 'That attestation is no longer in the draft.' }
   }
   const references = readReferencesForEdit(attestation)
   if (references === null) {
     return {
       ok: false,
-      message: 'Fix the attestation schemaReferences array before removing a reference.',
+      message:
+        'Fix the attestation schemaReferences array in the draft before removing a reference.',
     }
   }
   const index = findReferenceIndex(references, formatIdentifier)
   if (index === -1) {
-    return { ok: false, message: 'That schema reference is no longer in the Draft JSON.' }
+    return { ok: false, message: 'That schema reference is no longer in the draft.' }
   }
   references.splice(index, 1)
   attestation.schemaReferences = references
   return { ok: true, text: JSON.stringify(document.root, null, 2) }
+}
+
+/**
+ * Replaces the editable members of one existing attestation. Members the form
+ * does not model survive. A format that is no longer supported also drops its
+ * schema reference, because a reference without its format is unrepresentable.
+ */
+export function replaceAttestation(
+  documentText: string,
+  attestationIndex: number,
+  draft: AttestationDraft,
+): SchemaReferenceEdit {
+  const document = readDocumentForEdit(documentText)
+  if (document === null) {
+    return { ok: false, message: 'The draft document could not be read.' }
+  }
+  const attestation = readAttestationForEdit(document.attestations, attestationIndex)
+  if (attestation === null) {
+    return { ok: false, message: 'That attestation is no longer in the draft.' }
+  }
+  const references = readReferencesForEdit(attestation)
+  if (references === null) {
+    return {
+      ok: false,
+      message: 'Fix the attestation schemaReferences array in the draft before editing it.',
+    }
+  }
+  const supportedFormats = [...draft.supportedFormats]
+  document.attestations[attestationIndex] = {
+    ...attestation,
+    name: draft.name,
+    attestationLoS: draft.attestationLoS,
+    bindingType: draft.bindingType,
+    supportedFormats,
+    schemaReferences: references.filter((reference) =>
+      supportedFormats.includes(reference.formatIdentifier as string),
+    ),
+  }
+  return { ok: true, text: JSON.stringify(document.root, null, 2) }
+}
+
+/** Appends one attestation with no schema references yet. */
+export function addAttestation(documentText: string, draft: AttestationDraft): SchemaReferenceEdit {
+  const document = readDocumentForEdit(documentText)
+  if (document === null) {
+    return { ok: false, message: 'The draft document could not be read.' }
+  }
+  document.attestations.push({
+    name: draft.name,
+    attestationLoS: draft.attestationLoS,
+    bindingType: draft.bindingType,
+    supportedFormats: [...draft.supportedFormats],
+    schemaReferences: [],
+  })
+  return { ok: true, text: JSON.stringify(document.root, null, 2) }
+}
+
+/**
+ * Removes one attestation. Its format references go with it; rulebook-level
+ * `schemaReferences` (attestationId null) are never touched.
+ */
+export function removeAttestation(
+  documentText: string,
+  attestationIndex: number,
+): SchemaReferenceEdit {
+  const document = readDocumentForEdit(documentText)
+  if (document === null) {
+    return { ok: false, message: 'The draft document could not be read.' }
+  }
+  if (readAttestationForEdit(document.attestations, attestationIndex) === null) {
+    return { ok: false, message: 'That attestation is no longer in the draft.' }
+  }
+  document.attestations.splice(attestationIndex, 1)
+  return { ok: true, text: JSON.stringify(document.root, null, 2) }
+}
+
+// ------------------------------------------------- credential types (vct/docType)
+//
+// The credential type is a member of the hosted JSON Schema, never a bare
+// keyword at its root (contract §3): `properties.vct.const` for SD-JWT VC and
+// `properties.docType.const` for mdoc, each listed in the root `required`
+// array. These helpers merge it into the exact document that is registered.
+
+export type CredentialTypeKeyword = 'vct' | 'docType'
+
+/** The credential-type keyword a format declares, or `null` for other formats. */
+export function credentialTypeKeyword(formatIdentifier: string): CredentialTypeKeyword | null {
+  if (formatIdentifier === 'dc+sd-jwt') {
+    return 'vct'
+  }
+  if (formatIdentifier === 'mso_mdoc') {
+    return 'docType'
+  }
+  return null
+}
+
+/** The credential type a hosted schema already declares, if any. */
+export function declaredCredentialType(
+  schemaText: string,
+  keyword: CredentialTypeKeyword,
+): string | null {
+  let document: unknown
+  try {
+    document = JSON.parse(schemaText)
+  } catch {
+    return null
+  }
+  if (!isRecord(document) || !isRecord(document.properties)) {
+    return null
+  }
+  const entry = document.properties[keyword]
+  if (!isRecord(entry) || typeof entry.const !== 'string' || entry.const === '') {
+    return null
+  }
+  return entry.const
+}
+
+export type CredentialTypeMerge =
+  { readonly ok: true; readonly text: string } | { readonly ok: false; readonly message: string }
+
+/**
+ * Merges an entered credential type into a hosted JSON Schema (contract §3).
+ * An existing `const` or `enum` must already contain the same value; otherwise
+ * nothing is merged and registration must stop. A boolean or non-object root
+ * cannot carry `properties`, and a malformed `properties`/`required` member is
+ * refused instead of being rewritten.
+ */
+export function mergeCredentialType(
+  schemaText: string,
+  keyword: CredentialTypeKeyword,
+  value: string,
+): CredentialTypeMerge {
+  const credentialType = value.trim()
+  let document: unknown
+  try {
+    document = JSON.parse(schemaText)
+  } catch {
+    return { ok: false, message: 'This is not valid JSON.' }
+  }
+  if (!isRecord(document)) {
+    return {
+      ok: false,
+      message: `A schema that is not a JSON object cannot declare ${keyword}; use an object schema.`,
+    }
+  }
+  if (credentialType === '') {
+    return { ok: true, text: schemaText }
+  }
+  const properties = document.properties
+  if (properties !== undefined && !isRecord(properties)) {
+    return { ok: false, message: 'The schema "properties" member must be an object.' }
+  }
+  const entry = isRecord(properties) ? properties[keyword] : undefined
+  if (entry !== undefined && !isRecord(entry)) {
+    return { ok: false, message: `The schema property "${keyword}" must be an object.` }
+  }
+  if (isRecord(entry)) {
+    if (entry.const !== undefined && entry.const !== credentialType) {
+      return {
+        ok: false,
+        message: `The schema declares ${keyword} const ${JSON.stringify(
+          entry.const,
+        )}, which does not match "${credentialType}".`,
+      }
+    }
+    if (entry.enum !== undefined) {
+      const declared = Array.isArray(entry.enum) ? entry.enum : []
+      if (!declared.includes(credentialType)) {
+        return {
+          ok: false,
+          message: `The schema's ${keyword} enum does not include "${credentialType}".`,
+        }
+      }
+    }
+  }
+  const required = document.required
+  if (required !== undefined && !Array.isArray(required)) {
+    return { ok: false, message: 'The schema "required" member must be an array.' }
+  }
+  const declaredRequired: readonly unknown[] = Array.isArray(required) ? required : []
+  const nextRequired: unknown[] = [...declaredRequired]
+  if (!nextRequired.includes(keyword)) {
+    nextRequired.push(keyword)
+  }
+  const nextProperties = {
+    ...(isRecord(properties) ? properties : {}),
+    [keyword]: { ...(isRecord(entry) ? entry : {}), const: credentialType },
+  }
+  return {
+    ok: true,
+    text: JSON.stringify(
+      { ...document, properties: nextProperties, required: nextRequired },
+      null,
+      2,
+    ),
+  }
+}
+
+/**
+ * Namespaces declared by an mso_mdoc JSON Schema (contract §4): top-level
+ * `properties` members other than `docType` whose subschema is an object
+ * schema. Their data elements are that member's properties.
+ */
+export function mdocNamespaces(schemaText: string): readonly string[] {
+  let document: unknown
+  try {
+    document = JSON.parse(schemaText)
+  } catch {
+    return []
+  }
+  if (!isRecord(document) || !isRecord(document.properties)) {
+    return []
+  }
+  return Object.entries(document.properties).flatMap(([name, subschema]) => {
+    if (name === 'docType' || !isRecord(subschema)) {
+      return []
+    }
+    const isObjectSchema = subschema.type === 'object' || isRecord(subschema.properties)
+    return isObjectSchema ? [name] : []
+  })
+}
+
+export interface SchemaKeywordWarning {
+  readonly kind: 'format' | 'contentEncoding'
+  /** Dotted path such as `properties.birth_date.format`. */
+  readonly path: string
+  readonly value: string
+}
+
+const SUPPORTED_CBOR_FORMATS: Readonly<Record<string, true>> = {
+  date: true,
+  'date-time': true,
+}
+const MAX_LINT_NODES = 512
+const MAX_LINT_DEPTH = 32
+
+function collectKeywordWarnings(
+  node: unknown,
+  path: string,
+  depth: number,
+  warnings: SchemaKeywordWarning[],
+  budget: { count: number },
+): void {
+  if (budget.count >= MAX_LINT_NODES || depth > MAX_LINT_DEPTH) {
+    return
+  }
+  if (Array.isArray(node)) {
+    node.forEach((item, index) =>
+      collectKeywordWarnings(item, `${path}${index}.`, depth + 1, warnings, budget),
+    )
+    return
+  }
+  if (!isRecord(node)) {
+    return
+  }
+  budget.count += 1
+  const format = node.format
+  if (typeof format === 'string' && SUPPORTED_CBOR_FORMATS[format] !== true) {
+    warnings.push({ kind: 'format', path: `${path}format`, value: format })
+  }
+  const encoding = node.contentEncoding
+  if (typeof encoding === 'string' && encoding !== 'base64') {
+    warnings.push({ kind: 'contentEncoding', path: `${path}contentEncoding`, value: encoding })
+  }
+  for (const [key, value] of Object.entries(node)) {
+    if (key === 'format' || key === 'contentEncoding') {
+      continue
+    }
+    collectKeywordWarnings(value, `${path}${key}.`, depth + 1, warnings, budget)
+  }
+}
+
+/**
+ * Lists `format`/`contentEncoding` values that the mdoc CBOR mapping cannot
+ * apply (contract §6). Supported values are `date`, `date-time` and `base64`;
+ * anything else is reported rather than silently accepted.
+ */
+export function cborKeywordWarnings(schemaText: string): readonly SchemaKeywordWarning[] {
+  let document: unknown
+  try {
+    document = JSON.parse(schemaText)
+  } catch {
+    return []
+  }
+  const warnings: SchemaKeywordWarning[] = []
+  collectKeywordWarnings(document, '', 0, warnings, { count: 0 })
+  return warnings
 }

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'vitest'
 
 import {
   countDiagnostics,
+  credentialFormatLabel,
   describeDiagnosticPath,
   documentFromDraft,
   draftRequest,
@@ -10,6 +11,7 @@ import {
   parseDraftDocument,
   serializeDraftDocument,
   validationSummary,
+  validateAttestation,
   validateMetadata,
   type DraftMetadata,
 } from './draft'
@@ -166,5 +168,31 @@ describe('draft JSON helpers', () => {
       applicableSpec: 'An applicable specification is required.',
     })
     expect(validateMetadata({ ...EMPTY_METADATA, name: 'Draft' })).toEqual({})
+  })
+
+  test('labels the two credential formats and requires an attestation name and format', () => {
+    expect(credentialFormatLabel('dc+sd-jwt')).toBe('SD-JWT VC (dc+sd-jwt)')
+    expect(credentialFormatLabel('mso_mdoc')).toBe('mdoc (mso_mdoc)')
+    expect(credentialFormatLabel('other')).toBe('other')
+
+    expect(
+      validateAttestation({
+        name: '  ',
+        attestationLoS: 'iso_18045_high',
+        bindingType: 'key',
+        supportedFormats: [],
+      }),
+    ).toEqual({
+      name: 'An attestation name is required.',
+      formats: 'Choose at least one supported format.',
+    })
+    expect(
+      validateAttestation({
+        name: 'Loyalty Card',
+        attestationLoS: 'iso_18045_basic',
+        bindingType: 'claim',
+        supportedFormats: ['mso_mdoc'],
+      }),
+    ).toEqual({})
   })
 })

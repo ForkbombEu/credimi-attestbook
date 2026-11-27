@@ -143,6 +143,7 @@ export type PublicationReadinessCheckId =
   | 'content_valid'
   | 'standards_profile'
   | 'attestation_types'
+  | 'credential_types'
 
 export interface PublicationReadinessCheck {
   readonly id: PublicationReadinessCheckId

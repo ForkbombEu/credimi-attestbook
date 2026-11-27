@@ -1,9 +1,9 @@
 // Pure editor helpers for the rulebook draft page (issue #40).
 //
-// The browser parses the JSON editor locally so a syntax error is shown
-// immediately, then asks the server to validate the same document. Field
-// requirements that the registry enforces are only checked here for a fast
-// form-level message; the server remains authoritative.
+// The browser parses the serialized draft document locally, then asks the
+// server to validate it. Field requirements that the registry enforces are
+// only checked here for a fast form-level message; the server remains
+// authoritative.
 
 import type {
   DraftAttestation,
@@ -40,6 +40,51 @@ export const EMPTY_DRAFT_DOCUMENT: DraftContentDocument = {
   schemaReferences: [],
 }
 
+/** Level-of-assurance values the attestation form offers (contract §2). */
+export const ATTESTATION_LOS_VALUES = [
+  'iso_18045_high',
+  'iso_18045_moderate',
+  'iso_18045_enhanced-basic',
+  'iso_18045_basic',
+] as const
+
+/** Holder binding values the attestation form offers (contract §2). */
+export const BINDING_TYPE_VALUES = ['key', 'claim', 'biometric', 'none'] as const
+
+/** Credential formats an attestation can declare (contract §2). */
+export const CREDENTIAL_FORMAT_VALUES = ['dc+sd-jwt', 'mso_mdoc'] as const
+
+/** One attestation as the form edits it. */
+export interface AttestationDraft {
+  readonly name: string
+  readonly attestationLoS: string
+  readonly bindingType: string
+  readonly supportedFormats: readonly string[]
+}
+
+/** A readable name for a credential format, used by the form and its list. */
+export function credentialFormatLabel(format: string): string {
+  if (format === 'dc+sd-jwt') {
+    return 'SD-JWT VC (dc+sd-jwt)'
+  }
+  if (format === 'mso_mdoc') {
+    return 'mdoc (mso_mdoc)'
+  }
+  return format
+}
+
+/** Returns form-level attestation errors, keyed by field. */
+export function validateAttestation(draft: AttestationDraft): Readonly<Record<string, string>> {
+  const errors: Record<string, string> = {}
+  if (draft.name.trim() === '') {
+    errors.name = 'An attestation name is required.'
+  }
+  if (draft.supportedFormats.length === 0) {
+    errors.formats = 'Choose at least one supported format.'
+  }
+  return errors
+}
+
 export type DraftParseResult =
   | { readonly ok: true; readonly document: DraftContentDocument }
   | { readonly ok: false; readonly message: string }
@@ -49,22 +94,22 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /**
- * Parses the JSON editor text. Only the container shape is checked here:
- * per-attestation validation is the server's job, and echoing it locally would
- * create two rules that could disagree.
+ * Parses the serialized draft document. Only the container shape is checked
+ * here: per-attestation validation is the server's job, and echoing it locally
+ * would create two rules that could disagree.
  */
 export function parseDraftDocument(text: string): DraftParseResult {
   if (text.trim() === '') {
-    return { ok: false, message: 'The JSON editor is empty. Add an attestations array.' }
+    return { ok: false, message: 'The draft document is empty. Add an attestations array.' }
   }
   let value: unknown
   try {
     value = JSON.parse(text)
   } catch {
-    return { ok: false, message: 'The JSON editor does not contain valid JSON.' }
+    return { ok: false, message: 'The draft document does not contain valid JSON.' }
   }
   if (!isRecord(value)) {
-    return { ok: false, message: 'The JSON document must be an object.' }
+    return { ok: false, message: 'The draft document must be an object.' }
   }
   const attestations = value.attestations ?? []
   if (!Array.isArray(attestations)) {

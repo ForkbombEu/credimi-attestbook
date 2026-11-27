@@ -57,10 +57,18 @@ different: it is an ownership refusal, not an expired session.
    specification** (a new draft starts at `ts11@1.0.1`). **Description** and
    **Source URL** are optional. The source URL records provenance and is not
    injected into a standards-defined document.
-3. In **Attestations and schema references**, edit the **Draft JSON**. The
-   object has an `attestations` array and a rulebook-level `schemaReferences`
-   array. Each attestation type carries its name, level of assurance, binding
-   type, supported formats and schema references:
+3. In **Attestation types**, choose `+ Add new attestation` and fill in the
+   inline form:
+   - **Attestation name** is required;
+   - **Level of assurance** is one of `iso_18045_high`, `iso_18045_moderate`,
+     `iso_18045_enhanced-basic` or `iso_18045_basic`;
+   - **Binding type** is `key` (the default), `claim`, `biometric` or `none`;
+   - **Supported formats** is at least one of *SD-JWT VC (dc+sd-jwt)* or
+     *mdoc (mso_mdoc)*.
+
+   Choose `Save attestation`. The card shows the four fields with `Edit` and
+   `Remove` actions; removing a format also removes that format's schema
+   reference. The form edits the same document shape the API stores:
 
 ```json
 {
@@ -83,29 +91,43 @@ different: it is an ownership refusal, not an expired session.
 }
 ```
 
-4. Optionally use the **Schema references** card instead of editing those
-   entries by hand. You can paste or upload a JSON Schema 2020-12 document under
+4. For each supported format in the card, choose `Add schema` and either paste
+   or upload a JSON Schema 2020-12 document under
    `Upload/paste schema to AttestBook`, or record an absolute `https` URL under
    `Use existing external URL`. A hosted document is registered for the
    signed-in provider and referenced by its canonical hosted URL and SRI
    integrity; an external reference stores the URL and an optional SRI value.
-   Either mode edits the Draft JSON and marks the form dirty.
+
+   For a hosted schema, enter the **Credential type (vct)** (`dc+sd-jwt`) or
+   **Document type (docType)** (`mso_mdoc`). It is optional while drafting and
+   required before publication: the registration writes it into the schema as
+   `properties.vct.const` / `properties.docType.const` and lists it in the
+   root `required` array. A different existing `const` or `enum`, or an mdoc
+   schema without a namespace (a top-level `properties` member other than
+   `docType` whose subschema is an object schema), blocks the registration with
+   a message. The form warns about unsupported CBOR `format` or
+   `contentEncoding` values, and an external schema shows only a warning that
+   AttestBook cannot verify its credential type. Either mode marks the form
+   dirty.
 5. Follow **Live validation** below, then choose `Create draft`. The editor
    creates one draft for the signed-in provider and continues at
    `/rulebooks/<id>/edit`. There is no provider field in the request: ownership
    comes from the session.
 
-## Edit metadata and JSON
+## Edit metadata and attestations
 
 Open the rulebook's detail page and choose `Edit draft`, or open
 `/rulebooks/<id>/edit` directly while signed in to the owning provider. The
 editor loads the draft working copy through `GET /api/v1/rulebooks/<id>/draft`.
 
-Changing a metadata field or the Draft JSON marks the form dirty. JSON syntax is
-parsed in the browser on every change, so a syntax error is reported immediately
-and disables saving. `Save draft` replaces the whole working copy with one
-`PUT /api/v1/rulebooks/<id>/draft` request; the same document produces the same
-working copy.
+Changing a metadata field, an attestation or a schema reference marks the form
+dirty. The serialized draft document is parsed and validated before it is sent;
+there is no raw JSON editor. `Save draft` replaces the whole working copy with
+one `PUT /api/v1/rulebooks/<id>/draft` request; the same document produces the
+same working copy.
+
+Rulebook-level schema references (those that belong to no attestation type) are
+listed read-only in the editor and kept unchanged in the saved document.
 
 Saving a draft never changes a frozen or published version. A published or
 historical rulebook opens read-only with an explanation, and the server also
@@ -130,7 +152,7 @@ The findings table has three columns:
 The result separates two kinds of problem:
 
 - **Structural errors** block a save. The save button stays disabled until they
-  are fixed and the JSON and required metadata are valid.
+  are fixed and the draft attestations and required metadata are valid.
 - **Standards findings** are reported but do not block saving a work-in-progress
   draft. The registry stores profile enumerations as extensible text, so an
   out-of-baseline value is a finding, not a failed save.

@@ -4,6 +4,16 @@
 // - publication readiness checks before a draft version is published.
 
 export {
+  assessCredentialTypes,
+  CREDENTIAL_TYPE_FORMATS,
+  type CredentialSchemaResolution,
+  type CredentialSchemaResolver,
+  type CredentialTypeFormat,
+  type CredentialTypeIssue,
+  type CredentialTypesAssessment,
+} from './credential-types'
+
+export {
   compareVersionDocuments,
   VERSION_DIFF_CHANGE_KINDS,
   type JsonValue,

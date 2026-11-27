@@ -319,6 +319,24 @@ describe('createHttpEditorApi', () => {
     expect((init?.headers as Record<string, string>).authorization).toBeUndefined()
   })
 
+  test('reads a stored schema document as exact text from the same-origin content route', async () => {
+    const stored = '{"type":"object","properties":{"vct":{"const":"urn:eudi:pid:1"}}}'
+    const fetchImpl = vi.fn<FetchLike>((path) =>
+      Promise.resolve(
+        path === '/api/v1/schema-documents/document-1/content'
+          ? new Response(stored, { headers: { 'content-type': 'application/schema+json' } })
+          : jsonResponse({ error: { code: 'not_found', message: 'No such document.' } }, 404),
+      ),
+    )
+    const api = createHttpEditorApi(fetchImpl)
+
+    expect(await api.getSchemaDocumentContent('document-1')).toBe(stored)
+    await expect(api.getSchemaDocumentContent('missing')).rejects.toMatchObject({
+      status: 404,
+      message: 'No such document.',
+    })
+  })
+
   test('creates a draft with the CSRF token and validates one anonymously', async () => {
     const fetchImpl = vi.fn<FetchLike>((path) => {
       if (path === '/api/v1/rulebooks') {
