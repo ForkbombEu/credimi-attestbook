@@ -699,8 +699,12 @@ keeps `ui/src/styles.css` to AttestBook's own layouts:
   `--brand-secondary-strong` header band with vertically centred uppercase
   primary labels, 13px cells with 12px padding, the row-naming first cell in
   sans bold, hairline rows and `--bg-muted` on hover;
-- the rulebook page lists each schema reference once, under its attestation
-  type, with references bound to no attestation type in a rulebook-level group;
+- the rulebook page puts its publication status beside the title and its
+  provider, specification, last update, version count and, only for an imported
+  rulebook, the source URL on one line in the hero; there is no separate metadata
+  or provenance section, and each schema reference is listed once, under its
+  attestation type, with references bound to no attestation type in a
+  rulebook-level group;
 - the footer closes with two sub-bars: “Proudly developed by ForkBomb BV”, then
   the Credimi Extras strip.
 

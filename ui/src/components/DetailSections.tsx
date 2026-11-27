@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useId, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { versionContentPath, type CatalogApi } from '../api'
 import { formatDate } from '../catalog'
@@ -20,7 +20,7 @@ import {
   versionsNewestFirst,
   type ReferenceWithHostedSchema,
 } from '../detail'
-import type { HostedSchema, Rulebook, SchemaReference, VersionSchemaReferences } from '../types'
+import type { HostedSchema, SchemaReference, VersionSchemaReferences } from '../types'
 
 import { Alert } from './Alert'
 import { CompatibilityBadge, StatusBadge } from './Badges'
@@ -220,124 +220,80 @@ function rulebookRows(references: readonly SchemaReference[]): readonly SchemaRe
   }))
 }
 
-export function MetadataSection({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
-  const { rulebook, provider, attestations, schemaReferences, versions, availability } = snapshot
+/**
+ * The rulebook's one-line summary under the hero title: its provider,
+ * specification, last update and version count, plus the source it was
+ * imported from. A locally authored rulebook has no source, so none is shown.
+ */
+export function RulebookSummary({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
+  const { rulebook, provider, versions } = snapshot
+  const source = externalSourceUrl(rulebook.sourceUrl)
+  const parts: { readonly key: string; readonly node: ReactNode }[] = [
+    {
+      key: 'provider',
+      node:
+        provider === null ? (
+          <span className="data">{rulebook.providerId} (not in the provider list)</span>
+        ) : (
+          <span>{provider.name}</span>
+        ),
+    },
+    { key: 'spec', node: <span className="data">{rulebook.applicableSpec}</span> },
+    {
+      key: 'updated',
+      node: (
+        <span>
+          Last updated{' '}
+          <time className="data" dateTime={rulebook.updatedAt}>
+            {formatDate(rulebook.updatedAt)}
+          </time>
+        </span>
+      ),
+    },
+  ]
+  if (versions.length > 0) {
+    parts.push({
+      key: 'versions',
+      node: <span>{versions.length === 1 ? '1 version' : `${versions.length} versions`}</span>,
+    })
+  }
+  if (source !== null) {
+    parts.push({
+      key: 'source',
+      node: (
+        <span>
+          Source{' '}
+          <a href={source} target="_blank" rel="noopener noreferrer">
+            {source}
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
+        </span>
+      ),
+    })
+  }
   return (
-    <section className="content-section" aria-labelledby="metadata-heading">
-      <h2 id="metadata-heading">Rulebook metadata</h2>
-      <dl className="metadata-grid">
-        <div>
-          <dt>Rulebook ID</dt>
-          <dd>
-            <span className="data">{rulebook.id}</span>
-          </dd>
-        </div>
-        <div>
-          <dt>Provider</dt>
-          <dd>
-            {provider === null ? (
-              <span className="muted">{rulebook.providerId} (not in the provider list)</span>
-            ) : (
-              <>
-                {provider.name} <span className="muted">({provider.id})</span>
-              </>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Publication status</dt>
-          <dd>
-            <StatusBadge status={rulebook.publicationStatus} />
-          </dd>
-        </div>
-        <div>
-          <dt>Applicable specification</dt>
-          <dd>
-            <span className="data">{rulebook.applicableSpec}</span>
-          </dd>
-        </div>
-        <div>
-          <dt>Attestation types</dt>
-          <dd>{availability.attestations ? attestations.length : 'Unavailable'}</dd>
-        </div>
-        <div>
-          <dt>Schema references</dt>
-          <dd>{availability.schemaReferences ? schemaReferences.length : 'Unavailable'}</dd>
-        </div>
-        <div>
-          <dt>Versions</dt>
-          <dd>{availability.versions ? versions.length : 'Unavailable'}</dd>
-        </div>
-      </dl>
-      {availability.provider ? null : (
-        <Alert variant="info">
-          <p>The provider list could not be loaded, so only the provider identifier is shown.</p>
-        </Alert>
-      )}
-    </section>
+    <p className="detail-heading__meta">
+      {parts.map((part, index) => (
+        <Fragment key={part.key}>
+          {index === 0 ? null : <span aria-hidden="true"> · </span>}
+          {part.node}
+        </Fragment>
+      ))}
+    </p>
   )
 }
 
-export function ProvenanceSection({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
-  const { rulebook } = snapshot
-  const source = describeSourceFor(rulebook)
-  return (
-    <section className="content-section" aria-labelledby="provenance-heading">
-      <h2 id="provenance-heading">Source provenance</h2>
-      <dl className="metadata-grid">
-        <div>
-          <dt>Source</dt>
-          <dd>
-            {source.href === null ? (
-              source.label
-            ) : (
-              <a href={source.href} target="_blank" rel="noopener noreferrer">
-                {source.href}
-                <span className="sr-only"> (opens in a new tab)</span>
-              </a>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Registered</dt>
-          <dd>
-            <time dateTime={rulebook.createdAt}>{formatDate(rulebook.createdAt)}</time>
-          </dd>
-        </div>
-        <div>
-          <dt>Last updated</dt>
-          <dd>
-            <time dateTime={rulebook.updatedAt}>{formatDate(rulebook.updatedAt)}</time>
-          </dd>
-        </div>
-        <div>
-          <dt>Publication authority</dt>
-          <dd>Owned by the provider recorded above.</dd>
-        </div>
-      </dl>
-      <p className="table-note">
-        This is the public provenance projection: source URL and registry timestamps.
-        Import-internal provenance is not exposed by the public API.
-      </p>
-    </section>
-  )
-}
-
-function describeSourceFor(rulebook: Rulebook) {
-  // Reuse the catalog's URL-safety rule without importing its display label.
-  const value = rulebook.sourceUrl
+/** The imported-from URL when it is a safe http(s) link; anything else is not shown. */
+function externalSourceUrl(value: string | null): string | null {
   if (value === null || value === '') {
-    return { href: null as string | null, label: 'Locally authored' }
+    return null
   }
   try {
     const url = new URL(value)
-    if (url.protocol === 'http:' || url.protocol === 'https:') {
-      return { href: url.toString(), label: url.toString() }
-    }
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
   } catch {
-    // Fall through to inert text.
+    return null
   }
-  return { href: null as string | null, label: value }
 }
 
 /**
@@ -431,14 +387,6 @@ export function AttestationsSection({ snapshot }: { readonly snapshot: RulebookD
             </li>
           )}
         </ul>
-      ) : null}
-      {schemaReferences.length > 0 ? (
-        <p className="table-note">
-          A reference is <strong>Hosted by AttestBook</strong> only when its exact URI names an
-          immutable stored schema document on this deployment; every other http(s) value stays an
-          external link. Hosted rows link to the public, unauthenticated content route and show the
-          stored media type and digest the bytes must match.
-        </p>
       ) : null}
     </section>
   )

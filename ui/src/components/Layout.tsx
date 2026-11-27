@@ -255,11 +255,14 @@ export function SiteHeader({ section, onNavigate, showLoginLink = true }: SiteHe
 export function PageHero({
   title,
   breadcrumb,
+  badge,
   alert = false,
   children,
 }: {
   readonly title: ReactNode
   readonly breadcrumb?: ReactNode
+  /** A status chip set right beside the title. */
+  readonly badge?: ReactNode
   readonly alert?: boolean
   readonly children?: ReactNode
 }) {
@@ -274,6 +277,7 @@ export function PageHero({
             <h1 className="section-intro-title" id="page-title">
               {title}
             </h1>
+            {badge}
           </div>
           {children === undefined ? null : (
             <div className="section-intro-description">{children}</div>

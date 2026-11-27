@@ -303,6 +303,19 @@ dd {
   text-wrap: balance;
 }
 
+/* A status chip sits right beside the hero title, not at the far end. */
+.hero-band .section-intro-heading {
+  justify-content: flex-start;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.hero-band .section-intro-heading .badge {
+  min-height: 28px;
+  padding: 4px 12px;
+  font-size: var(--fs-sm);
+}
+
 .hero-band :focus-visible {
   outline-color: var(--fg-on-primary);
 }
@@ -1268,13 +1281,6 @@ dd {
   flex-wrap: wrap;
   gap: var(--space-1);
   font-size: var(--fs-sm);
-}
-
-.detail-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 0 var(--space-10);
-  align-items: start;
 }
 
 /* Content sections sit directly on the lavender wash, not in cards
@@ -2248,7 +2254,6 @@ dd {
   .filter-bar,
   .playground-grid,
   .editor-grid,
-  .detail-grid,
   .metadata-grid,
   .inline-metadata {
     grid-template-columns: 1fr;

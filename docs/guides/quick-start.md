@@ -49,13 +49,14 @@ panel says that only the loaded page was searched (`docs/ui.md` §3.1).
 
 On the detail page:
 
-- **Rulebook metadata** shows the name, description, applicable specification,
-  source URL and the provider that owns the rulebook.
+- **The page header** shows the name with its publication status, the
+  description, the provider that owns the rulebook, the applicable
+  specification, the last update and, for an imported rulebook, its source URL.
 - **Attestation types** lists each type with its level of assurance, binding
-  type, supported formats and schema references.
-- **Schema references** shows the pin (`formatIdentifier`, `uri` and W3C SRI
-  `integrity`) and marks references whose exact bytes AttestBook hosts, with a
-  download link and digest.
+  type, supported formats and schema references: the pin (`formatIdentifier`,
+  `uri` and W3C SRI `integrity`), with references whose exact bytes AttestBook
+  hosts marked and given a download link and digest. References bound to no
+  attestation type follow as a rulebook-level group.
 - **Standards compatibility** reports rulebook-level compatibility as **Not
   tested** and lists the eight validation dimensions with whether this build
   executes them. It never presents an untested dimension as a pass.

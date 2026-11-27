@@ -2,12 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { CatalogApi } from './api'
 import { CatalogApiError } from './api'
-import { formatDate } from './catalog'
+import { Alert } from './components/Alert'
+import { StatusBadge } from './components/Badges'
 import {
   AttestationsSection,
   CompatibilitySection,
-  MetadataSection,
-  ProvenanceSection,
+  RulebookSummary,
   VersionsSection,
   VersionSummary,
 } from './components/DetailSections'
@@ -134,25 +134,15 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
 
       <main className="page-main" id="main-content">
         {state.status === 'ready' ? (
-          <PageHero title={heading} breadcrumb={breadcrumb}>
+          <PageHero
+            title={heading}
+            breadcrumb={breadcrumb}
+            badge={<StatusBadge status={state.snapshot.rulebook.publicationStatus} />}
+          >
             {state.snapshot.rulebook.description === '' ? null : (
               <p>{state.snapshot.rulebook.description}</p>
             )}
-            <p className="detail-heading__meta">
-              <span>{state.snapshot.rulebook.applicableSpec}</span>
-              <span aria-hidden="true"> · </span>
-              <span>Last updated {formatDate(state.snapshot.rulebook.updatedAt)}</span>
-              {state.snapshot.versions.length > 0 ? (
-                <>
-                  <span aria-hidden="true"> · </span>
-                  <span>
-                    {state.snapshot.versions.length === 1
-                      ? '1 version'
-                      : `${state.snapshot.versions.length} versions`}
-                  </span>
-                </>
-              ) : null}
-            </p>
+            <RulebookSummary snapshot={state.snapshot} />
             <div className="detail-actions">
               <VersionSummary snapshot={state.snapshot} />
               {state.snapshot.rulebook.publicationStatus === 'draft' && canEditDraft ? (
@@ -212,13 +202,14 @@ function DetailContent({
   readonly api: CatalogApi
   readonly snapshot: RulebookDetailSnapshot
 }) {
-  const { rulebook, versions } = snapshot
+  const { rulebook, versions, availability } = snapshot
   return (
     <>
-      <div className="detail-grid">
-        <MetadataSection snapshot={snapshot} />
-        <ProvenanceSection snapshot={snapshot} />
-      </div>
+      {availability.provider ? null : (
+        <Alert variant="info">
+          <p>The provider list could not be loaded, so only the provider identifier is shown.</p>
+        </Alert>
+      )}
 
       <AttestationsSection snapshot={snapshot} />
       <CompatibilitySection />

@@ -121,13 +121,22 @@ describe('rulebook detail states', () => {
 })
 
 describe('rulebook detail content', () => {
-  test('renders metadata, attestation types, schema references and provenance', async () => {
+  test('summarizes the rulebook in the hero and renders its attestation types', async () => {
     renderDetail()
 
-    expect(await screen.findByRole('heading', { name: 'PID Rulebook' })).toBeInTheDocument()
-    expect(screen.getByRole('heading', { name: 'Rulebook metadata' })).toBeInTheDocument()
-    expect(screen.getByText('Example Issuer')).toBeInTheDocument()
-    expect(screen.getAllByText('ts11@1.0.1').length).toBeGreaterThan(0)
+    const title = await screen.findByRole('heading', { level: 1, name: 'PID Rulebook' })
+    // The metadata and provenance sections are folded into the hero.
+    expect(screen.queryByRole('region', { name: 'Rulebook metadata' })).toBeNull()
+    expect(screen.queryByRole('region', { name: 'Source provenance' })).toBeNull()
+
+    const hero = title.closest('section') as HTMLElement
+    expect(within(hero).getByText('Published')).toHaveClass('badge--published')
+    expect(within(hero).getByText('Example Issuer')).toBeInTheDocument()
+    expect(within(hero).getByText('ts11@1.0.1')).toBeInTheDocument()
+    expect(
+      within(hero).getByRole('link', { name: /https:\/\/issuer\.example\.org\/rulebooks\/pid/ }),
+    ).toHaveAttribute('href', 'https://issuer.example.org/rulebooks/pid')
+
     expect(screen.getAllByText('Person Identification Data').length).toBeGreaterThan(0)
     expect(screen.getByText('iso_18045_high')).toBeInTheDocument()
     expect(screen.getByText('cryptographic')).toBeInTheDocument()
@@ -140,10 +149,21 @@ describe('rulebook detail content', () => {
     for (const link of schemaLinks) {
       expect(link).toHaveAttribute('href', 'https://issuer.example.org/schemas/pid')
     }
-
-    expect(screen.getByRole('heading', { name: 'Source provenance' })).toBeInTheDocument()
-    expect(screen.getByText('https://issuer.example.org/rulebooks/pid')).toBeInTheDocument()
+    expect(screen.queryByText(/only when its exact URI names/)).toBeNull()
     expect(document.title).toBe('PID Rulebook · AttestBook')
+  })
+
+  test('shows no source for a locally authored rulebook', async () => {
+    renderDetail(createFakeApi(), 'rulebook-age')
+
+    const title = await screen.findByRole('heading', {
+      level: 1,
+      name: 'Age Verification Rulebook',
+    })
+    const hero = title.closest('section') as HTMLElement
+    expect(within(hero).getByText('Draft')).toHaveClass('badge--draft')
+    expect(within(hero).queryByText(/^Source/)).toBeNull()
+    expect(within(hero).queryByText('Locally authored')).toBeNull()
   })
 
   test('shows every schema reference once, with rulebook-level ones in their own group', async () => {
