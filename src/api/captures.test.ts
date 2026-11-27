@@ -197,6 +197,33 @@ describe('capture explorer read API', () => {
     expect(JSON.stringify(body)).not.toContain(credential)
   })
 
+  test('never returns the raw inline artifact in a list, detail or validate response', async () => {
+    const { app, seeded, token, credential } = await setup()
+    const bodies = [
+      await (await app.request('/api/v1/captures')).text(),
+      await (await app.request('/api/v1/captures/mock-capture-capture-issuer-3')).text(),
+      await (await app.request(`/api/v1/captures/${CAPTURE_ID}`)).text(),
+    ]
+    const validate = await postJson(
+      app,
+      '/api/v1/captures/mock-capture-capture-issuer-3/validate',
+      {
+        rulebookId: seeded.rulebookId,
+        rulebookVersion: seeded.version,
+        attestationType: seeded.attestationName,
+      },
+      bearer(token),
+    )
+    expect(validate.status).toBe(200)
+    bodies.push(await validate.text())
+
+    for (const body of bodies) {
+      expect(body).not.toContain('synthetic-access-token-not-a-secret')
+      expect(body).not.toContain('"given_name":"Test"')
+      expect(body).not.toContain(credential)
+    }
+  })
+
   test('reports an external artifact reference as unavailable evidence', async () => {
     const { app } = await setup()
     const response = await app.request('/api/v1/captures/mock-capture-capture-issuer-1')

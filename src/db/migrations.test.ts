@@ -49,6 +49,9 @@ describe('registry migrations', () => {
         'attestations',
         'audit_log',
         'auth_tokens',
+        'capture_correlations',
+        'capture_evidence',
+        'capture_evidence_artifacts',
         'credential_schema_documents',
         'providers',
         'publication_events',
@@ -657,6 +660,116 @@ describe('registry migrations', () => {
           .query<{ count: number }, []>('SELECT COUNT(*) AS count FROM publication_events')
           .get()?.count,
       ).toBe(0)
+    } finally {
+      database.close()
+    }
+  })
+
+  test('adds durable capture evidence, segregated artifacts and correlations', () => {
+    const database = createDatabase()
+    try {
+      applyMigrations(database, { now: () => FIXED_NOW })
+      expect(listAppliedMigrations(database).map((migration) => migration.version)).toContain(
+        '0012_capture_evidence',
+      )
+
+      const digest = 'a'.repeat(64)
+      database
+        .query(
+          `INSERT INTO capture_evidence (
+             capture_id, envelope_json, source_id, source_component, source_transport,
+             source_description, received_at, captured_at_ms, submission_digest
+           ) VALUES ('capture-1', '{}', 'mock-capture-issuer', 'capture-issuer', 'mock',
+             'Deterministic local mock fixtures', ?, 0, ?)`,
+        )
+        .run(FIXED_NOW, digest)
+      database
+        .query(
+          `INSERT INTO capture_evidence_artifacts (
+             capture_id, media_type, encoding, byte_length, digest, bytes
+           ) VALUES ('capture-1', 'application/json', 'utf8', 2, ?, X'00ff')`,
+        )
+        .run(digest)
+      database
+        .query(
+          `INSERT INTO capture_correlations (capture_id, binding_json, validation_json, updated_at)
+           VALUES ('capture-1', '{}', '{}', ?)`,
+        )
+        .run(FIXED_NOW)
+
+      // The raw bytes are reachable only through the artifact table.
+      const artifact = database
+        .query<{ bytes: Uint8Array }, []>('SELECT bytes FROM capture_evidence_artifacts')
+        .get()
+      expect(Array.from(artifact?.bytes ?? [])).toEqual([0x00, 0xff])
+
+      // A correlation is the one mutable row: upsert replaces both halves.
+      database
+        .query(
+          `INSERT INTO capture_correlations (capture_id, binding_json, validation_json, updated_at)
+           VALUES ('capture-1', '{"rulebookId":"r"}', '{"validationId":"v"}', ?)
+           ON CONFLICT (capture_id) DO UPDATE SET
+             binding_json = excluded.binding_json,
+             validation_json = excluded.validation_json,
+             updated_at = excluded.updated_at`,
+        )
+        .run('2026-01-02T00:00:00.000Z')
+      const correlation = database
+        .query<{ binding_json: string; updated_at: string }, []>(
+          'SELECT binding_json, updated_at FROM capture_correlations',
+        )
+        .get()
+      expect(correlation).toEqual({
+        binding_json: '{"rulebookId":"r"}',
+        updated_at: '2026-01-02T00:00:00.000Z',
+      })
+
+      // Evidence identity and normalized metadata are insert-once, including
+      // `INSERT OR REPLACE`, which would otherwise cascade-delete the
+      // correlation without firing a DELETE trigger.
+      expect(() =>
+        database
+          .query(
+            `INSERT OR REPLACE INTO capture_evidence (
+               capture_id, envelope_json, source_id, source_component, source_transport,
+               source_description, received_at, captured_at_ms, submission_digest
+             ) VALUES ('capture-1', '{"changed":true}', 'mock-capture-issuer', 'capture-issuer',
+               'mock', 'Deterministic local mock fixtures', ?, 1, ?)`,
+          )
+          .run(FIXED_NOW, 'b'.repeat(64)),
+      ).toThrow(/already exists/)
+      expect(() =>
+        database.query("UPDATE capture_evidence SET received_at = 'changed'").run(),
+      ).toThrow(/immutable/)
+
+      // Closed enumerations and orphan rows are rejected by the schema.
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO capture_evidence (
+               capture_id, envelope_json, source_id, source_component, source_transport,
+               source_description, received_at, captured_at_ms, submission_digest
+             ) VALUES ('capture-2', '{}', 'source', 'capture-issuer', 'live', 'source', ?, 0, ?)`,
+          )
+          .run(FIXED_NOW, digest),
+      ).toThrow(/CHECK/)
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO capture_evidence_artifacts (
+               capture_id, media_type, encoding, byte_length, digest, bytes
+             ) VALUES ('missing', 'application/json', 'utf8', 0, ?, X'')`,
+          )
+          .run(digest),
+      ).toThrow(/FOREIGN KEY/i)
+      expect(() =>
+        database
+          .query(
+            `INSERT INTO capture_correlations (capture_id, binding_json, validation_json, updated_at)
+             VALUES ('missing', '{}', '{}', ?)`,
+          )
+          .run(FIXED_NOW),
+      ).toThrow(/FOREIGN KEY/i)
     } finally {
       database.close()
     }

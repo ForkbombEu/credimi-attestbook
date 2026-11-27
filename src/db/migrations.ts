@@ -20,6 +20,7 @@ import subscriptions from '../../migrations/0008_subscriptions.sql' with { type:
 import subscriptionVerification from '../../migrations/0009_subscription_verification.sql' with { type: 'text' }
 import subscriptionWebhookKey from '../../migrations/0010_subscription_webhook_key.sql' with { type: 'text' }
 import webhookDeliveryOutbox from '../../migrations/0011_webhook_delivery_outbox.sql' with { type: 'text' }
+import captureEvidence from '../../migrations/0012_capture_evidence.sql' with { type: 'text' }
 
 export interface Migration {
   /** Stable, ordered version such as `0001_registry`. */
@@ -52,6 +53,7 @@ export const MIGRATIONS: readonly Migration[] = [
   { version: '0009_subscription_verification', sql: subscriptionVerification },
   { version: '0010_subscription_webhook_key', sql: subscriptionWebhookKey },
   { version: '0011_webhook_delivery_outbox', sql: webhookDeliveryOutbox },
+  { version: '0012_capture_evidence', sql: captureEvidence },
 ]
 
 export function migrationChecksum(sql: string): string {

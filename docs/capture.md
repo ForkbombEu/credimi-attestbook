@@ -62,8 +62,9 @@ Implemented by [#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48)
   source-declared redaction, the opaque correlation and test-execution references and, once
   recorded, the exact pinned rulebook version and the structural validation result (FR-019);
 - explicit evidence gaps for external, source-redacted, unbound and unvalidated evidence, and
-  an authenticated in-memory validation correlation that refuses evidence it cannot validate
-  honestly;
+  an authenticated validation correlation, persisted in SQLite by
+  [#156](https://github.com/ForkbombEu/credimi-attestbook/issues/156), that refuses evidence it
+  cannot validate honestly;
 - the `/captures` explorer read routes and the UI-006 capture explorer UI.
 
 Deliberately **not** implemented in #46 or #47:
@@ -72,14 +73,17 @@ Deliberately **not** implemented in #46 or #47:
   `capture-issuer`/`capture-verifier` endpoint. The issue that owns this slice requires the
   components' actual APIs to be confirmed before they are integrated, so only the mock
   transport exists;
-- persistence or external artifact storage, and its access-control boundary (CD-6). The mock
-  source keeps only an in-memory idempotency map of capture ids to digests;
+- external artifact storage and its access-control boundary (CD-6). Durable capture evidence
+  and correlations are implemented separately by
+  [#156](https://github.com/ForkbombEu/credimi-attestbook/issues/156); the mock source still
+  keeps its own in-memory push-idempotency map of capture ids to digests;
 - fetching an `artifactRef`. No network request is made by this module. A future fetcher
   must reuse the import pipeline's URL validation, DNS resolution and pinned-address checks
   (`src/import/url.ts`), not resolve the reference itself;
-- binding an artifact collected outside the mock source to a rulebook version, fetching an
-  external reference, or persisting a correlation. #48 implements the mock-backed explorer and
-  the pinned-rulebook correlation for a captured issued credential (section 9);
+- binding an artifact collected outside the mock source to a rulebook version, or fetching an
+  external reference. #48 implements the mock-backed explorer and the pinned-rulebook
+  correlation for a captured issued credential (section 9), and #156 persists the evidence and
+  that correlation;
 - signing, encrypting, decrypting or otherwise authenticating capture evidence; nothing here
   claims a capture artifact is authentic, complete or protocol-conformant;
 - an operational capture integration. The envelope and adapter contracts are internal
@@ -291,11 +295,26 @@ FR-019 as a **mock-backed** read model in `src/capture/explorer.ts` (`CaptureExp
 the read routes in `src/api/routes.ts` and the UI in `ui/src/CapturesPage.tsx` and
 `ui/src/CaptureDetailPage.tsx`.
 
-- `CaptureExplorer` lazily pulls every page from the configured `CapturePullAdapter`s,
-  deduplicates by `captureId` and keeps the normalized metadata envelopes plus the segregated
-  inline artifacts in memory. The server builds it from deterministic `MockCaptureSource`s for
-  both components, and every entry carries `source.transport: "mock"`; no live
-  `capture-issuer`/`capture-verifier` endpoint is contacted.
+- `CaptureExplorer` lazily pulls every page from the configured `CapturePullAdapter`s and reads
+  and writes through a `CaptureStore` (`src/capture/store.ts`). The server wires
+  `SqliteCaptureStore` over the migration-created tables
+  (`migrations/0012_capture_evidence.sql`): `capture_evidence` holds the metadata-only
+  normalized envelope and the source description, `capture_evidence_artifacts` holds the
+  segregated decoded inline bytes, and `capture_correlations` holds the pinned binding and its
+  structural validation. Seeding is idempotent by `captureId` over the SHA-256 of the accepted
+  submission bytes (`submission_digest`, §7; a pull source has no submission frame, so the
+  explorer hashes a canonical serialization that excludes AttestBook's receipt timestamp): a
+  byte-identical reseed is a duplicate, different bytes are a conflict, and restarting against
+  the same database neither duplicates captures nor drops a recorded correlation. The store is
+  bounded at `MAX_CAPTURE_RECORDS`; a new capture beyond it is refused with the existing
+  `capture_store_full` code instead of growing or evicting. The server builds the explorer from
+  deterministic `MockCaptureSource`s for both components, and every entry carries
+  `source.transport: "mock"`; no live `capture-issuer`/`capture-verifier` endpoint is
+  contacted.
+- A metadata read never loads the artifact blob. `CaptureStore.list`/`get` join only the
+  artifact metadata (`mediaType`, `encoding`, `byteLength`, `digest`); the raw bytes are read
+  only to compute the redacted projection or to run structural validation, and nothing returns
+  or logs them.
 - A read model never returns the raw artifact. Inline evidence is represented by the redacted
   default-policy projection (`artifactProjection`) with the projection status, policy
   reference, redacted JSON Pointers, redacted digest and diagnostics. The source-declared
@@ -328,9 +347,10 @@ the read routes in `src/api/routes.ts` and the UI in `ui/src/CapturesPage.tsx` a
   the correlation `boundAt` and the validation `validatedAt` by their own timestamps. The test
   execution reference stays opaque: AttestBook does not query Credimi or orchestrate an
   execution.
-- The correlation is in memory for the server process only. It writes no registry data and is
-  not a durable run history. A captured presentation submission is not unpacked into a
-  credential, and no live capture component is integrated.
+- The correlation is durable in the server's SQLite database and survives a restart. It writes
+  no registry data and is not a run history; the database is operator-managed. A captured
+  presentation submission is not unpacked into a credential, and no live capture component is
+  integrated.
 - `POST /api/v1/captures/{captureId}/compare` (FR-021, issue #50) reads that recorded
   correlation and returns the AttestBook structural evidence next to an optional
   caller-supplied external wallet observation, separated into schema, protocol,
@@ -357,7 +377,8 @@ The specification §16 capture matrix is covered by `src/capture/`:
 | Push/pull contracts | `adapters/contracts.test.ts` — a non-mock pull/push adapter driven only through the published interfaces |
 | Transport errors | `adapters/transport.test.ts` — unavailable, timeout, invalid response, oversized response, cursor and page-size rejection, no network request |
 | Authorization | `adapters/authorization.test.ts` — hashed credential acceptance, fail-closed default, constant-time helper, no credential echo, cross-source rejection |
-| Capture explorer and correlation (FR-019/UI-006) | `explorer.test.ts` — mock list/paging, redacted-only projection, external and missing evidence gaps, end-to-end correlation of the segregated artifact, rejection of external/non-credential evidence, request parsing and the timeline; `api/captures.test.ts` — real validation-engine correlation against a seeded pinned version, digest linkage, safe `409`/`404`/`400`/`502`/`503` responses, unchanged snapshot bytes and response schema validation; `ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`, `ui/src/capture.test.ts` — explorer states, explicit gaps, redacted projection, eligibility refusals, correlation flow and axe-core; `ui/e2e/captures.spec.ts` — browser tests against the real seeded API, including a real signed credential correlation, redaction and responsive checks |
+| Capture explorer and correlation (FR-019/UI-006) | `explorer.test.ts` — mock list/paging, redacted-only projection, external and missing evidence gaps, end-to-end correlation of the segregated artifact, rejection of external/non-credential evidence, request parsing, the timeline and a second explorer over the same database file reloading the recorded binding and validation; `api/captures.test.ts` — real validation-engine correlation against a seeded pinned version, digest linkage, safe `409`/`404`/`400`/`502`/`503` responses, unchanged snapshot bytes, response schema validation and no raw inline artifact in any response; `ui/src/CapturesPage.test.tsx`, `ui/src/CaptureDetailPage.test.tsx`, `ui/src/capture.test.ts` — explorer states, explicit gaps, redacted projection, eligibility refusals, correlation flow and axe-core; `ui/e2e/captures.spec.ts` — browser tests against the real seeded API, including a real signed credential correlation, redaction and responsive checks |
+| Capture evidence persistence (FR-015/FR-019) | `store.test.ts` — metadata/artifact round trip, newest-first ordering, idempotent re-insert, `duplicate_conflict` on different bytes, the `MAX_CAPTURE_RECORDS` `capture_store_full` bound, correlation upsert and persistence across a new connection; `db/migrations.test.ts` — migration `0012` tables, closed enumerations, insert-once evidence, immutable artifacts and correlation foreign keys |
 
 ## 11. Explicit limitations
 
@@ -383,11 +404,14 @@ The specification §16 capture matrix is covered by `src/capture/`:
   authorized reference).
 - No signing, encryption, selective-disclosure recovery or protocol conformance claim is
   made. Missing or undisclosed claims remain `NOT_TESTED` for later validation, not failures.
-- The capture explorer is mock-backed and in-memory. It shows deterministic local fixtures,
-  never a live capture, and a correlation is lost on restart. Only a captured
-  `issued-credential` inline artifact can be validated; a presentation submission is not
-  unpacked, and redacted/external evidence is reported instead of validated.
-- Retention is process-lifetime for evidence and correlations, bounded by
-  `MAX_CAPTURE_RECORDS` and the source page limit; nothing is persisted, and the mock store
-  keeps only ids and submission hashes. The complete data-retention and redaction policy is
-  in [`docs/security-threat-model.md`](security-threat-model.md) §4.
+- The capture explorer is mock-backed. Evidence and correlations are persisted in the server's
+  SQLite database, so a correlation survives a restart; it still shows deterministic local
+  fixtures, never a live capture. Only a captured `issued-credential` inline artifact can be
+  validated; a presentation submission is not unpacked, and redacted/external evidence is
+  reported instead of validated.
+- Evidence and correlations are retained in SQLite until the operator removes or prunes the
+  database; there is no HTTP delete and no retention job. The store is bounded at
+  `MAX_CAPTURE_RECORDS` per database, and a new capture beyond it is refused instead of
+  evicting. The mock source's own paging cursor and push-idempotency map remain
+  process-lifetime and are not the explorer's evidence store. The complete data-retention and
+  redaction policy is in [`docs/security-threat-model.md`](security-threat-model.md) §4.
