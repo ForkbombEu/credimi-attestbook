@@ -80,7 +80,7 @@ export function CatalogFilterBar({
 
       <button
         type="button"
-        className="btn btn-outline btn-md"
+        className="btn btn-outline btn-lg"
         onClick={onClear}
         disabled={!filtering}
       >
