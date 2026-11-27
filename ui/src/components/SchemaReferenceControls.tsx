@@ -160,16 +160,61 @@ export function SchemaReferenceControls({
     setCredentialType(keyword === null ? '' : (declaredCredentialType(text, keyword) ?? ''))
   }
 
+  // The stored-document read started by an edit; a newer edit or a closed form
+  // aborts it so a late response never fills the wrong row.
+  const pendingLoad = useRef<AbortController | null>(null)
+  const [loadingStored, setLoadingStored] = useState(false)
+  useEffect(() => () => pendingLoad.current?.abort(), [])
+
+  /**
+   * Opens the row's form. Editing an existing reference starts from its current
+   * values: an external reference fills the URL and SRI pin, and a hosted one
+   * loads the exact stored schema (and so its vct/docType) for editing. Saving
+   * a changed hosted schema registers a new immutable document.
+   */
   const openForm = (attestation: SchemaControlAttestation, formatIdentifier: string) => {
     const reference = referenceForFormat(attestation, formatIdentifier)
+    const hosted = hostedFor(reference)
+    pendingLoad.current?.abort()
+    setLoadingStored(false)
     setOpenKey(rowKey(attestation.index, formatIdentifier))
-    setMode(defaultMode(hostedFor(reference)))
+    setMode(defaultMode(hosted))
     setResult(null)
     setStatus(null)
     resetForm()
+    if (reference === null) {
+      return
+    }
+    if (hosted === null) {
+      setExternalUri(reference.uri)
+      setExternalIntegrity(reference.integrity ?? '')
+      return
+    }
+    const controller = new AbortController()
+    pendingLoad.current = controller
+    setLoadingStored(true)
+    api
+      .getSchemaDocumentContent(hosted.id, controller.signal)
+      .then((text) => {
+        if (!controller.signal.aborted) {
+          applySchemaText(text, formatIdentifier)
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) {
+          setFormError('The stored schema could not be loaded. Paste or choose it again.')
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoadingStored(false)
+        }
+      })
   }
 
   const closeForm = () => {
+    pendingLoad.current?.abort()
+    setLoadingStored(false)
     setOpenKey(null)
     resetForm()
   }
@@ -369,7 +414,7 @@ export function SchemaReferenceControls({
     return (
       <div className="schema-form" key={key}>
         <p className="schema-form__title">
-          {reference === null ? 'Add a schema for' : 'Replace the schema for'}{' '}
+          {reference === null ? 'Add a schema for' : 'Edit the schema for'}{' '}
           <strong>{attestation.name}</strong> · <code>{formatName(formatIdentifier)}</code>
         </p>
         <fieldset className="schema-mode">
@@ -430,7 +475,7 @@ export function SchemaReferenceControls({
                 onChange={(event) => {
                   applySchemaText(event.target.value, formatIdentifier)
                 }}
-                disabled={working || disabled}
+                disabled={working || disabled || loadingStored}
                 aria-describedby={
                   showPreview && !preview.ok
                     ? `${formId}-preview ${formId}-preview-error`
@@ -439,8 +484,11 @@ export function SchemaReferenceControls({
                 aria-invalid={showPreview && !preview.ok}
               />
               <p className="field-hint" id={`${formId}-preview`}>
-                JSON Schema 2020-12. The exact text is registered; the API compiles it before it is
-                stored.
+                {loadingStored ? (
+                  <span role="status">Loading the stored schema…</span>
+                ) : (
+                  'JSON Schema 2020-12. The exact text is registered; the API compiles it before it is stored. A changed schema is stored as a new document.'
+                )}
               </p>
             </div>
             <div className="field">
@@ -563,7 +611,12 @@ export function SchemaReferenceControls({
                   void handleRegister(attestation, formatIdentifier)
                 }}
                 disabled={
-                  working || disabled || csrfToken === null || !preview.ok || missingNamespace
+                  working ||
+                  disabled ||
+                  loadingStored ||
+                  csrfToken === null ||
+                  !preview.ok ||
+                  missingNamespace
                 }
                 aria-label={`Register and insert schema for ${attestation.name} (${formatName(formatIdentifier)})`}
               >
@@ -804,9 +857,9 @@ export function SchemaReferenceControls({
                   onClick={() => openForm(attestation, formatIdentifier)}
                   disabled={disabled}
                   aria-expanded={open}
-                  aria-label={`${reference === null ? 'Add' : 'Replace'} schema for ${attestation.name} (${formatName(formatIdentifier)})`}
+                  aria-label={`${reference === null ? 'Add' : 'Edit'} schema for ${attestation.name} (${formatName(formatIdentifier)})`}
                 >
-                  {reference === null ? 'Add schema' : 'Replace schema'}
+                  {reference === null ? 'Add schema' : 'Edit schema'}
                 </button>
                 {reference === null ? null : (
                   <button

@@ -271,7 +271,7 @@ test.describe('next version from a published rulebook', () => {
     // Replace the attestation's schema reference through the existing controls.
     await page
       .getByRole('button', {
-        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
       })
       .click()
     await page.getByRole('radio', { name: /Use existing external URL/ }).check()

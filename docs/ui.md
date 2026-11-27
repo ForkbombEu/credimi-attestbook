@@ -479,8 +479,12 @@ dimensions.
   cannot be edited by the form: they are listed read-only and kept unchanged in the saved
   document. The serialized document is internal state; no raw JSON is shown or editable;
 - each supported format has one schema row inside its attestation, so multiple attestations
-  and formats stay unambiguous. A row can add or replace `Upload/paste schema to AttestBook`
-  or `Use existing external URL` (issue #100):
+  and formats stay unambiguous. A row can **Add schema** or **Edit schema** with
+  `Upload/paste schema to AttestBook` or `Use existing external URL` (issue #100). Editing
+  starts from the current reference: an external one fills its URL and SRI pin, and a hosted
+  one loads the exact stored document (and so its vct/docType) from the same-origin
+  `GET /api/v1/schema-documents/{documentId}/content` route; registering a changed hosted
+  schema stores a new immutable document and repoints the reference:
   - hosted mode accepts pasted text or a local `.json` file. A file is read as bytes and
     refused when it begins with a byte-order mark or is not valid UTF-8, so the text that is
     registered is the file's exact content. The browser checks the exact UTF-8 byte bound

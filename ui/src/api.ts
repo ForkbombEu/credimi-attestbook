@@ -101,6 +101,11 @@ export interface EditorApi {
     csrfToken: string,
     signal?: AbortSignal,
   ): Promise<CredentialSchemaDocument>
+  /**
+   * Reads the exact stored bytes of a hosted schema document from its public,
+   * same-origin content route, so the editor can load it for editing.
+   */
+  getSchemaDocumentContent(documentId: string, signal?: AbortSignal): Promise<string>
   /** Draft lifecycle reads used by the editor's publication panel (#41). */
   listVersions(rulebookId: string, signal?: AbortSignal): Promise<readonly RulebookVersion[]>
   getPublicationReadiness(
@@ -418,6 +423,22 @@ export function createHttpEditorApi(
         },
       )
       return readData<CredentialSchemaDocument>(response, 'schema registration')
+    },
+    async getSchemaDocumentContent(documentId, signal) {
+      // The path is same-origin on purpose: the canonical URL carries the
+      // configured public origin, which need not be the one the browser uses.
+      const response = await fetchImpl(
+        `/api/v1/schema-documents/${encodeURIComponent(documentId)}/content`,
+        {
+          headers: { accept: 'application/schema+json, application/json' },
+          ...(signal === undefined ? {} : { signal }),
+        },
+      )
+      if (!response.ok) {
+        const failure = await readError(response, 'stored schema')
+        throw new CatalogApiError(failure.message, response.status, failure.code)
+      }
+      return response.text()
     },
     async listVersions(rulebookId, signal) {
       const response = await fetchImpl(

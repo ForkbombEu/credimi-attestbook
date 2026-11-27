@@ -147,6 +147,7 @@ function editor(overrides: Partial<EditorApi> = {}): EditorApi {
     createDraft: vi.fn(async () => CREATED),
     validateDraft: vi.fn(async () => report()),
     registerSchemaDocument: vi.fn(async () => REGISTERED),
+    getSchemaDocumentContent: vi.fn(async () => SCHEMA_TEXT),
     listVersions: vi.fn(async () => [version()]),
     getPublicationReadiness: vi.fn(async () => readiness()),
     createVersion: vi.fn(async (_rulebookId, label) => version({ version: label })),
@@ -747,6 +748,71 @@ describe('rulebook draft editor', () => {
     ).not.toBeInTheDocument()
   })
 
+  test('edits an external schema reference starting from its URL and SRI pin', async () => {
+    const user = userEvent.setup()
+    const api = editor()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
+      }),
+    )
+
+    expect(screen.getByText(/Edit the schema for/)).toBeVisible()
+    expect(screen.getByRole('radio', { name: /Use existing external URL/ })).toBeChecked()
+    expect(screen.getByLabelText('Schema URL')).toHaveValue(
+      'https://issuer.example.org/schemas/pid',
+    )
+    expect(screen.getByLabelText('SRI integrity (optional)')).toHaveValue(
+      'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=',
+    )
+    expect(api.getSchemaDocumentContent).not.toHaveBeenCalled()
+  })
+
+  test('edits a hosted schema starting from its stored document and credential type', async () => {
+    const stored = JSON.stringify({
+      type: 'object',
+      properties: { vct: { const: 'urn:eudi:pid:1' }, family_name: { type: 'string' } },
+      required: ['vct'],
+    })
+    const loaded: DraftRulebook = {
+      ...DRAFT,
+      attestations: [
+        {
+          ...DRAFT.attestations[0]!,
+          schemaReferences: [
+            {
+              formatIdentifier: 'dc+sd-jwt',
+              uri: HOSTED_SCHEMA.url,
+              integrity: HOSTED_SCHEMA.integrity,
+              hostedSchema: HOSTED_SCHEMA,
+            },
+          ],
+        },
+      ],
+    }
+    const getSchemaDocumentContent = vi.fn(async () => stored)
+    const user = userEvent.setup()
+    renderEditor(editor({ getDraft: vi.fn(async () => loaded), getSchemaDocumentContent }), {
+      rulebookId: DRAFT.id,
+    })
+
+    await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
+    await user.click(
+      screen.getByRole('button', {
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
+      }),
+    )
+
+    expect(screen.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ })).toBeChecked()
+    await waitFor(() => expect(screen.getByLabelText('JSON Schema document')).toHaveValue(stored))
+    expect(getSchemaDocumentContent).toHaveBeenCalledWith(HOSTED_SCHEMA.id, expect.anything())
+    expect(screen.getByLabelText('Credential type (vct)')).toHaveValue('urn:eudi:pid:1')
+    expect(screen.getByLabelText('JSON Schema document')).toBeEnabled()
+  })
+
   test('registers a pasted hosted schema and inserts its URI and integrity into the attestation', async () => {
     const api = editor()
     const user = userEvent.setup()
@@ -756,7 +822,7 @@ describe('rulebook draft editor', () => {
     await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
     await user.click(
       screen.getByRole('button', {
-        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
       }),
     )
     await user.click(screen.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ }))
@@ -797,7 +863,7 @@ describe('rulebook draft editor', () => {
     await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
     await user.click(
       screen.getByRole('button', {
-        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
       }),
     )
     await user.click(screen.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ }))
@@ -860,7 +926,7 @@ describe('rulebook draft editor', () => {
     await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
     await user.click(
       screen.getByRole('button', {
-        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
       }),
     )
     await user.click(screen.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ }))
@@ -916,7 +982,7 @@ describe('rulebook draft editor', () => {
     await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
     await user.click(
       screen.getByRole('button', {
-        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
       }),
     )
     await user.click(screen.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ }))
@@ -946,7 +1012,7 @@ describe('rulebook draft editor', () => {
     await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
     await user.click(
       screen.getByRole('button', {
-        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
       }),
     )
     expect(screen.getByText(/AttestBook cannot inspect an external schema/)).toBeVisible()
@@ -1139,7 +1205,7 @@ describe('rulebook draft editor', () => {
     await screen.findByRole('heading', { name: 'Edit PID Rulebook draft' })
     expect(
       screen.getByRole('button', {
-        name: 'Replace schema for Person Identification Data (mso_mdoc)',
+        name: 'Edit schema for Person Identification Data (mso_mdoc)',
       }),
     ).toBeVisible()
     await user.click(
@@ -1181,7 +1247,7 @@ describe('rulebook draft editor', () => {
     await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
     await user.click(
       screen.getByRole('button', {
-        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
       }),
     )
     await user.click(screen.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ }))
@@ -1333,7 +1399,7 @@ describe('rulebook draft editor', () => {
     await waitFor(() => expect(api.validateDraft).toHaveBeenCalled())
     await user.click(
       screen.getByRole('button', {
-        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
       }),
     )
     await user.click(screen.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ }))
@@ -1383,7 +1449,7 @@ describe('rulebook draft editor', () => {
     expect(await screen.findByText('This rulebook is published.')).toBeVisible()
     expect(
       screen.getByRole('button', {
-        name: 'Replace schema for Person Identification Data (dc+sd-jwt)',
+        name: 'Edit schema for Person Identification Data (dc+sd-jwt)',
       }),
     ).toBeDisabled()
     expect(
