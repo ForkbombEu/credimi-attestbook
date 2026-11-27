@@ -1082,6 +1082,37 @@ describe('rulebook draft editor', () => {
     ])
   })
 
+  test('keeps a binding type outside the TS11 vocabulary visible and unchanged when editing', async () => {
+    const legacy: DraftRulebook = {
+      ...DRAFT,
+      attestations: [{ ...DRAFT.attestations[0]!, bindingType: 'cryptographic' }],
+    }
+    const replaceDraft = vi.fn(async (_rulebookId: string, _request: SaveDraftRequest) => legacy)
+    const api = editor({ getDraft: vi.fn(async () => legacy), replaceDraft })
+    const user = userEvent.setup()
+    renderEditor(api, { rulebookId: DRAFT.id })
+
+    await screen.findByRole('heading', { name: 'Attestation types' })
+    await user.click(
+      screen.getByRole('button', { name: 'Edit attestation Person Identification Data' }),
+    )
+    const binding = within(attestationForm()).getByLabelText('Binding type')
+    // The select shows the stored value instead of silently displaying `claim`.
+    expect(binding).toHaveValue('cryptographic')
+    expect(within(binding).getByRole('option', { selected: true })).toHaveTextContent(
+      'cryptographic (outside TS11 v1.0.1)',
+    )
+
+    await user.click(within(attestationForm()).getByRole('button', { name: 'Save attestation' }))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save draft' })).toBeEnabled())
+    await user.click(screen.getByRole('button', { name: 'Save draft' }))
+    await waitFor(() => expect(replaceDraft).toHaveBeenCalled())
+    const request = replaceDraft.mock.calls[0]?.[1] as {
+      readonly attestations: readonly { readonly bindingType: string }[]
+    }
+    expect(request.attestations[0]?.bindingType).toBe('cryptographic')
+  })
+
   test('drops a format schema reference when the format is unchecked', async () => {
     const twoFormats: DraftRulebook = {
       ...DRAFT,

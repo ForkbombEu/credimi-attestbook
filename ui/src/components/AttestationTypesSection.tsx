@@ -55,6 +55,17 @@ function draftOf(attestation: SchemaControlAttestation): AttestationDraft {
   }
 }
 
+/**
+ * An imported or API-authored value outside the TS11 vocabulary stays visible
+ * and selected, instead of a select silently showing the first option while the
+ * draft keeps the old value.
+ */
+function legacyOption(values: readonly string[], current: string) {
+  return values.includes(current) ? null : (
+    <option value={current}>{`${current} (outside TS11 v1.0.1)`}</option>
+  )
+}
+
 interface AttestationFormProps {
   readonly initial: AttestationDraft | null
   readonly disabled: boolean
@@ -152,6 +163,7 @@ function AttestationForm({ initial, disabled, onSave, onCancel }: AttestationFor
             onChange={(event) => update({ attestationLoS: event.target.value })}
             disabled={disabled}
           >
+            {legacyOption(ATTESTATION_LOS_VALUES, draft.attestationLoS)}
             {ATTESTATION_LOS_VALUES.map((value) => (
               <option key={value} value={value}>
                 {value}
@@ -167,6 +179,7 @@ function AttestationForm({ initial, disabled, onSave, onCancel }: AttestationFor
             onChange={(event) => update({ bindingType: event.target.value })}
             disabled={disabled}
           >
+            {legacyOption(BINDING_TYPE_VALUES, draft.bindingType)}
             {BINDING_TYPE_VALUES.map((value) => (
               <option key={value} value={value}>
                 {value}
