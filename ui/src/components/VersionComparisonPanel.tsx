@@ -80,7 +80,12 @@ export function VersionComparisonPanel({ api, rulebookId, versions }: VersionCom
       })
   }, [api, fromLabel, rulebookId, toLabel])
 
-  const selectable = versions.length >= 2
+  // With fewer than two versions there is nothing to compare, so the panel is
+  // not offered at all.
+  if (versions.length < 2) {
+    return null
+  }
+
   const sameVersion = fromLabel === toLabel
 
   return (
@@ -92,137 +97,127 @@ export function VersionComparisonPanel({ api, rulebookId, versions }: VersionCom
         content compare as identical.
       </p>
 
-      {!selectable ? (
-        <p className="muted">Record at least two versions to compare them.</p>
-      ) : (
-        <>
-          <div className="comparison-controls">
-            <div className="field">
-              <label htmlFor="version-compare-from">Baseline version</label>
-              <select
-                id="version-compare-from"
-                value={fromLabel}
-                onChange={(event) => {
-                  setFromLabel(event.target.value)
-                  setState({ status: 'idle' })
-                }}
-              >
-                {ordered.map((version) => (
-                  <option key={version.id} value={version.version}>
-                    {version.version} ({version.status})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="field">
-              <label htmlFor="version-compare-to">Compared version</label>
-              <select
-                id="version-compare-to"
-                value={toLabel}
-                onChange={(event) => {
-                  setToLabel(event.target.value)
-                  setState({ status: 'idle' })
-                }}
-              >
-                {ordered.map((version) => (
-                  <option key={version.id} value={version.version}>
-                    {version.version} ({version.status})
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="button"
-              className="btn btn-primary btn-md"
-              onClick={compare}
-              disabled={state.status === 'loading' || sameVersion}
-            >
-              {state.status === 'loading' ? 'Comparing…' : 'Compare'}
+      <div className="comparison-controls">
+        <div className="field">
+          <label htmlFor="version-compare-from">Baseline version</label>
+          <select
+            id="version-compare-from"
+            value={fromLabel}
+            onChange={(event) => {
+              setFromLabel(event.target.value)
+              setState({ status: 'idle' })
+            }}
+          >
+            {ordered.map((version) => (
+              <option key={version.id} value={version.version}>
+                {version.version} ({version.status})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="field">
+          <label htmlFor="version-compare-to">Compared version</label>
+          <select
+            id="version-compare-to"
+            value={toLabel}
+            onChange={(event) => {
+              setToLabel(event.target.value)
+              setState({ status: 'idle' })
+            }}
+          >
+            {ordered.map((version) => (
+              <option key={version.id} value={version.version}>
+                {version.version} ({version.status})
+              </option>
+            ))}
+          </select>
+        </div>
+        <button
+          type="button"
+          className="btn btn-primary btn-md"
+          onClick={compare}
+          disabled={state.status === 'loading' || sameVersion}
+        >
+          {state.status === 'loading' ? 'Comparing…' : 'Compare'}
+        </button>
+      </div>
+      {sameVersion ? (
+        <p className="field-hint" role="status">
+          Choose two different versions.
+        </p>
+      ) : null}
+
+      {state.status === 'error' ? (
+        <Alert
+          variant="destructive"
+          title="The versions could not be compared"
+          role="alert"
+          action={
+            <button type="button" className="btn btn-outline btn-sm" onClick={compare}>
+              Retry
             </button>
-          </div>
-          {sameVersion ? (
-            <p className="field-hint" role="status">
-              Choose two different versions.
+          }
+        >
+          <p>{state.message}</p>
+        </Alert>
+      ) : null}
+
+      {state.status === 'ready' ? (
+        state.diff.identical ? (
+          <Alert variant="info" role="status">
+            <p>
+              <strong>
+                {state.diff.from.version} and {state.diff.to.version}
+              </strong>{' '}
+              have identical authored content (digests {formatDigest(state.diff.from.contentDigest)}{' '}
+              and {formatDigest(state.diff.to.contentDigest)}).
             </p>
-          ) : null}
-
-          {state.status === 'error' ? (
-            <Alert
-              variant="destructive"
-              title="The versions could not be compared"
-              role="alert"
-              action={
-                <button type="button" className="btn btn-outline btn-sm" onClick={compare}>
-                  Retry
-                </button>
-              }
-            >
-              <p>{state.message}</p>
-            </Alert>
-          ) : null}
-
-          {state.status === 'ready' ? (
-            state.diff.identical ? (
-              <Alert variant="info" role="status">
-                <p>
-                  <strong>
-                    {state.diff.from.version} and {state.diff.to.version}
-                  </strong>{' '}
-                  have identical authored content (digests{' '}
-                  {formatDigest(state.diff.from.contentDigest)} and{' '}
-                  {formatDigest(state.diff.to.contentDigest)}).
-                </p>
-              </Alert>
-            ) : (
-              <>
-                <p className="editor-status" role="status">
-                  {state.diff.changes.length}{' '}
-                  {state.diff.changes.length === 1 ? 'change' : 'changes'} between{' '}
-                  <strong>{state.diff.from.version}</strong> and{' '}
-                  <strong>{state.diff.to.version}</strong>: {state.diff.summary.added} added,{' '}
-                  {state.diff.summary.removed} removed, {state.diff.summary.changed} changed.
-                </p>
-                <div className="table-wrap table-wrap--nested">
-                  <table className="detail-table">
-                    <caption className="sr-only">
-                      Differences from version {state.diff.from.version} to version{' '}
-                      {state.diff.to.version}, sorted by path
-                    </caption>
-                    <thead>
-                      <tr>
-                        <th scope="col">Path</th>
-                        <th scope="col">Change</th>
-                        <th scope="col">Baseline value</th>
-                        <th scope="col">Compared value</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {state.diff.changes.map((change) => (
-                        <tr key={change.path}>
-                          <th scope="row">
-                            <code>{change.path === '' ? '(document)' : change.path}</code>
-                          </th>
-                          <td>
-                            <span className={`badge badge--diff-${change.kind}`}>
-                              {change.kind}
-                            </span>
-                          </td>
-                          <td>
-                            <code className="diff-value">{formatValue(change.before)}</code>
-                          </td>
-                          <td>
-                            <code className="diff-value">{formatValue(change.after)}</code>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              </>
-            )
-          ) : null}
-        </>
-      )}
+          </Alert>
+        ) : (
+          <>
+            <p className="editor-status" role="status">
+              {state.diff.changes.length} {state.diff.changes.length === 1 ? 'change' : 'changes'}{' '}
+              between <strong>{state.diff.from.version}</strong> and{' '}
+              <strong>{state.diff.to.version}</strong>: {state.diff.summary.added} added,{' '}
+              {state.diff.summary.removed} removed, {state.diff.summary.changed} changed.
+            </p>
+            <div className="table-wrap table-wrap--nested">
+              <table className="detail-table">
+                <caption className="sr-only">
+                  Differences from version {state.diff.from.version} to version{' '}
+                  {state.diff.to.version}, sorted by path
+                </caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Path</th>
+                    <th scope="col">Change</th>
+                    <th scope="col">Baseline value</th>
+                    <th scope="col">Compared value</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {state.diff.changes.map((change) => (
+                    <tr key={change.path}>
+                      <th scope="row">
+                        <code>{change.path === '' ? '(document)' : change.path}</code>
+                      </th>
+                      <td>
+                        <span className={`badge badge--diff-${change.kind}`}>{change.kind}</span>
+                      </td>
+                      <td>
+                        <code className="diff-value">{formatValue(change.before)}</code>
+                      </td>
+                      <td>
+                        <code className="diff-value">{formatValue(change.after)}</code>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
+        )
+      ) : null}
     </section>
   )
 }

@@ -149,16 +149,13 @@ test.describe('rulebook detail against the real API', () => {
     await expect(page.getByRole('heading', { name: 'PID Rulebook', level: 1 })).toBeVisible()
   })
 
-  test('distinguishes hosted and external schema references and fetches hosted bytes anonymously', async ({
+  test('downloads hosted schema references and links external ones anonymously', async ({
     page,
     request,
   }) => {
     await page.goto(await pidDetail(page))
 
     const references = page.getByRole('region', { name: 'Attestation types' })
-    await expect(references.getByText('Hosted by AttestBook').first()).toBeVisible()
-    await expect(references.getByText('External URL').first()).toBeVisible()
-    await expect(references.getByText('application/schema+json').first()).toBeVisible()
 
     const externalLink = references.getByRole('link', {
       name: /https:\/\/issuer\.example\.org\/schemas\/pid/,
@@ -196,8 +193,6 @@ test.describe('rulebook detail against the real API', () => {
       panel.getByRole('heading', { name: 'Schema references in version 1.0' }),
     ).toBeVisible()
     await expect(panel.getByText(/Exact frozen version/)).toBeVisible()
-    await expect(panel.getByText('Hosted by AttestBook').first()).toBeVisible()
-    await expect(panel.getByText('External URL').first()).toBeVisible()
     await expect(
       panel
         .getByRole('link', { name: /Download the JSON Schema 2020-12 document for mso_mdoc/ })

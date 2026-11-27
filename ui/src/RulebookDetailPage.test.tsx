@@ -294,7 +294,7 @@ describe('rulebook detail content', () => {
     ).toBeInTheDocument()
   })
 
-  test('shows the empty version state for a rulebook without versions', async () => {
+  test('shows the empty version state and no comparison for a rulebook without versions', async () => {
     renderDetail(createFakeApi(), 'rulebook-age')
 
     expect(
@@ -303,6 +303,7 @@ describe('rulebook detail content', () => {
     expect(
       screen.getByText('No versions have been recorded for this rulebook.'),
     ).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Compare versions' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Export version/ })).not.toBeInTheDocument()
   })
 
@@ -347,15 +348,10 @@ describe('hosted and external schema provenance', () => {
     schemaReferences: { 'rulebook-pid': [hosted, external] },
   }
 
-  test('distinguishes hosted documents from external URLs in the same rulebook', async () => {
+  test('offers a download only for hosted documents in the same rulebook', async () => {
     renderDetail(createFakeApi(dataset))
 
     const section = await screen.findByRole('region', { name: 'Attestation types' })
-    expect(within(section).getAllByText('Hosted by AttestBook').length).toBeGreaterThan(0)
-    expect(within(section).getAllByText('External URL').length).toBeGreaterThan(0)
-    expect(within(section).getAllByText('JSON Schema 2020-12').length).toBeGreaterThan(0)
-    expect(within(section).getAllByText('application/schema+json').length).toBeGreaterThan(0)
-    expect(within(section).getAllByText(`${'c'.repeat(16)}…`).length).toBeGreaterThan(0)
     expect(within(section).getAllByText('Pin matches stored digest').length).toBeGreaterThan(0)
 
     const download = within(section).getAllByRole('link', {
@@ -369,6 +365,9 @@ describe('hosted and external schema provenance', () => {
     })[0]!
     expect(externalLink).toHaveAttribute('href', 'https://issuer.example.org/schemas/pid-mdoc')
     expect(externalLink).toHaveAttribute('target', '_blank')
+    expect(
+      within(externalLink.closest('tr')!).queryByRole('link', { name: /Download/ }),
+    ).not.toBeInTheDocument()
   })
 
   test('inspects the exact frozen version and names its hosted references', async () => {
@@ -416,9 +415,6 @@ describe('hosted and external schema provenance', () => {
     expect(await screen.findByText('Schema references in version 1.0')).toBeInTheDocument()
     expect(screen.getByText(/Exact frozen version/)).toBeInTheDocument()
     expect(screen.getAllByText(`${'a'.repeat(16)}…`).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Hosted by AttestBook').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('External URL').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('application/schema+json').length).toBeGreaterThan(0)
     expect(
       screen.getAllByRole('link', {
         name: /Download the JSON Schema 2020-12 document for dc\+sd-jwt/,

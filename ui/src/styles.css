@@ -922,6 +922,18 @@ dd {
   white-space: nowrap;
 }
 
+/* The two common TS11 formats are told apart at a glance; the palettes are the
+   brand's non-status hues, so a format never reads as a pass or a failure. */
+.tag--sd-jwt {
+  background: var(--wallet-bg);
+  color: var(--wallet);
+}
+
+.tag--mdoc {
+  background: var(--credential-bg);
+  color: var(--credential);
+}
+
 .format-list {
   color: var(--fg-subtle);
   font-size: var(--fs-xs);
@@ -1373,48 +1385,6 @@ dd {
 
 .reference-uri--inert {
   color: var(--fg-subtle);
-}
-
-/* Schema provenance: hosted AttestBook documents vs external references */
-.reference-source {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  margin-bottom: 2px;
-  font-size: var(--fs-xs);
-  font-weight: 600;
-}
-
-.reference-source--external {
-  color: var(--fg-subtle);
-}
-
-.reference-source__label {
-  display: inline-block;
-  padding: 2px 8px;
-  border-radius: var(--radius-pill);
-  background: var(--brand-secondary-strong);
-  color: var(--brand-primary);
-}
-
-.reference-source__kind {
-  color: var(--fg-subtle);
-  font-size: var(--fs-xs);
-  font-weight: 500;
-}
-
-.reference-hosted-meta {
-  display: flex;
-  margin: var(--space-1) 0 0;
-  flex-wrap: wrap;
-  gap: var(--space-1) var(--space-3);
-  color: var(--fg-subtle);
-  font-size: var(--fs-xs);
-}
-
-.reference-hosted-meta code {
-  font-size: var(--fs-xs);
 }
 
 .reference-pin {
@@ -2219,6 +2189,21 @@ dd {
   color: var(--brand-secondary);
   font-size: var(--fs-sm);
   line-height: 1.6;
+}
+
+/* The negative Credimi mark at its 32px minimum, beside the disclaimer. */
+.site-footer__about {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-4) var(--space-6);
+}
+
+.site-footer__logo {
+  flex: none;
+  width: 32px;
+  height: 32px;
 }
 
 /* The first footer sub-bar: the ForkBomb attribution (DESIGN.md §8). The

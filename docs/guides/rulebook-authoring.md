@@ -229,8 +229,8 @@ working draft is updated before publication.
 ## Compare version history
 
 The detail page's **Compare versions** panel compares two stored snapshots. It
-needs at least two versions: choose a **Baseline version** and a **Compared
-version**, then choose `Compare`.
+appears once the rulebook has at least two versions: choose a **Baseline
+version** and a **Compared version**, then choose `Compare`.
 
 If the authored content is the same, the panel says so even when the labels
 differ: the snapshot identity fields (format marker, rulebook id and version

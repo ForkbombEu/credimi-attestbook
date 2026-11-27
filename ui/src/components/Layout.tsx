@@ -291,10 +291,19 @@ export function SiteFooter({
   return (
     <footer className="site-footer">
       <div className="site-footer__inner">
-        <p>
-          Structural credential validation runs per credential against a pinned rulebook version.
-          AttestBook does not test or claim trust, interoperability or standards conformance.
-        </p>
+        <div className="site-footer__about">
+          <img
+            className="site-footer__logo"
+            src="/brand/logos/credimi_logo_negative.svg"
+            alt="Credimi"
+            width={32}
+            height={32}
+          />
+          <p>
+            Structural credential validation runs per credential against a pinned rulebook version.
+            AttestBook does not test or claim trust, interoperability or standards conformance.
+          </p>
+        </div>
         <SessionControls onNavigate={onNavigate} showLoginLink={showLoginLink} />
       </div>
       <div className="footer-sub-bar site-footer__attribution">

@@ -93,24 +93,23 @@ Implemented by these slices:
 - rulebook detail with:
   - metadata: stable identifier, provider, publication status, applicable specification and
     record counts;
-  - attestation types with level of assurance, binding type, supported formats and their
-    schema references;
+  - attestation types with level of assurance, binding type and supported formats, the
+    `dc+sd-jwt` and `mso_mdoc` pills each in their own colour, and their schema references;
   - every schema reference, including rulebook-level references that belong to no
-    attestation type, with format identifier, source, safe http(s)-only URI, media type,
-    SHA-256 digest, SRI integrity pin and a download link;
-  - a **Hosted by AttestBook** row is derived from the exact stored-document association
-    returned by the API (never from a URL prefix): it shows the immutable hosted URI, the
-    stored media type and digest, and whether the persisted SRI pin identifies those bytes.
-    Every other value stays an **External URL** and is never fetched just to render the view;
+    attestation type, with format identifier, safe http(s)-only URI, SRI integrity pin and,
+    for a hosted document, a download link;
+  - a reference is hosted only when the API returns the exact stored-document association
+    (never from a URL prefix): its URI opens the immutable hosted document, the row offers a
+    **Download** and states whether the persisted SRI pin identifies those bytes. Every
+    other value is an external link and is never fetched just to render the view;
   - source provenance: the source URL (or "locally authored") and registry timestamps;
-  - standards-compatibility disclosure: the rulebook is always **Not tested**, and each
-    FR-010 evaluation dimension states whether this build supports it per credential, has
-    not tested it, or cannot apply it;
+  - standards-compatibility disclosure, last on the page: the rulebook is always **Not
+    tested**, with links to the playground and the credential validation guide (§3.2);
   - version history, newest first, with label, status, specification, SHA-256 content
     digest, creation/publication dates and an export of each exact immutable snapshot;
   - **Inspect references** on each version reads the exact frozen snapshot and shows its
     schema references grouped by attestation type plus rulebook-level references, with the
-    same hosted/external provenance, the version label and the pinned content digest;
+    same hosted/external download behaviour, the version label and the pinned content digest;
 - loading, error (with retry), empty and not-found states, including section-level
   degradation when a related read fails;
 - accessible markup (landmarks, table semantics, labelled controls, live status,
@@ -151,11 +150,12 @@ Implemented by these slices:
   - entry actions on the catalog (`New rulebook`) and on the detail page (`Edit draft` for a
     draft, `Create new version` for a published rulebook), shown only for an authenticated
     session bound to the owning provider;
-- a deterministic version comparison panel on `/rulebooks/{id}` (#41):
+- a deterministic version comparison panel on `/rulebooks/{id}` (#41), shown only when the
+  rulebook has at least two versions:
   - two labelled version selects and an explicit `Compare` action; the public comparison
     endpoint returns JSON Pointer changes sorted by path, and snapshot identity fields are
     excluded so two labels with equal authored content compare as identical;
-  - a table of path, change kind and before/after values, with explicit empty, loading and
+  - a table of path, change kind and before/after values, with explicit loading and
     retryable error states;
 - a mock-backed capture explorer at `/captures` and `/captures/<captureId>` (#48, UI-006):
   - the list shows one row per normalized capture with its source component and `mock`
@@ -712,7 +712,8 @@ The application uses the brand stylesheet's shared components as they are and
 keeps `ui/src/styles.css` to AttestBook's own layouts:
 
 - the topbar pairs the 32px `credimi_logo.svg` mark with the `AttestBook` title
-  (on `/docs` too); no wordmark appears in either header;
+  (on `/docs` too); no wordmark appears in either header. The indigo footer sets the 32px
+  negative `credimi_logo_negative.svg` mark beside its disclaimer;
 - every view opens with the indigo `.hero-band` (`PageHero` in
   `ui/src/components/Layout.tsx`) carrying the only `h1` and the
   description; content follows in 96px page sections (64px on mobile) on the
@@ -947,11 +948,10 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
 - detail metadata, provider fallback, attestation types, schema references (including
   rulebook-level ones), provenance, safe http(s)-only URI linking, compatibility disclosure
   and newest-first version history with digest and export URLs;
-- hosted/external schema provenance (#103): the stored-document association marks a
-  reference **Hosted by AttestBook** with its kind, media type, SHA-256 digest and download
-  link, a look-alike URL without an association stays **External URL**, a matching or
-  missing SRI pin is reported explicitly, and the exact-version panel reads the frozen
-  snapshot and shows the same provenance with the version label and content digest
+- hosted/external schema provenance (#103): the stored-document association gives a hosted
+  reference its download link, a look-alike URL without an association stays an external
+  link with no download, a matching or missing SRI pin is reported explicitly, and the
+  exact-version panel reads the frozen snapshot with the version label and content digest
   (`ui/src/detail.test.ts`, `ui/src/RulebookDetailPage.test.tsx`);
 - section-level degradation when versions or schema references fail, and empty-version and
   malformed-record rendering;

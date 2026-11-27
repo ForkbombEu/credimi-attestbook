@@ -54,9 +54,9 @@ On the detail page:
   specification, the last update and, for an imported rulebook, its source URL.
 - **Attestation types** lists each type with its level of assurance, binding
   type, supported formats and schema references: the pin (`formatIdentifier`,
-  `uri` and W3C SRI `integrity`), with references whose exact bytes AttestBook
-  hosts marked and given a download link and digest. References bound to no
-  attestation type follow as a rulebook-level group.
+  `uri` and W3C SRI `integrity`), with a download link for references whose
+  exact bytes AttestBook hosts. References bound to no attestation type follow
+  as a rulebook-level group.
 - **Standards compatibility** reports rulebook-level compatibility as **Not
   tested**: no rulebook-level result is recorded yet. It links to the
   playground, which lists the eight validation dimensions with whether this

@@ -67,17 +67,10 @@ function hostedSchemaKindLabel(kind: HostedSchema['kind']): string {
   return kind === 'json_schema_2020_12' ? 'JSON Schema 2020-12' : 'SD-JWT VC Type Metadata'
 }
 
-function ReferenceSource({ reference }: { readonly reference: ReferenceWithHostedSchema }) {
-  const hosted = reference.hostedSchema
-  if (hosted == null) {
-    return <span className="reference-source reference-source--external">External URL</span>
-  }
-  return (
-    <span className="reference-source reference-source--hosted">
-      <span className="reference-source__label">Hosted by AttestBook</span>
-      <span className="reference-source__kind">{hostedSchemaKindLabel(hosted.kind)}</span>
-    </span>
-  )
+/** The two TS11 formats every PID-style rulebook uses get their own pill colour. */
+const FORMAT_TAG_MODIFIERS: Readonly<Record<string, string>> = {
+  'dc+sd-jwt': ' tag--sd-jwt',
+  mso_mdoc: ' tag--mdoc',
 }
 
 function ReferenceUri({
@@ -162,21 +155,7 @@ function SchemaReferenceTable({
                   {row.formatIdentifier}
                 </th>
                 <td>
-                  <ReferenceSource reference={row} />
                   <ReferenceUri reference={row} />
-                  {hosted === null ? null : (
-                    <p className="reference-hosted-meta">
-                      <span>
-                        Media type: <code>{hosted.mediaType}</code>
-                      </span>
-                      <span>
-                        SHA-256:{' '}
-                        <span className="data" title={hosted.contentDigest}>
-                          {formatDigest(hosted.contentDigest)}
-                        </span>
-                      </span>
-                    </p>
-                  )}
                 </td>
                 <td>
                   <ReferenceIntegrity reference={row} />
@@ -348,7 +327,9 @@ export function AttestationsSection({ snapshot }: { readonly snapshot: RulebookD
                         <ul className="tag-list">
                           {attestation.supportedFormats.map((format) => (
                             <li key={format}>
-                              <span className="tag">{format}</span>
+                              <span className={`tag${FORMAT_TAG_MODIFIERS[format] ?? ''}`}>
+                                {format}
+                              </span>
                             </li>
                           ))}
                         </ul>
