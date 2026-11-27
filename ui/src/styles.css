@@ -1795,7 +1795,7 @@ dd {
   grid-column: 1 / -1;
 }
 
-/* The draft JSON is code: monospace, unlike the other form fields. */
+/* The schema document editor is code: monospace, unlike other form fields. */
 .field textarea.json-editor {
   min-height: 340px;
   font-family: var(--font-mono);
@@ -1834,37 +1834,129 @@ dd {
   margin-bottom: var(--space-4);
 }
 
-.schema-attestations {
-  display: grid;
-  gap: var(--space-5);
+/* Attestation types and their per-format schema rows (form editor, contract §2). */
+.schema-rows {
+  min-width: 0;
 }
 
 .schema-attestation {
   min-width: 0;
 }
 
-.schema-attestation + .schema-attestation {
+.attestation-list {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.attestation-card {
+  min-width: 0;
   padding-top: var(--space-5);
   border-top: 1px solid var(--border);
 }
 
-.schema-attestation__title {
+.attestation-card:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
+.attestation-card__header {
   display: flex;
-  margin: 0;
   flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--space-2);
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3) var(--space-4);
+}
+
+.attestation-card__summary {
+  min-width: 0;
+  flex: 1 1 20rem;
+}
+
+.attestation-card__title {
+  margin: 0;
+  overflow-wrap: anywhere;
   color: var(--fg);
   font-size: var(--fs-lg);
   font-weight: 700;
 }
 
-.schema-attestation__position {
+.attestation-card__meta {
+  display: flex;
+  margin: var(--space-1) 0 0;
+  flex-wrap: wrap;
+  gap: var(--space-1) var(--space-4);
   color: var(--fg-subtle);
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: var(--fs-sm);
+}
+
+.attestation-card__meta code {
+  color: var(--fg);
+}
+
+.attestation-rulebook-references {
+  margin: 0 0 var(--space-5);
+}
+
+.attestation-rulebook-references h3 {
+  margin: 0 0 var(--space-2);
+  font-size: var(--fs-base);
+}
+
+.attestation-rulebook-references__list {
+  margin: 0;
+  padding-left: var(--space-5);
+  overflow-wrap: anywhere;
+  font-size: var(--fs-sm);
+}
+
+.attestation-form {
+  margin-top: var(--space-4);
+  padding-top: var(--space-4);
+  border-top: 1px solid var(--border-strong);
+}
+
+.attestation-form__formats {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.attestation-form__formats legend {
+  margin-bottom: var(--space-2);
+  padding: 0;
+  color: var(--fg);
+  font-size: var(--fs-sm);
+  font-weight: 600;
+}
+
+.attestation-form__format-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.attestation-form__format {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--fs-sm);
+  font-weight: 400;
+}
+
+.attestation-form__format input {
+  accent-color: var(--brand-primary);
+}
+
+.attestation-form__actions {
+  margin: var(--space-4) 0 0;
+}
+
+.attestation-add {
+  margin-top: var(--space-5);
+}
+
+.schema-lint {
+  margin-top: var(--space-2);
 }
 
 .schema-row {
@@ -1874,10 +1966,6 @@ dd {
   align-items: flex-start;
   gap: var(--space-3) var(--space-4);
   border-top: 1px solid var(--border);
-}
-
-.schema-attestation__title + .schema-row {
-  margin-top: var(--space-3);
 }
 
 .schema-row__details {

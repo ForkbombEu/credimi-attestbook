@@ -373,7 +373,7 @@ describe('validateSchemaDocuments integrity and coverage', () => {
     expect(outcome.schemaReferences[0]?.applied).toBe(false)
   })
 
-  test('does not silently ignore a format keyword', async () => {
+  test('evaluates the supported date format with a calendar check', async () => {
     const schema = JSON.stringify({
       type: 'object',
       properties: { birthdate: { type: 'string', format: 'date' } },
@@ -383,14 +383,91 @@ describe('validateSchemaDocuments integrity and coverage', () => {
       uri: JSON_SCHEMA_URI,
       integrity: sha256Sri(schema),
     }
-    const outcome = await validateSchemaDocuments({
-      references: [reference],
-      documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
-      parsed: await parseOrThrow(await issueTestCredential()),
-    })
+    const validate = async (value: string) =>
+      validateSchemaDocuments({
+        references: [reference],
+        documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+        parsed: await parseOrThrow(
+          await issueTestCredential({ claims: defaultCredentialClaims({ birthdate: value }) }),
+        ),
+      })
 
-    expect(outcome.status).toBe('NOT_TESTED')
-    expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+    expect((await validate('1815-12-10')).status).toBe('PASS')
+    expect((await validate('2000-02-29')).status).toBe('PASS')
+
+    for (const value of ['1815-02-29', '1900-02-29', '2000-02-30', '1815-13-01', '1815-00-10']) {
+      const outcome = await validate(value)
+      expect(outcome.status).toBe('FAIL')
+      const finding = outcome.findings.find((entry) => entry.code === 'schema_violation')
+      expect(finding?.expected).toBe('format')
+    }
+  })
+
+  test('evaluates the supported date-time format with range checks', async () => {
+    const schema = JSON.stringify({
+      type: 'object',
+      required: ['signed_at'],
+      properties: { signed_at: { type: 'string', format: 'date-time' } },
+    })
+    const reference = {
+      formatIdentifier: 'dc+sd-jwt',
+      uri: JSON_SCHEMA_URI,
+      integrity: sha256Sri(schema),
+    }
+    const validate = async (value: string) =>
+      validateSchemaDocuments({
+        references: [reference],
+        documents: [{ uri: JSON_SCHEMA_URI, content: schema }],
+        parsed: await parseOrThrow(
+          await issueTestCredential({ claims: defaultCredentialClaims({ signed_at: value }) }),
+        ),
+      })
+
+    for (const value of [
+      '2026-01-02T03:04:05Z',
+      '2026-01-02t03:04:05z',
+      '2026-01-02T03:04:05.123+02:00',
+      '2026-01-02T23:59:60-05:30',
+    ]) {
+      expect((await validate(value)).status).toBe('PASS')
+    }
+
+    for (const value of [
+      '2026-01-02',
+      '2026-01-02T24:00:00Z',
+      '2026-01-02T03:60:00Z',
+      '2026-01-02T03:04:61Z',
+      '2026-01-02T03:04:05',
+      '2026-01-02T03:04:05+24:00',
+      '2026-01-02T03:04:05+02:60',
+      `2026-01-02T03:04:05.${'1'.repeat(60)}Z`,
+    ]) {
+      const outcome = await validate(value)
+      expect(outcome.status).toBe('FAIL')
+      expect(outcome.findings.map((entry) => entry.code)).toContain('schema_violation')
+    }
+  })
+
+  test('does not silently ignore an unsupported format value', async () => {
+    for (const schema of [
+      { type: 'object', properties: { given_name: { type: 'string', format: 'uri' } } },
+      { type: 'object', properties: { given_name: { type: 'string', format: 42 } } },
+    ]) {
+      const content = JSON.stringify(schema)
+      const reference = {
+        formatIdentifier: 'dc+sd-jwt',
+        uri: JSON_SCHEMA_URI,
+        integrity: sha256Sri(content),
+      }
+      const outcome = await validateSchemaDocuments({
+        references: [reference],
+        documents: [{ uri: JSON_SCHEMA_URI, content }],
+        parsed: await parseOrThrow(await issueTestCredential()),
+      })
+
+      expect(outcome.status).toBe('NOT_TESTED')
+      expect(outcome.findings.map((entry) => entry.code)).toContain('unsupported_schema_keyword')
+    }
   })
 
   test('does not silently ignore uniqueItems', async () => {

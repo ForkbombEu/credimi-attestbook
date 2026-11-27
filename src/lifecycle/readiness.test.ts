@@ -11,6 +11,7 @@ import type { PublicationStatus, RulebookVersion } from '../registry/types'
 import { serializeRulebookVersion, type RulebookVersionDocument } from '../registry/versioning'
 
 import { assessPublicationReadiness } from './readiness'
+import type { CredentialSchemaResolver } from './credential-types'
 
 function snapshot(overrides: Partial<RulebookVersionDocument> = {}): RulebookVersionDocument {
   return {
@@ -65,6 +66,7 @@ function assess(
     readonly version?: Partial<RulebookVersion>
     readonly current?: RulebookVersionDocument
     readonly rulebookStatus?: PublicationStatus
+    readonly resolveCredentialSchema?: CredentialSchemaResolver
   } = {},
 ) {
   return assessPublicationReadiness({
@@ -73,6 +75,7 @@ function assess(
     bytes: serializeRulebookVersion(document),
     currentBytes: serializeRulebookVersion(options.current ?? document),
     document,
+    resolveCredentialSchema: options.resolveCredentialSchema ?? (() => null),
   })
 }
 
@@ -96,6 +99,18 @@ describe('publication readiness', () => {
       'pass',
       'pass',
       'pass',
+      'warn',
+    ])
+    expect(statusOf(result, 'credential_types')).toBe('warn')
+    expect(result.checks.map((check) => check.id)).toEqual([
+      'draft_version',
+      'rulebook_status',
+      'snapshot_integrity',
+      'snapshot_current',
+      'content_valid',
+      'standards_profile',
+      'attestation_types',
+      'credential_types',
     ])
     expect(result.limitations.length).toBeGreaterThan(0)
   })
@@ -138,6 +153,7 @@ describe('publication readiness', () => {
       bytes: serializeRulebookVersion(document),
       currentBytes: serializeRulebookVersion(document),
       document,
+      resolveCredentialSchema: () => null,
     })
 
     expect(result.ready).toBe(false)
@@ -149,6 +165,39 @@ describe('publication readiness', () => {
 
     expect(result.ready).toBe(false)
     expect(statusOf(result, 'attestation_types')).toBe('fail')
+    expect(statusOf(result, 'credential_types')).toBe('not_applicable')
+  })
+
+  test('a hosted schema without the credential type is not ready', () => {
+    const resolver: CredentialSchemaResolver = (uri) =>
+      uri === 'https://issuer.example.org/schemas/pid'
+        ? {
+            kind: 'json_schema_2020_12',
+            document: { type: 'object', properties: { family_name: { type: 'string' } } },
+          }
+        : null
+    const result = assess(snapshot(), { resolveCredentialSchema: resolver })
+
+    expect(result.ready).toBe(false)
+    const credentialTypes = result.checks.find((check) => check.id === 'credential_types')
+    expect(credentialTypes?.status).toBe('fail')
+    expect(credentialTypes?.message).toContain('Person Identification Data')
+    expect(credentialTypes?.message).toContain('dc+sd-jwt')
+  })
+
+  test('a hosted schema declaring the credential type passes', () => {
+    const resolver: CredentialSchemaResolver = () => ({
+      kind: 'json_schema_2020_12',
+      document: {
+        type: 'object',
+        required: ['vct'],
+        properties: { vct: { const: 'https://example.org/vct/pid' } },
+      },
+    })
+    const result = assess(snapshot(), { resolveCredentialSchema: resolver })
+
+    expect(result.ready).toBe(true)
+    expect(statusOf(result, 'credential_types')).toBe('pass')
   })
 
   test('content that fails the standards checks is not publishable', () => {

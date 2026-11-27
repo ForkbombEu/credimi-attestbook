@@ -126,9 +126,11 @@ document unchanged; different bytes create a different document. There is no rep
 delete route.
 
 In the browser editor, the same operation is the **Upload/paste schema to AttestBook** option
-in the **Schema references** card: paste the document or choose the `.json` file, preview it,
-and select **Register and insert schema**. The editor inserts the returned URL and integrity
-pin into the Draft JSON and reports the immutable document fields.
+of a format's schema reference inside an attestation type: paste the document or choose the
+`.json` file, optionally enter the credential type (`vct` for `dc+sd-jwt`, `docType` for
+`mso_mdoc`, merged into the schema as `properties.<vct|docType>.const`), preview it, and select
+**Register and insert schema**. The editor adds the returned URL and integrity pin to the
+draft and reports the immutable document fields.
 
 ## 5. Create a draft with hosted and external references
 
@@ -174,7 +176,7 @@ JSON
 RULEBOOK_ID="$(printf '%s' "$MRDOC" | jq -r '.data.id')"
 ```
 
-The persisted Draft JSON contains only `formatIdentifier`, `uri` and `integrity`; the hosted
+The persisted draft document contains only `formatIdentifier`, `uri` and `integrity`; the hosted
 and external references are structurally identical there. The distinction is derived by the
 public read projections from the stored-document association, never from the URL prefix, and
 is not written into the draft or into a version snapshot.

@@ -131,8 +131,9 @@ Implemented by these slices:
   and tokens are never returned;
 - a draft editor at `/rulebooks/new` and `/rulebooks/<id>/edit` (#40):
   - metadata editing for name, description, source URL and applicable specification;
-  - a developer-facing JSON editor for attestation types and per-attestation or
-    rulebook-level schema references, with an immediate JSON syntax message;
+  - an interactive attestation form for attestation types (name, level of assurance,
+    binding type and supported formats) with one schema reference per format, the credential
+    type (vct/docType) merged into hosted schemas, and read-only rulebook-level references;
   - live validation of the unsaved document against the real server: structural findings
     that block a save are shown separately from standards findings, and the validation
     boundaries are listed explicitly;
@@ -252,7 +253,7 @@ Implemented by these slices:
     `API reference` links stay reachable at tablet widths.
 - contextual help links from the working views into the product guide (#139):
   - the draft editor adds one unobtrusive line under its lede linking the
-    `/guide/rulebook-authoring` page, and the **Schema references** card links
+    `/guide/rulebook-authoring` page, and the **Attestation types** section links
     `/guide/credential-schemas` in its intro beside the schema controls, so both are
     contextual rather than a general documentation menu;
   - `/playground` links `/guide/credential-validation` under its lede, next to the statement
@@ -466,13 +467,20 @@ dimensions.
 `/rulebooks/new` and `/rulebooks/<id>/edit` are the UI-003 authoring view for the #40 slice:
 
 - the rulebook metadata form edits name, description, source URL and applicable
-  specification. The JSON editor edits one document containing the `attestations` array (with
-  each type's level of assurance, binding type, supported formats and schema references) and
-  the rulebook-level `schemaReferences` array. An empty document is offered for a new draft
-  and the current working copy is loaded for an existing one;
-- a **Schema references** card offers one row per attestation type and supported format, so
-  multiple attestations and formats stay unambiguous. A row can add or replace
-  `Upload/paste schema to AttestBook` or `Use existing external URL` (issue #100):
+  specification. An **Attestation types** section replaces the former raw Draft JSON editor:
+  each attestation is listed with its name, level of assurance, binding type and supported
+  formats, with **Edit** and **Remove** actions and a `+ Add new attestation` button that opens
+  an inline form. The form offers the contract values only: level of assurance
+  `iso_18045_high`, `iso_18045_moderate`, `iso_18045_enhanced-basic` or `iso_18045_basic`;
+  binding type `key` (the default), `claim`, `biometric` or `none`; and formats `dc+sd-jwt`
+  (shown as *SD-JWT VC (dc+sd-jwt)*) or `mso_mdoc` (*mdoc (mso_mdoc)*). A name and at least
+  one format are required before the attestation is applied. Removing a format also removes
+  that format's schema reference. Rulebook-level `schemaReferences` (attestationId null)
+  cannot be edited by the form: they are listed read-only and kept unchanged in the saved
+  document. The serialized document is internal state; no raw JSON is shown or editable;
+- each supported format has one schema row inside its attestation, so multiple attestations
+  and formats stay unambiguous. A row can add or replace `Upload/paste schema to AttestBook`
+  or `Use existing external URL` (issue #100):
   - hosted mode accepts pasted text or a local `.json` file. A file is read as bytes and
     refused when it begins with a byte-order mark or is not valid UTF-8, so the text that is
     registered is the file's exact content. The browser checks the exact UTF-8 byte bound
@@ -481,25 +489,39 @@ dimensions.
     enables. Registration is `POST /api/v1/schema-documents?kind=json_schema_2020_12` with the
     session cookie, the `X-CSRF-Token` header and the exact document bytes; the returned
     canonical `url` and W3C SRI `integrity` become ordinary
-    `schemaReferences[].uri`/`integrity` values in the Draft JSON;
+    `schemaReferences[].uri`/`integrity` values in the draft document;
+  - hosted mode also asks for the credential type: **Credential type (vct)** for
+    `dc+sd-jwt` and **Document type (docType)** for `mso_mdoc`. It is optional while drafting
+    and required before publication, prefills from an existing
+    `properties.vct.const`/`properties.docType.const`, and is merged on registration into the
+    exact bytes as `properties.<keyword>.const` plus that keyword in the root `required`
+    array. A mismatching existing `const` or `enum`, or a boolean/non-object schema, blocks
+    the registration with a clear message and registers nothing. An `mso_mdoc` schema must
+    declare at least one namespace (a top-level `properties` member other than `docType`
+    whose subschema is an object schema) before registration; the form shows the CBOR
+    `date`/`date-time`/`base64` guidance and lists unsupported `format` or
+    `contentEncoding` values found in the preview;
   - external mode records an absolute `https` URL and an optional W3C SRI value without any
-    upload or registration call; both modes replace the existing reference for the same
-    attestation format instead of duplicating it, and a remove action edits the same JSON;
+    upload or registration call, and notes that AttestBook cannot inspect the document: it
+    must declare `properties.vct.const`/`properties.docType.const` itself, and publication
+    readiness can only warn. Both modes replace the existing reference for the same
+    attestation format instead of duplicating it, and a remove action changes the same
+    document;
   - each row names its source from the API's stored-document association, never from a URL
     prefix (issue #103). A hosted row shows the document kind, stored media type, SHA-256
     digest, a download link and whether the persisted SRI pin matches; an external row stays
-    **External URL**. The association is kept beside the raw Draft JSON, which continues to
-    contain only `formatIdentifier`, `uri` and `integrity`;
-  - every insertion or removal edits the existing Draft JSON text (preserving unknown
+    **External URL**. The association is kept beside the serialized document, which continues
+    to contain only `formatIdentifier`, `uri` and `integrity`;
+  - every insertion or removal rewrites the serialized draft document (preserving unknown
     members, including unrecognised members of references on other formats) and marks the
     form dirty, so it follows the ordinary save path. Registration is asynchronous while the
-    Draft JSON stays editable: the reference is applied to the latest text, never the
-    click-time copy, and a changed attestation name refuses the insert while keeping the
-    registered URL and SRI visible. A published or historical rulebook renders the rows
-    read-only, and an expired session keeps the pasted document mounted behind the inline
-    **Sign in again** form so registration can be retried;
-- the JSON is parsed locally on every change so a syntax error is shown immediately and
-  prevents a save. All deeper checks are server-side: a 350 ms debounced
+    attestation section stays editable: the reference is applied to the latest document,
+    never the click-time copy, and a changed attestation name refuses the insert while
+    keeping the registered URL and SRI visible. A published or historical rulebook renders
+    the rows read-only, and an expired session keeps the pasted document mounted behind the
+    inline **Sign in again** form so registration can be retried;
+- the serialized document is parsed locally before validation and a save. All deeper checks
+  are server-side: a 350 ms debounced
   `POST /api/v1/rulebooks/validate-draft` runs the registry's structural bounds and projects
   each attestation type into a TS11 v1.0.1 `SchemaMeta` document validated by the real
   standards adapter. Findings show severity, draft path, message and stable code, and the
@@ -511,10 +533,10 @@ dimensions.
   unknown `applicableSpec` reports that no standards checks ran instead of validating it
   against the wrong baseline;
 - two contextual help links put the guide beside the authoring work rather than in a tour: the
-  page heading links the rulebook authoring guide and the **Schema references** card intro
-  links the credential schemas guide. Both are plain new-tab anchors (see §1), so help never
-  navigates the editor or discards unsaved metadata and JSON; the links are keyboard-focusable
-  and do not change the surrounding layout or spacing at either viewport;
+  page heading links the rulebook authoring guide and the **Attestation types** section
+  intro links the credential schemas guide. Both are plain new-tab anchors (see §1), so help
+  never navigates the editor or discards unsaved metadata and attestations; the links are
+  keyboard-focusable and do not change the surrounding layout or spacing at either viewport;
 - the view is protected by the administrator session: an anonymous deep link renders a
   **Sign in to author rulebooks** panel with a `Sign in` link whose validated `next` value is
   the current editor path. The form is not rendered and no draft is read until

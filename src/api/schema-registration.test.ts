@@ -397,6 +397,31 @@ describe('typed registration failures', () => {
     expect((await errorJson(response)).error.code).toBe('invalid_request')
   })
 
+  test('registers a JSON Schema using the supported date and date-time formats', async () => {
+    for (const format of ['date', 'date-time']) {
+      const response = await registerAsOwner({
+        body: JSON.stringify({
+          $schema: 'https://json-schema.org/draft/2020-12/schema',
+          type: 'object',
+          properties: { observed_at: { type: 'string', format } },
+        }),
+      })
+      expect(response.status).toBe(201)
+    }
+  })
+
+  test('still rejects any other format value', async () => {
+    const response = await registerAsOwner({
+      body: JSON.stringify({
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        properties: { email: { type: 'string', format: 'email' } },
+      }),
+    })
+    expect(response.status).toBe(400)
+    expect((await errorJson(response)).error.code).toBe('invalid_request')
+  })
+
   test('rejects an oversized document with payload_too_large', async () => {
     const oversized = new Uint8Array(MAX_CREDENTIAL_SCHEMA_DOCUMENT_BYTES + 1).fill(0x20)
     const response = await registerAsOwner({ body: oversized })

@@ -446,6 +446,7 @@ export const publicationReadinessCheckSchema = z.object({
     'content_valid',
     'standards_profile',
     'attestation_types',
+    'credential_types',
   ]),
   status: PUBLICATION_READINESS_CHECK_STATUS_SCHEMA,
   message: z.string(),

@@ -43,7 +43,12 @@ import {
 } from '../fixtures'
 import { RulebookImporter } from '../import'
 import type { ImportPreview, ImportResult, ImportSource } from '../import'
-import { assessPublicationReadiness, compareVersionDocuments } from '../lifecycle'
+import {
+  assessPublicationReadiness,
+  compareVersionDocuments,
+  type CredentialSchemaResolution,
+  type CredentialSchemaResolver,
+} from '../lifecycle'
 import { buildPublicationExportManifest, publicationExportFilename } from '../publication'
 import type { PublicationExportManifest } from '../publication'
 import { credentialSchemaDocumentUrl, parsePublicBaseUrl } from '../public-urls'
@@ -2215,6 +2220,44 @@ function hostedSchemaLookup(dependencies: ApiDependencies, registry: Registry): 
   }
 }
 
+/**
+ * Builds the read-only credential-type resolver used by publication readiness
+ * and publish enforcement. A reference is hosted only when its exact URI is
+ * the canonical content URL of a stored document; the stored bytes are parsed
+ * locally and never fetched. A canonical URI whose document is absent is
+ * treated like an external reference (the assessment warns, it never fetches).
+ */
+function credentialSchemaResolver(
+  dependencies: ApiDependencies,
+  registry: Registry,
+): CredentialSchemaResolver {
+  const publicBaseUrl = dependencies.publicBaseUrl
+  if (publicBaseUrl === undefined || publicBaseUrl === null || publicBaseUrl === '') {
+    return () => null
+  }
+  const cache = new Map<string, CredentialSchemaResolution | null>()
+  return (uri) => {
+    if (cache.has(uri)) {
+      return cache.get(uri) ?? null
+    }
+    const documentId = hostedSchemaDocumentId(uri, publicBaseUrl)
+    const content =
+      documentId === null ? null : registry.getCredentialSchemaDocumentContent(documentId)
+    let resolution: CredentialSchemaResolution | null = null
+    if (content !== null) {
+      let document: unknown = null
+      try {
+        document = JSON.parse(new TextDecoder().decode(content.bytes))
+      } catch {
+        // Unparseable stored bytes cannot declare a credential type.
+      }
+      resolution = { kind: content.document.kind, document }
+    }
+    cache.set(uri, resolution)
+    return resolution
+  }
+}
+
 function getRulebookDraftHandler(dependencies: ApiDependencies): ApiHandler {
   return (context) => {
     const registry = requireRegistry(dependencies)
@@ -2601,6 +2644,26 @@ function publishRulebookVersionHandler(dependencies: ApiDependencies): ApiHandle
       )
     }
 
+    // Credential types are a publication requirement: assess the same inputs
+    // readiness exposes and refuse before any state changes. Other readiness
+    // checks stay advisory for direct API callers.
+    const candidate = registry.getPublicationCandidate(rulebookId, label)
+    if (candidate === null) {
+      throw apiError(404, 'not_found', 'The requested rulebook version does not exist.')
+    }
+    const readiness = assessPublicationReadiness({
+      version: candidate.content.version,
+      rulebookStatus: candidate.rulebook.publicationStatus,
+      bytes: candidate.content.bytes,
+      currentBytes: candidate.currentBytes,
+      document: parseRulebookVersionDocument(candidate.content.bytes),
+      resolveCredentialSchema: credentialSchemaResolver(dependencies, registry),
+    })
+    const credentialTypes = readiness.checks.find((check) => check.id === 'credential_types')
+    if (credentialTypes?.status === 'fail') {
+      throw apiError(409, 'conflict', `The version cannot be published: ${credentialTypes.message}`)
+    }
+
     const published = registry.publishRulebookVersion(actor, rulebookId, label)
 
     // The publication transaction has committed. The durable outbox row is
@@ -2681,6 +2744,7 @@ function getRulebookPublicationReadinessHandler(dependencies: ApiDependencies): 
       bytes: content.bytes,
       currentBytes,
       document: parseRulebookVersionDocument(content.bytes),
+      resolveCredentialSchema: credentialSchemaResolver(dependencies, registry),
     })
     return context.json({ data: toPublicationReadinessResource(content.version, readiness) }, 200)
   }

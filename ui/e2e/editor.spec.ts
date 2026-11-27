@@ -92,11 +92,30 @@ type DraftReference = {
   readonly integrity?: string
 }
 
-function schemaReferencesOf(jsonText: string, attestationIndex: number): readonly DraftReference[] {
-  const document = JSON.parse(jsonText) as {
-    attestations: readonly { schemaReferences?: readonly DraftReference[] }[]
-  }
-  return document.attestations[attestationIndex]?.schemaReferences ?? []
+type SavedAttestation = {
+  readonly name: string
+  readonly attestationLoS: string
+  readonly bindingType: string
+  readonly supportedFormats: readonly string[]
+  readonly schemaReferences: readonly DraftReference[]
+}
+
+type SavedDraft = {
+  readonly name: string
+  readonly attestations: readonly SavedAttestation[]
+  readonly schemaReferences: readonly DraftReference[]
+}
+
+/** Reads the persisted draft through the API, not a raw document editor. */
+async function savedDraft(page: Page, rulebookId: string): Promise<SavedDraft> {
+  const response = await page.request.get(`/api/v1/rulebooks/${rulebookId}/draft`)
+  expect(response.ok()).toBe(true)
+  const body = (await response.json()) as { data: SavedDraft }
+  return body.data
+}
+
+function referencesOf(draft: SavedDraft, attestationIndex: number): readonly DraftReference[] {
+  return draft.attestations[attestationIndex]?.schemaReferences ?? []
 }
 
 async function addHostedSchema(
@@ -124,7 +143,7 @@ async function addHostedSchema(
 }
 
 test.describe('rulebook draft editor against the real API', () => {
-  test('shows live validation findings while the draft JSON changes', async ({ page }) => {
+  test('shows live validation findings for the seeded draft', async ({ page }) => {
     await signInAsAdmin(page)
     await openDraftEditor(page, 'Payment Account Rulebook')
 
@@ -133,32 +152,10 @@ test.describe('rulebook draft editor against the real API', () => {
     await expect(page.getByText(/[12] warnings? found\./)).toBeVisible()
     await expect(page.getByText('incomplete_attestation').first()).toBeVisible()
 
-    await page.getByLabel('Draft JSON').fill(
-      JSON.stringify({
-        attestations: [
-          {
-            name: 'Payment Account',
-            attestationLoS: 'iso_18045_high',
-            bindingType: 'key',
-            supportedFormats: ['dc+sd-jwt'],
-            schemaReferences: [
-              {
-                formatIdentifier: 'mso_mdoc',
-                uri: 'https://issuer.example.org/schemas/payment',
-              },
-            ],
-          },
-        ],
-        schemaReferences: [],
-      }),
-    )
-
-    await expect(page.getByText(/[12] errors? found\./)).toBeVisible()
-    await expect(page.getByRole('cell', { name: /not listed in supportedFormats/ })).toBeVisible()
-
-    await page.getByLabel('Draft JSON').fill('{not-json')
-    await expect(page.getByText('The JSON editor does not contain valid JSON.')).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Save draft' })).toBeDisabled()
+    // The raw Draft JSON editor is gone; attestations are edited in the form.
+    await expect(page.getByRole('heading', { name: 'Attestation types' })).toBeVisible()
+    await expect(page.getByLabel('Draft JSON')).toHaveCount(0)
+    await expect(page.getByRole('button', { name: 'Save draft' })).toBeEnabled()
   })
 
   test('persists an authorized session draft edit and does not change a published snapshot', async ({
@@ -297,6 +294,18 @@ test.describe('rulebook draft editor against the real API', () => {
       ),
     ).toEqual([])
 
+    // The attestation form is part of the editor surface too.
+    await page.getByRole('button', { name: '+ Add new attestation' }).click()
+    const attestationResults = await new AxeBuilder({ page }).analyze()
+    expect(
+      attestationResults.violations.map(
+        (violation) =>
+          `${violation.id}: ${violation.help} (${violation.nodes
+            .map((node) => node.target.join(' '))
+            .join(', ')})`,
+      ),
+    ).toEqual([])
+
     // The schema form is part of the editor surface too, so scan it open.
     const payment = await rulebookByName(page, 'Payment Account Rulebook')
     await page.goto(`/rulebooks/${payment.id}/edit`)
@@ -357,12 +366,14 @@ test.describe('rulebook draft editor against the real API', () => {
     page,
   }) => {
     await signInAsAdmin(page)
-    await openDraftEditor(page, 'Payment Account Rulebook')
+    const draftId = await openDraftEditor(page, 'Payment Account Rulebook')
 
     await addHostedSchema(page, 'Payment Account', 'dc+sd-jwt', HOSTED_SCHEMA_PASTE)
 
-    const jsonText = await page.getByLabel('Draft JSON').inputValue()
-    const [reference] = schemaReferencesOf(jsonText, 0)
+    await page.getByRole('button', { name: 'Save draft' }).click()
+    await expect(page.getByText(/Draft saved at/)).toBeVisible()
+    const draft = await savedDraft(page, draftId)
+    const [reference] = referencesOf(draft, 0)
     expect(reference?.formatIdentifier).toBe('dc+sd-jwt')
     expect(reference?.uri).toContain('/api/v1/schema-documents/')
     expect(reference?.uri).toMatch(/\/content$/)
@@ -375,8 +386,6 @@ test.describe('rulebook draft editor against the real API', () => {
     expect(content.headers()['content-type']).toBe('application/schema+json')
     expect(await content.text()).toBe(HOSTED_SCHEMA_PASTE)
 
-    await page.getByRole('button', { name: 'Save draft' }).click()
-    await expect(page.getByText(/Draft saved at/)).toBeVisible()
     await page.reload()
     const reloadedRow = page.locator('.schema-row').first()
     await expect(reloadedRow.locator('.schema-row__source')).toHaveText('Hosted by AttestBook')
@@ -386,8 +395,7 @@ test.describe('rulebook draft editor against the real API', () => {
     await expect(
       reloadedRow.getByRole('link', { name: /Download the hosted JSON Schema 2020-12/ }),
     ).toHaveAttribute('href', reference!.uri)
-    const reloaded = await page.getByLabel('Draft JSON').inputValue()
-    expect(schemaReferencesOf(reloaded, 0)).toEqual([reference])
+    expect(referencesOf(await savedDraft(page, draftId), 0)).toEqual([reference])
     expect((await page.request.get(reference!.uri)).ok()).toBe(true)
   })
 
@@ -413,11 +421,12 @@ test.describe('rulebook draft editor against the real API', () => {
       timeout: 30_000,
     })
 
-    const jsonText = await page.getByLabel('Draft JSON').inputValue()
-    const [reference] = schemaReferencesOf(jsonText, 0)
-    expect(reference?.uri).toContain('/api/v1/schema-documents/')
-    expect(reference?.integrity).toMatch(/^sha256-/)
-    const content = await page.request.get(reference!.uri)
+    // The catalogue rulebook belongs to another provider, so the draft is not
+    // saved here: the registered document is checked through its public URL.
+    const href = await page.getByRole('link', { name: 'Open the schema' }).getAttribute('href')
+    expect(href).toContain('/api/v1/schema-documents/')
+    await expect(page.getByText(/^Integrity: sha256-/)).toBeVisible()
+    const content = await page.request.get(href!)
     expect(await content.text()).toBe(HOSTED_SCHEMA_FILE)
   })
 
@@ -457,19 +466,20 @@ test.describe('rulebook draft editor against the real API', () => {
 
     await expect(page.getByText('External schema reference added to the draft.')).toBeVisible()
     expect(schemaRequests).toEqual([])
-    expect(schemaReferencesOf(await page.getByLabel('Draft JSON').inputValue(), 0)).toEqual([
+    await page.getByRole('button', { name: 'Save draft' }).click()
+    await expect(page.getByText(/Draft saved at/)).toBeVisible()
+    expect(referencesOf(await savedDraft(page, rulebookId), 0)).toEqual([
       {
         formatIdentifier: 'dc+sd-jwt',
         uri: 'https://loyalty.example.org/schemas/card',
         integrity: 'sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=',
+        hostedSchema: null,
       },
     ])
 
-    await page.getByRole('button', { name: 'Save draft' }).click()
-    await expect(page.getByText(/Draft saved at/)).toBeVisible()
     await page.reload()
     await expect(page.locator('.schema-row__source').first()).toHaveText('External URL')
-    expect(schemaReferencesOf(await page.getByLabel('Draft JSON').inputValue(), 0)[0]?.uri).toBe(
+    expect(referencesOf(await savedDraft(page, rulebookId), 0)[0]?.uri).toBe(
       'https://loyalty.example.org/schemas/card',
     )
   })
@@ -504,23 +514,25 @@ test.describe('rulebook draft editor against the real API', () => {
       .click()
     await expect(page.getByText('External schema reference added to the draft.')).toBeVisible()
 
-    const jsonText = await page.getByLabel('Draft JSON').inputValue()
-    const hosted = schemaReferencesOf(jsonText, 0)
-    const external = schemaReferencesOf(jsonText, 1)
+    await page.getByRole('button', { name: 'Save draft' }).click()
+    await expect(page.getByText(/Draft saved at/)).toBeVisible()
+    const saved = await savedDraft(page, rulebookId)
+    const hosted = referencesOf(saved, 0)
+    const external = referencesOf(saved, 1)
     expect(hosted[0]?.uri).toContain('/api/v1/schema-documents/')
     expect(external).toEqual([
       {
         formatIdentifier: 'mso_mdoc',
         uri: 'https://issuer.example.org/schemas/account-details',
+        integrity: null,
+        hostedSchema: null,
       },
     ])
 
-    await page.getByRole('button', { name: 'Save draft' }).click()
-    await expect(page.getByText(/Draft saved at/)).toBeVisible()
     await page.reload()
-    const reloaded = await page.getByLabel('Draft JSON').inputValue()
-    expect(schemaReferencesOf(reloaded, 0)).toEqual(hosted)
-    expect(schemaReferencesOf(reloaded, 1)).toEqual(external)
+    const reloaded = await savedDraft(page, rulebookId)
+    expect(referencesOf(reloaded, 0)).toEqual(hosted)
+    expect(referencesOf(reloaded, 1)).toEqual(external)
   })
 
   test('reports invalid schema JSON and disables registration before any request', async ({
@@ -546,7 +558,7 @@ test.describe('rulebook draft editor against the real API', () => {
         name: 'Register and insert schema for Payment Account (dc+sd-jwt)',
       }),
     ).toBeDisabled()
-    expect(schemaReferencesOf(await page.getByLabel('Draft JSON').inputValue(), 0)).toEqual([])
+    await expect(page.locator('.schema-row__missing')).toHaveText('No schema attached')
   })
 
   test('keeps the pasted schema when the session expires during registration', async ({ page }) => {
@@ -581,7 +593,7 @@ test.describe('rulebook draft editor against the real API', () => {
 
     await expect(page.getByRole('heading', { name: 'Sign in again' })).toBeVisible()
     await expect(page.getByLabel('JSON Schema document')).toHaveValue(HOSTED_SCHEMA_PASTE)
-    expect(schemaReferencesOf(await page.getByLabel('Draft JSON').inputValue(), 0)).toEqual([])
+    await expect(page.locator('.schema-row__missing')).toHaveText('No schema attached')
 
     // Re-authenticating keeps the pasted document, so the registration can be retried.
     await page.getByLabel('Username').fill('e2e-admin')
@@ -589,5 +601,86 @@ test.describe('rulebook draft editor against the real API', () => {
     await page.getByRole('button', { name: 'Sign in again' }).click()
     await expect(page.getByRole('heading', { name: 'Sign in again' })).toBeHidden()
     await expect(page.getByLabel('JSON Schema document')).toHaveValue(HOSTED_SCHEMA_PASTE)
+  })
+
+  test('adds, edits and removes an attestation through the form', async ({ page }) => {
+    await signInAsAdmin(page)
+    const rulebookId = await createDraftViaApi(page, `Form attestation rulebook ${Date.now()}`, [])
+    await page.goto(`/rulebooks/${rulebookId}/edit`)
+    await expect(page.getByRole('heading', { name: 'Attestation types' })).toBeVisible()
+
+    await page.getByRole('button', { name: '+ Add new attestation' }).click()
+    const form = page.locator('.attestation-form')
+    await form.getByLabel('Attestation name').fill('Loyalty Card')
+    await form.getByLabel('Level of assurance').selectOption('iso_18045_basic')
+    await form.getByLabel('Binding type').selectOption('claim')
+    await form.getByRole('checkbox', { name: 'mdoc (mso_mdoc)' }).check()
+    await form.getByRole('button', { name: 'Save attestation' }).click()
+    await expect(page.getByRole('heading', { name: 'Loyalty Card', level: 3 })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Edit attestation Loyalty Card' }).click()
+    await page.locator('.attestation-form').getByLabel('Attestation name').fill('Loyalty Card v2')
+    await page.getByRole('checkbox', { name: 'SD-JWT VC (dc+sd-jwt)' }).check()
+    await page.getByRole('button', { name: 'Save attestation' }).click()
+    await expect(page.getByRole('heading', { name: 'Loyalty Card v2', level: 3 })).toBeVisible()
+
+    await page.getByRole('button', { name: 'Save draft' }).click()
+    await expect.poll(async () => (await savedDraft(page, rulebookId)).attestations.length).toBe(1)
+    expect((await savedDraft(page, rulebookId)).attestations[0]).toMatchObject({
+      name: 'Loyalty Card v2',
+      attestationLoS: 'iso_18045_basic',
+      bindingType: 'claim',
+      supportedFormats: ['dc+sd-jwt', 'mso_mdoc'],
+    })
+
+    await page.getByRole('button', { name: 'Remove attestation Loyalty Card v2' }).click()
+    await page.getByRole('button', { name: 'Save draft' }).click()
+    await expect.poll(async () => (await savedDraft(page, rulebookId)).attestations.length).toBe(0)
+  })
+
+  test('writes the entered vct into the registered hosted schema', async ({ page }) => {
+    await signInAsAdmin(page)
+    const rulebookId = await createDraftViaApi(page, `Vct rulebook ${Date.now()}`, [
+      {
+        name: 'PID',
+        attestationLoS: 'iso_18045_high',
+        bindingType: 'key',
+        supportedFormats: ['dc+sd-jwt'],
+      },
+    ])
+    await page.goto(`/rulebooks/${rulebookId}/edit`)
+
+    await page.getByRole('button', { name: 'Add schema for PID (dc+sd-jwt)' }).click()
+    await page.getByRole('radio', { name: /Upload\/paste schema to AttestBook/ }).check()
+    await page.getByLabel('JSON Schema document').fill(
+      JSON.stringify({
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        properties: { family_name: { type: 'string' } },
+      }),
+    )
+    await page.getByLabel('Credential type (vct)').fill('urn:eudi:pid:1')
+    await page
+      .getByRole('button', {
+        name: 'Register and insert schema for PID (dc+sd-jwt)',
+      })
+      .click()
+    await expect(page.getByText('Hosted schema registered and added to the draft.')).toBeVisible({
+      timeout: 30_000,
+    })
+
+    await page.getByRole('button', { name: 'Save draft' }).click()
+    await expect
+      .poll(async () => referencesOf(await savedDraft(page, rulebookId), 0).length)
+      .toBe(1)
+    const [reference] = referencesOf(await savedDraft(page, rulebookId), 0)
+    const content = await page.request.get(reference!.uri)
+    expect(content.ok()).toBe(true)
+    const registered = (await content.json()) as {
+      readonly required?: readonly string[]
+      readonly properties?: Record<string, { readonly const?: string }>
+    }
+    expect(registered.properties?.vct?.const).toBe('urn:eudi:pid:1')
+    expect(registered.required).toContain('vct')
   })
 })

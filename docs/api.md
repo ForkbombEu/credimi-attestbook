@@ -172,7 +172,7 @@ in Phase 1.
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}` | no | `200` | One version record and its content digest. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/content` | no | `200` | The exact snapshot bytes; `Content-Digest` and `ETag` carry the SHA-256. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/schema-references` | no | `200` | Schema references frozen in the exact version snapshot, grouped by attestation type plus rulebook-level references. A reference whose exact URI is a stored AttestBook document carries its hosted media type, SHA-256 digest, SRI pin and permanent URL; every other value is reported as external. The snapshot bytes are never rewritten. |
-| `POST` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publish` | yes | `200` | Publish the owning provider's draft version. |
+| `POST` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publish` | yes | `200` | Publish the owning provider's draft version. Answers `409 conflict` without changing state when the `credential_types` readiness check fails; `409 immutable` for a historical version. |
 | `POST` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/refresh` | yes | `200` | Re-snapshot a draft version from the current working copy; an unchanged snapshot is a no-op and published/historical versions answer `409 immutable`. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/compare?to={version}` | no | `200` | Deterministic structural comparison of two snapshots. Identity fields are excluded and changes are JSON Pointer paths sorted by path. |
 | `GET` | `/api/v1/rulebooks/{rulebookId}/versions/{version}/publication-readiness` | no | `200` | Pre-publication checks and explicit limitations; never a publication or a conformance claim. |
@@ -336,12 +336,28 @@ individually:
 | `content_valid` | The snapshot content passes the same structural and TS11 v1.0.1 standards validation the editor runs. |
 | `standards_profile` | Whether the profile baseline was actually validated; an unsupported profile is a warning, not a silent pass. |
 | `attestation_types` | The rulebook defines at least one attestation type. |
+| `credential_types` | Every attestation type that declares `dc+sd-jwt` or `mso_mdoc` has a credential type that can be verified from the schema reference. |
+
+A credential type lives inside the schema, never as a bare rulebook field. For
+`dc+sd-jwt`, a hosted JSON Schema must declare a non-empty string
+`properties.vct.const` (an SD-JWT VC Type Metadata document counts through its
+root `vct`). For `mso_mdoc`, a hosted JSON Schema must declare a non-empty string
+`properties.docType.const` and at least one namespace: a top-level `properties`
+member other than `docType` whose subschema is an object schema (`type: "object"`
+and/or a `properties` member). A declared format with no schema reference is a
+failure; an external reference (not hosted under the configured `PUBLIC_BASE_URL`)
+is a warning, because AttestBook never fetches remote documents. Any failure
+wins over a warning; without a declared `dc+sd-jwt`/`mso_mdoc` format the check is
+`not_applicable`. The message names each offending attestation and format,
+bounded in length.
 
 `ready` is true only when no check reports `fail`. The response also carries explicit
 `limitations`: remote schema documents, issuer trust, signing and interoperability are not
 verified by these checks, and the assessment makes no TS11 or ETSI conformance claim.
-Readiness is advisory for direct API callers; `POST .../publish` remains the authoritative
-transition and still rejects a stale snapshot with `409 conflict`.
+Readiness is advisory for direct API callers except for `credential_types`:
+`POST .../publish` refuses the version with `409 conflict` (before any state change)
+when that check would fail, while the other checks remain advisory and the publish
+transition remains authoritative for them.
 
 The rulebook-status check mirrors the publish transition exactly: a draft version cannot be
 published while its rulebook is `published` (it answers `409 immutable`) or `historical`.

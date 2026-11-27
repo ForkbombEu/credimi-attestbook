@@ -3,13 +3,13 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEven
 import type { EditorApi } from './api'
 import { CatalogApiError, isAbortError, isSessionAuthError } from './api'
 import { Alert } from './components/Alert'
+import { AttestationTypesSection } from './components/AttestationTypesSection'
 import { SeverityBadge } from './components/Badges'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import { CreateVersionPanel } from './components/CreateVersionPanel'
 import { DraftLifecyclePanel } from './components/DraftLifecyclePanel'
 import { GuideLink } from './components/GuideLink'
 import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
-import { SchemaReferenceControls } from './components/SchemaReferenceControls'
 import { SessionRenewalForm, SignInRequiredNotice } from './components/SessionPrompt'
 import {
   describeDiagnosticPath,
@@ -214,9 +214,9 @@ export function RulebookDraftEditorPage({
   const parsed = useMemo(() => parseDraftDocument(jsonText), [jsonText])
   const metadataErrors = useMemo(() => validateMetadata(metadata), [metadata])
   const parseError = parsed.ok ? null : parsed.message
-  // Keep the last readable attestation list while the raw JSON is temporarily
-  // invalid, so the schema controls stay visible (disabled) rather than
-  // disappearing as the user fixes a syntax error.
+  // Keep the last readable attestation list while the serialized document is
+  // temporarily unreadable, so the form stays visible (disabled) rather than
+  // disappearing.
   const [lastParsedDocument, setLastParsedDocument] =
     useState<DraftContentDocument>(EMPTY_DRAFT_DOCUMENT)
   useEffect(() => {
@@ -279,10 +279,11 @@ export function RulebookDraftEditorPage({
   }
 
   /**
-   * The schema controls build over the raw Draft JSON, so an insertion is an
-   * ordinary unsaved edit: it marks the form dirty and clears the saved marker.
+   * The attestation section builds over the serialized draft document, so an
+   * edit is an ordinary unsaved change: it marks the form dirty and clears the
+   * saved marker.
    */
-  const handleSchemaDocumentChange = useCallback((text: string) => {
+  const handleDocumentChange = useCallback((text: string) => {
     setJsonText(text)
     setDirty(true)
     setSavedAt(null)
@@ -397,7 +398,7 @@ export function RulebookDraftEditorPage({
       : validation === null
         ? parseError === null
           ? 'Waiting for validation…'
-          : 'Fix the JSON before validation can run.'
+          : 'The draft document could not be read before validation could run.'
         : validationSummary(validation.diagnostics)
   const canSave =
     authenticated &&
@@ -539,7 +540,7 @@ export function RulebookDraftEditorPage({
           <p>
             {creatingNextVersion
               ? 'This rulebook is published and immutable. Create a new draft version to reopen the working copy for editing; the published artifact is not changed.'
-              : 'Edit the rulebook metadata and its attestation JSON. Validation runs as you type; saving a draft never changes a frozen or published version.'}
+              : 'Edit the rulebook metadata, its attestation types and their schemas. Validation runs as you type; saving a draft never changes a frozen or published version.'}
           </p>
           <p className="page-help">
             New to rulebook authoring? Read the{' '}
@@ -690,62 +691,14 @@ export function RulebookDraftEditorPage({
               </div>
             </section>
 
-            <section className="content-section" aria-labelledby={`${fieldPrefix}-json-heading`}>
-              <h2 id={`${fieldPrefix}-json-heading`}>Attestations and schema references</h2>
-              <p className="field-hint">
-                JSON object with an <code>attestations</code> array and a rulebook-level{' '}
-                <code>schemaReferences</code> array. Each attestation type carries its level of
-                assurance, binding type, supported formats and schema references.
-              </p>
-              <div className="field field--credential">
-                <label htmlFor={`${fieldPrefix}-json`}>Draft JSON</label>
-                <textarea
-                  id={`${fieldPrefix}-json`}
-                  className="json-editor"
-                  spellCheck={false}
-                  rows={24}
-                  value={jsonText}
-                  onChange={(event) => {
-                    setJsonText(event.target.value)
-                    setDirty(true)
-                    setSavedAt(null)
-                    setSaveError(null)
-                  }}
-                  disabled={readOnly}
-                  aria-invalid={parseError !== null}
-                  aria-describedby={
-                    parseError === null
-                      ? `${fieldPrefix}-json-hint`
-                      : `${fieldPrefix}-json-hint ${fieldPrefix}-json-error`
-                  }
-                />
-                <p className="field-hint" id={`${fieldPrefix}-json-hint`}>
-                  Structural errors block a save; standards findings are reported but do not block a
-                  work-in-progress draft.
-                </p>
-                {parseError === null ? null : (
-                  <p className="field-error" id={`${fieldPrefix}-json-error`}>
-                    {parseError}
-                  </p>
-                )}
-              </div>
-            </section>
-
-            <SchemaReferenceControls
+            <AttestationTypesSection
               api={api}
               document={parsed.ok ? parsed.document : lastParsedDocument}
               documentText={jsonText}
               disabled={readOnly || !parsed.ok}
-              disabledReason={
-                readOnly
-                  ? null
-                  : parsed.ok
-                    ? null
-                    : 'Fix the Draft JSON before editing schema references.'
-              }
               csrfToken={csrfToken}
               hostedSchemas={hostedSchemas}
-              onDocumentChange={handleSchemaDocumentChange}
+              onDocumentChange={handleDocumentChange}
               onSessionExpired={() => {
                 setSessionExpired(true)
                 setRenewedNotice(null)
