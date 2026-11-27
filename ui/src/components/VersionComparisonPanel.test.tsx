@@ -83,11 +83,10 @@ describe('version comparison panel', () => {
     expect(await screen.findByRole('status')).toHaveTextContent('1 change between 1.0 and 1.1')
   })
 
-  test('asks for two versions before enabling a comparison', () => {
-    renderPanel(createFakeApi(), [makeVersion()])
+  test('is not offered when there is only one version to compare', () => {
+    const { container } = renderPanel(createFakeApi(), [makeVersion()])
 
-    expect(screen.getByText('Record at least two versions to compare them.')).toBeVisible()
-    expect(screen.queryByRole('button', { name: 'Compare' })).not.toBeInTheDocument()
+    expect(container).toBeEmptyDOMElement()
   })
 
   test('does not compare a version with itself', async () => {

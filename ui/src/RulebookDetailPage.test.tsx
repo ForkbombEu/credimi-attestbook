@@ -85,7 +85,6 @@ describe('rulebook detail states', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Rulebook not found')
-    expect(screen.getByRole('link', { name: 'Rulebook catalog' })).toHaveAttribute('href', '/')
     await waitFor(() => expect(document.title).toBe('Rulebook not found · AttestBook'))
 
     await user.click(screen.getByRole('button', { name: 'Back to the catalog' }))
@@ -190,18 +189,24 @@ describe('rulebook detail content', () => {
     expect(within(rulebookTable).getByText('None recorded')).toBeInTheDocument()
   })
 
-  test('reports standards compatibility and marks unsupported evaluations', async () => {
-    renderDetail()
+  test('reports rulebook-level compatibility as not tested and points to the playground', async () => {
+    const { onNavigate } = renderDetail()
 
     const section = await screen.findByRole('region', { name: 'Standards compatibility' })
     expect(
       within(section).getByText('Rulebook-level compatibility: not tested.'),
     ).toBeInTheDocument()
-    expect(within(section).getAllByText('Not tested')).toHaveLength(3)
-    expect(within(section).getAllByText('Not applicable')).toHaveLength(2)
-    expect(within(section).getAllByText('Supported per credential')).toHaveLength(4)
-    expect(within(section).getByText('Cryptographic verification')).toBeInTheDocument()
-    expect(within(section).getByText('End-to-end interoperability')).toBeInTheDocument()
+    expect(section).toHaveTextContent('No rulebook-level compatibility result is recorded.')
+    // The per-credential capability table belongs to the playground, not to a rulebook.
+    expect(within(section).queryByRole('table')).toBeNull()
+    expect(
+      within(section).getByRole('link', { name: /credential validation guide/ }),
+    ).toHaveAttribute('href', '/guide/credential-validation')
+
+    await userEvent
+      .setup()
+      .click(within(section).getByRole('link', { name: 'Validation playground' }))
+    expect(onNavigate).toHaveBeenCalledWith('/playground')
   })
 
   test('renders newest-first version history with digest and export links', async () => {
@@ -219,13 +224,6 @@ describe('rulebook detail content', () => {
     })
     expect(exportOne).toHaveAttribute('href', '/api/v1/rulebooks/rulebook-pid/versions/1.0/content')
     expect(exportOne).toHaveAttribute('download', 'rulebook-rulebook-pid-1.0.json')
-  })
-
-  test('offers an export action for the latest version in the heading', async () => {
-    renderDetail()
-
-    const action = await screen.findByRole('link', { name: 'Export version 1.0' })
-    expect(action).toHaveAttribute('href', '/api/v1/rulebooks/rulebook-pid/versions/1.0/content')
   })
 
   test('does not link unsafe reference or source URLs', async () => {
@@ -296,7 +294,7 @@ describe('rulebook detail content', () => {
     ).toBeInTheDocument()
   })
 
-  test('shows the empty version state for a rulebook without versions', async () => {
+  test('shows the empty version state and no comparison for a rulebook without versions', async () => {
     renderDetail(createFakeApi(), 'rulebook-age')
 
     expect(
@@ -305,6 +303,7 @@ describe('rulebook detail content', () => {
     expect(
       screen.getByText('No versions have been recorded for this rulebook.'),
     ).toBeInTheDocument()
+    expect(screen.queryByRole('region', { name: 'Compare versions' })).not.toBeInTheDocument()
     expect(screen.queryByRole('link', { name: /Export version/ })).not.toBeInTheDocument()
   })
 
@@ -349,15 +348,10 @@ describe('hosted and external schema provenance', () => {
     schemaReferences: { 'rulebook-pid': [hosted, external] },
   }
 
-  test('distinguishes hosted documents from external URLs in the same rulebook', async () => {
+  test('offers a download only for hosted documents in the same rulebook', async () => {
     renderDetail(createFakeApi(dataset))
 
     const section = await screen.findByRole('region', { name: 'Attestation types' })
-    expect(within(section).getAllByText('Hosted by AttestBook').length).toBeGreaterThan(0)
-    expect(within(section).getAllByText('External URL').length).toBeGreaterThan(0)
-    expect(within(section).getAllByText('JSON Schema 2020-12').length).toBeGreaterThan(0)
-    expect(within(section).getAllByText('application/schema+json').length).toBeGreaterThan(0)
-    expect(within(section).getAllByText(`${'c'.repeat(16)}…`).length).toBeGreaterThan(0)
     expect(within(section).getAllByText('Pin matches stored digest').length).toBeGreaterThan(0)
 
     const download = within(section).getAllByRole('link', {
@@ -371,6 +365,9 @@ describe('hosted and external schema provenance', () => {
     })[0]!
     expect(externalLink).toHaveAttribute('href', 'https://issuer.example.org/schemas/pid-mdoc')
     expect(externalLink).toHaveAttribute('target', '_blank')
+    expect(
+      within(externalLink.closest('tr')!).queryByRole('link', { name: /Download/ }),
+    ).not.toBeInTheDocument()
   })
 
   test('inspects the exact frozen version and names its hosted references', async () => {
@@ -418,9 +415,6 @@ describe('hosted and external schema provenance', () => {
     expect(await screen.findByText('Schema references in version 1.0')).toBeInTheDocument()
     expect(screen.getByText(/Exact frozen version/)).toBeInTheDocument()
     expect(screen.getAllByText(`${'a'.repeat(16)}…`).length).toBeGreaterThan(0)
-    expect(screen.getAllByText('Hosted by AttestBook').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('External URL').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('application/schema+json').length).toBeGreaterThan(0)
     expect(
       screen.getAllByRole('link', {
         name: /Download the JSON Schema 2020-12 document for dc\+sd-jwt/,

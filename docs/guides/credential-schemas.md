@@ -145,18 +145,18 @@ the credential type itself. Publication is refused while this check fails.
 ## What a reader can inspect in rulebook detail
 
 The **Schema references** section of a rulebook's detail page lists every reference with its
-attestation type, format identifier, source and URI:
+format identifier, URI and integrity pin:
 
-- **Hosted by AttestBook** rows show the document kind, stored media type, SHA-256 digest, the
-  integrity pin and its comparison state, and a **Download** link to the exact bytes. The URI
-  links to the public content route.
-- **External URL** rows show the recorded URI as an external link and the recorded pin, if any.
-  They show no stored media type, digest or download because AttestBook holds no copy of the
-  document.
+- A reference **hosted by AttestBook** links its URI to the public content route, states
+  whether the integrity pin matches the stored digest, and offers a **Download** link to the
+  exact bytes.
+- An **External URL** reference shows the recorded URI as an external link and the recorded
+  pin, if any. It has no download because AttestBook holds no copy of the document.
 
-The source badge is the distinction: a reference is **Hosted by AttestBook** only when its
-exact URI equals the canonical content URL of a stored document on this deployment. Every
-other `http(s)` value remains an external link.
+A reference is hosted only when its exact URI equals the canonical content URL of a stored
+document on this deployment. Every other `http(s)` value remains an external link. The
+editor names the same distinction on each row as **Hosted by AttestBook** or **External
+URL**, with the stored document kind, media type and SHA-256 digest of a hosted document.
 
 A frozen published version exposes the same distinction through its version projection at
 `GET /api/v1/rulebooks/{rulebookId}/versions/{version}/schema-references`: a hosted reference

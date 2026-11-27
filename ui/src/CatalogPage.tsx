@@ -146,7 +146,7 @@ export function CatalogPage({ api, onNavigate }: CatalogPageProps) {
         </div>
       </main>
 
-      <SiteFooter />
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   )
 }

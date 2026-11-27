@@ -459,3 +459,18 @@ describe('playground contextual help', () => {
     await expectNoA11yViolations(container)
   })
 })
+
+describe('playground evaluation support', () => {
+  test('lists every dimension with what this build executes, before any run', async () => {
+    renderPlayground()
+
+    const section = screen.getByRole('region', { name: 'What this playground checks' })
+    expect(within(section).getAllByText('Supported per credential')).toHaveLength(4)
+    expect(within(section).getAllByText('Not tested')).toHaveLength(2)
+    expect(within(section).getAllByText('Not applicable')).toHaveLength(2)
+    expect(
+      within(section).getByRole('rowheader', { name: 'Cryptographic verification' }),
+    ).toBeInTheDocument()
+    expect(await screen.findByLabelText('Rulebook')).toBeInTheDocument()
+  })
+})

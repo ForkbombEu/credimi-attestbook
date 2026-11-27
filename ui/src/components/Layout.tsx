@@ -76,14 +76,13 @@ function CredimiExtrasBanner({ variant }: { readonly variant?: 'footer' }) {
 }
 
 interface SiteHeaderProps {
+  /** The current view; it selects the navigation item marked `aria-current`. */
   readonly section: string
   readonly onNavigate: (path: string) => void
-  /** The login page hides the anonymous sign-in link that would target itself. */
-  readonly showLoginLink?: boolean
 }
 
 /**
- * Session controls in the shared topbar (issue #90). An anonymous visitor gets
+ * Session controls in the shared footer (issue #90). An anonymous visitor gets
  * a sign-in link that preserves the current path; an authenticated
  * administrator sees the provider identity and a sign-out action. The session
  * endpoint is authoritative, so a missing or expired cookie renders anonymous
@@ -102,7 +101,7 @@ function SessionControls({
 
   if (session.status === 'loading') {
     // The login page renders its own session status in the card; elsewhere the
-    // topbar says what it is waiting for.
+    // footer says what it is waiting for.
     return showLoginLink ? (
       <div className="site-session" role="group" aria-label="Administrator session">
         <span className="site-session__status">Checking session…</span>
@@ -170,17 +169,15 @@ function SessionControls({
 }
 
 /**
- * The shared header with the product views. The long-form section label names
- * the current view; the short navigation labels stay distinct from the
- * breadcrumb links so assistive technology can address each destination.
+ * The shared header with the product views. `section` names the current view
+ * and only selects the navigation item marked `aria-current`.
  *
  * The product guide is an in-app view, so `Guides` uses the client router and
- * carries `aria-current` on its routes. The API reference is a separate server
- * document at `/docs`, so its link is an ordinary anchor with a full page load
- * and a distinct outlined treatment: the two kinds of documentation stay
- * visibly apart (issue #131).
+ * carries `aria-current` on its routes. The API docs are a separate server
+ * document at `/docs`, so that item is an ordinary anchor with a full page
+ * load, styled like the other items (issue #131).
  */
-export function SiteHeader({ section, onNavigate, showLoginLink = true }: SiteHeaderProps) {
+export function SiteHeader({ section, onNavigate }: SiteHeaderProps) {
   return (
     <>
       <CredimiExtrasBanner />
@@ -231,15 +228,8 @@ export function SiteHeader({ section, onNavigate, showLoginLink = true }: SiteHe
             >
               Guides
             </AppLink>
-            <a className="site-nav__reference" href={DOCS_PATH}>
-              API reference
-              <span className="site-nav__reference-arrow" aria-hidden="true">
-                ↗
-              </span>
-            </a>
+            <a href={DOCS_PATH}>API docs</a>
           </nav>
-          <SessionControls onNavigate={onNavigate} showLoginLink={showLoginLink} />
-          <span className="site-header__section">{section}</span>
         </div>
       </header>
     </>
@@ -248,19 +238,17 @@ export function SiteHeader({ section, onNavigate, showLoginLink = true }: SiteHe
 
 /**
  * The page title band every view opens with (DESIGN.md §8): the indigo hero
- * band carrying the breadcrumb, the page's only `h1` and its description. A
- * view whose whole content is a state (a not-found address) passes `alert` so
- * the band itself is announced.
+ * band carrying the page's only `h1` and its description. Navigation lives in
+ * the topbar only. A view whose whole content is a state (a not-found address)
+ * passes `alert` so the band itself is announced.
  */
 export function PageHero({
   title,
-  breadcrumb,
   badge,
   alert = false,
   children,
 }: {
   readonly title: ReactNode
-  readonly breadcrumb?: ReactNode
   /** A status chip set right beside the title. */
   readonly badge?: ReactNode
   readonly alert?: boolean
@@ -271,7 +259,6 @@ export function PageHero({
   return (
     <section className="hero-band" aria-labelledby="page-title">
       <div className="hero-inner">
-        {breadcrumb}
         <Intro className="section-intro" {...(alert ? { role: 'alert' } : {})}>
           <div className="section-intro-heading">
             <h1 className="section-intro-title" id="page-title">
@@ -289,17 +276,35 @@ export function PageHero({
 }
 
 /**
- * The indigo footer: the product disclaimer, then the two translucent sub-bars
- * of DESIGN.md §8 — the ForkBomb attribution, then the Credimi Extras strip.
+ * The indigo footer: the product disclaimer beside the administrator session
+ * controls, then the two translucent sub-bars of DESIGN.md §8 — the ForkBomb
+ * attribution, then the Credimi Extras strip.
  */
-export function SiteFooter() {
+export function SiteFooter({
+  onNavigate,
+  showLoginLink = true,
+}: {
+  readonly onNavigate: (path: string) => void
+  /** The login page hides the anonymous sign-in link that would target itself. */
+  readonly showLoginLink?: boolean
+}) {
   return (
     <footer className="site-footer">
       <div className="site-footer__inner">
-        <p>
-          Structural credential validation runs per credential against a pinned rulebook version.
-          AttestBook does not test or claim trust, interoperability or standards conformance.
-        </p>
+        <div className="site-footer__about">
+          <img
+            className="site-footer__logo"
+            src="/brand/logos/credimi_logo_negative.svg"
+            alt="Credimi"
+            width={32}
+            height={32}
+          />
+          <p>
+            Structural credential validation runs per credential against a pinned rulebook version.
+            AttestBook does not test or claim trust, interoperability or standards conformance.
+          </p>
+        </div>
+        <SessionControls onNavigate={onNavigate} showLoginLink={showLoginLink} />
       </div>
       <div className="footer-sub-bar site-footer__attribution">
         <p>

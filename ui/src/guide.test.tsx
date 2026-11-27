@@ -700,13 +700,11 @@ describe('credential validation guide accuracy', () => {
 })
 
 describe('guide navigation', () => {
-  test('the landing page links back to the catalog and out to the separate API reference', () => {
+  test('the landing page links out to the separate API reference without a hero breadcrumb', () => {
     render(<GuideIndexPage onNavigate={vi.fn()} />)
 
-    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
-    expect(within(breadcrumb).getByRole('link', { name: 'Catalog' })).toHaveAttribute('href', '/')
-    expect(within(breadcrumb).getByText('Guides')).toHaveAttribute('aria-current', 'page')
-
+    // Navigation lives in the topbar only.
+    expect(screen.queryByRole('navigation', { name: 'Breadcrumb' })).toBeNull()
     expect(screen.getByRole('link', { name: /Open the API reference/ })).toHaveAttribute(
       'href',
       '/docs',
@@ -745,21 +743,6 @@ describe('guide navigation', () => {
     )
     expect(within(nav).getByRole('link', { name: /Open the API reference/ })).not.toHaveAttribute(
       'aria-current',
-    )
-  })
-
-  test('the article navigation returns to the catalog and the guide index', () => {
-    render(<GuideEntryPage slug="introduction" onNavigate={vi.fn()} />)
-
-    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
-    expect(within(breadcrumb).getByRole('link', { name: 'Catalog' })).toHaveAttribute('href', '/')
-    expect(within(breadcrumb).getByRole('link', { name: 'Guides' })).toHaveAttribute(
-      'href',
-      '/guide',
-    )
-    expect(within(breadcrumb).getByText('Introduction to AttestBook')).toHaveAttribute(
-      'aria-current',
-      'page',
     )
   })
 

@@ -9,7 +9,6 @@ import {
   CompatibilitySection,
   RulebookSummary,
   VersionsSection,
-  VersionSummary,
 } from './components/DetailSections'
 import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { ErrorState, LoadingState } from './components/CatalogStates'
@@ -78,18 +77,6 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
   const backToCatalog = useCallback(() => onNavigate(CATALOG_PATH), [onNavigate])
 
   const heading = state.status === 'ready' ? state.snapshot.rulebook.name : 'Rulebook details'
-  const breadcrumb = (
-    <nav className="breadcrumb" aria-label="Breadcrumb">
-      <ol>
-        <li>
-          <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-            Rulebook catalog
-          </AppLink>
-        </li>
-        <li aria-current="page">{heading}</li>
-      </ol>
-    </nav>
-  )
   // Only the signed-in administrator bound to the owning provider is offered
   // the editor; the server independently enforces the same ownership rule.
   const canEditDraft =
@@ -107,7 +94,7 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
 
         <main className="page-main" id="main-content">
           <div id="rulebook-detail" tabIndex={-1}>
-            <PageHero title="Rulebook not found" alert breadcrumb={breadcrumb}>
+            <PageHero title="Rulebook not found" alert>
               <p>
                 No rulebook matches this address. It may have been removed, or the identifier may be
                 incorrect.
@@ -121,7 +108,7 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
           </div>
         </main>
 
-        <SiteFooter />
+        <SiteFooter onNavigate={onNavigate} />
       </div>
     )
   }
@@ -136,37 +123,30 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
         {state.status === 'ready' ? (
           <PageHero
             title={heading}
-            breadcrumb={breadcrumb}
             badge={<StatusBadge status={state.snapshot.rulebook.publicationStatus} />}
           >
             {state.snapshot.rulebook.description === '' ? null : (
               <p>{state.snapshot.rulebook.description}</p>
             )}
             <RulebookSummary snapshot={state.snapshot} />
-            <div className="detail-actions">
-              <VersionSummary snapshot={state.snapshot} />
-              {state.snapshot.rulebook.publicationStatus === 'draft' && canEditDraft ? (
+            {canEditDraft &&
+            (state.snapshot.rulebook.publicationStatus === 'draft' ||
+              state.snapshot.rulebook.publicationStatus === 'published') ? (
+              <div className="detail-actions">
                 <AppLink
                   className="btn btn-outline btn-lg"
                   href={rulebookEditorPath(state.snapshot.rulebook.id)}
                   onNavigate={onNavigate}
                 >
-                  Edit draft
+                  {state.snapshot.rulebook.publicationStatus === 'draft'
+                    ? 'Edit draft'
+                    : 'Create new version'}
                 </AppLink>
-              ) : null}
-              {state.snapshot.rulebook.publicationStatus === 'published' && canEditDraft ? (
-                <AppLink
-                  className="btn btn-outline btn-lg"
-                  href={rulebookEditorPath(state.snapshot.rulebook.id)}
-                  onNavigate={onNavigate}
-                >
-                  Create new version
-                </AppLink>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
           </PageHero>
         ) : (
-          <PageHero title={heading} breadcrumb={breadcrumb} />
+          <PageHero title={heading} />
         )}
 
         <div className="page" id="rulebook-detail" tabIndex={-1}>
@@ -186,11 +166,13 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
             />
           ) : null}
 
-          {state.status === 'ready' ? <DetailContent api={api} snapshot={state.snapshot} /> : null}
+          {state.status === 'ready' ? (
+            <DetailContent api={api} snapshot={state.snapshot} onNavigate={onNavigate} />
+          ) : null}
         </div>
       </main>
 
-      <SiteFooter />
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   )
 }
@@ -198,9 +180,11 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
 function DetailContent({
   api,
   snapshot,
+  onNavigate,
 }: {
   readonly api: CatalogApi
   readonly snapshot: RulebookDetailSnapshot
+  readonly onNavigate: (path: string) => void
 }) {
   const { rulebook, versions, availability } = snapshot
   return (
@@ -212,9 +196,9 @@ function DetailContent({
       )}
 
       <AttestationsSection snapshot={snapshot} />
-      <CompatibilitySection />
       <VersionsSection snapshot={snapshot} api={api} />
       <VersionComparisonPanel api={api} rulebookId={rulebook.id} versions={versions} />
+      <CompatibilitySection onNavigate={onNavigate} />
     </>
   )
 }

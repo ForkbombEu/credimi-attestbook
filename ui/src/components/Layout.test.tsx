@@ -67,13 +67,15 @@ describe('Credimi Extras chrome', () => {
   })
 
   test('closes the footer with the ForkBomb attribution, then the Credimi Extras strip', () => {
-    render(<SiteFooter />)
+    render(<SiteFooter onNavigate={noop} />)
 
     const footer = screen.getByRole('contentinfo')
     expect(footer).toHaveTextContent('AttestBook does not test or claim trust')
 
-    const [forkbomb, credimi, ...rest] = within(footer).getAllByRole('link')
+    const [login, forkbomb, credimi, ...rest] = within(footer).getAllByRole('link')
     expect(rest).toHaveLength(0)
+
+    expect(login).toHaveTextContent('Log in')
 
     expect(forkbomb).toHaveTextContent('ForkBomb BV')
     expect(forkbomb!.closest('p')).toHaveTextContent(/^Proudly developed by ForkBomb BV$/)
@@ -96,7 +98,7 @@ describe('Credimi Extras chrome', () => {
       <>
         <SiteHeader section="Capture explorer" onNavigate={noop} />
         <main />
-        <SiteFooter />
+        <SiteFooter onNavigate={noop} />
       </>,
     )
 
@@ -105,7 +107,7 @@ describe('Credimi Extras chrome', () => {
 })
 
 describe('documentation navigation in the shared topbar', () => {
-  test('links to the in-app guides and the separate API reference', async () => {
+  test('links to the in-app guides and the separate API docs', async () => {
     const user = userEvent.setup()
     const onNavigate = vi.fn()
     render(<SiteHeader section="Rulebook catalog" onNavigate={onNavigate} />)
@@ -114,7 +116,7 @@ describe('documentation navigation in the shared topbar', () => {
     expect(guides).toHaveAttribute('href', '/guide')
     expect(guides).not.toHaveAttribute('aria-current')
 
-    const reference = screen.getByRole('link', { name: 'API reference' })
+    const reference = screen.getByRole('link', { name: 'API docs' })
     expect(reference).toHaveAttribute('href', '/docs')
     expect(reference).not.toHaveAttribute('aria-current')
 
@@ -141,21 +143,25 @@ describe('documentation navigation in the shared topbar', () => {
   })
 })
 
-describe('administrator session in the topbar', () => {
+describe('administrator session in the footer', () => {
   test('links an anonymous visitor to sign in while preserving the current path', async () => {
     window.history.replaceState({}, '', '/playground')
     render(
       <SessionProvider api={fakeApi()}>
         <SiteHeader section="Credential playground" onNavigate={noop} />
+        <SiteFooter onNavigate={noop} />
       </SessionProvider>,
     )
 
+    const footer = screen.getByRole('contentinfo')
     await waitFor(() =>
-      expect(screen.getByRole('link', { name: 'Log in' })).toHaveAttribute(
+      expect(within(footer).getByRole('link', { name: 'Log in' })).toHaveAttribute(
         'href',
         '/login?next=%2Fplayground',
       ),
     )
+    // The topbar carries navigation only, not the session controls.
+    expect(within(screen.getByRole('banner')).queryByRole('link', { name: 'Log in' })).toBeNull()
   })
 
   test('shows the authenticated provider identity and signs out', async () => {
@@ -163,15 +169,16 @@ describe('administrator session in the topbar', () => {
     const logout = vi.fn(async () => undefined)
     render(
       <SessionProvider api={fakeApi({ getSession: async () => SESSION, logout })}>
-        <SiteHeader section="Rulebook catalog" onNavigate={noop} />
+        <SiteFooter onNavigate={noop} />
       </SessionProvider>,
     )
 
-    const identity = await screen.findByTitle('Signed in as E2E Administrator')
+    const footer = screen.getByRole('contentinfo')
+    const identity = await within(footer).findByTitle('Signed in as E2E Administrator')
     expect(identity).toBeVisible()
-    await user.click(screen.getByRole('button', { name: 'Log out' }))
+    await user.click(within(footer).getByRole('button', { name: 'Log out' }))
 
-    await waitFor(() => expect(screen.getByRole('link', { name: 'Log in' })).toBeVisible())
+    await waitFor(() => expect(within(footer).getByRole('link', { name: 'Log in' })).toBeVisible())
     expect(logout).toHaveBeenCalledTimes(1)
     expect(logout).toHaveBeenCalledWith('csrf-token-value')
     expect(screen.queryByText('E2E Administrator')).not.toBeInTheDocument()
@@ -180,7 +187,7 @@ describe('administrator session in the topbar', () => {
   test('the login page can hide the anonymous sign-in link', async () => {
     render(
       <SessionProvider api={fakeApi()}>
-        <SiteHeader section="Administrator login" onNavigate={noop} showLoginLink={false} />
+        <SiteFooter onNavigate={noop} showLoginLink={false} />
       </SessionProvider>,
     )
 

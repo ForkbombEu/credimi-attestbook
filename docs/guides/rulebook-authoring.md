@@ -20,7 +20,7 @@ owns the rulebook. Signing in is required to:
 - use `Freeze as draft version`, `Refresh` and `Publish` in the editor's
   lifecycle panel, and `Create new version` on a published rulebook.
 
-The header shows `Log in` when anonymous, and the signed-in provider's name with
+The page footer shows `Log in` when anonymous, and the signed-in provider's name with
 `Log out` when authenticated. The catalogue's `New rulebook` action appears for
 any signed-in administrator; the new draft belongs to that administrator's
 provider. The detail page's `Edit draft` and `Create new version` actions
@@ -29,11 +29,11 @@ appear only for the administrator bound to the provider that owns the rulebook.
 ## Sign in
 
 1. Open the [administrator sign-in page](/login), or follow `Log in` in the
-   header from the page you are on.
+   page footer from the page you are on.
 2. Enter the administrator username and password configured for this server. The
    page never asks for, stores or sends a provider bearer token.
 3. After a successful sign-in the browser returns to the same-origin page you
-   came from, or to the catalogue. The header then shows the provider the
+   came from, or to the catalogue. The footer then shows the provider the
    administrator is bound to.
 
 The server carries the session in an HttpOnly cookie, and the page restores it
@@ -229,8 +229,8 @@ working draft is updated before publication.
 ## Compare version history
 
 The detail page's **Compare versions** panel compares two stored snapshots. It
-needs at least two versions: choose a **Baseline version** and a **Compared
-version**, then choose `Compare`.
+appears once the rulebook has at least two versions: choose a **Baseline
+version** and a **Compared version**, then choose `Compare`.
 
 If the authored content is the same, the panel says so even when the labels
 differ: the snapshot identity fields (format marker, rulebook id and version

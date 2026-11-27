@@ -65,18 +65,23 @@ test.describe('rulebook detail against the real API', () => {
     await expect(exportLink).toHaveAttribute('download', /rulebook-.*-1\.0\.json/)
   })
 
-  test('marks unsupported standards evaluations explicitly', async ({ page }) => {
+  test('reports rulebook-level compatibility as not tested', async ({ page }) => {
     await page.goto(await pidDetail(page))
 
     const compatibility = page.getByRole('region', { name: 'Standards compatibility' })
     await expect(compatibility).toContainText('Rulebook-level compatibility: not tested.')
-    await expect(compatibility).toContainText('Cryptographic verification')
-    await expect(compatibility).toContainText('Issuer and trust-policy validation')
-    await expect(compatibility).toContainText('Protocol conformance')
-    await expect(compatibility).toContainText('End-to-end interoperability')
     await expect(compatibility).toContainText('No rulebook-level compatibility result is recorded.')
-    await expect(compatibility.getByText('Not tested', { exact: true })).toHaveCount(3)
-    await expect(compatibility.getByText('Not applicable', { exact: true })).toHaveCount(2)
+    await expect(compatibility.getByRole('table')).toHaveCount(0)
+
+    await compatibility.getByRole('link', { name: 'Validation playground' }).click()
+    await expect(page).toHaveURL('/playground')
+    const support = page.getByRole('region', { name: 'What this playground checks' })
+    await expect(support).toContainText('Cryptographic verification')
+    await expect(support).toContainText('Issuer and trust-policy validation')
+    await expect(support).toContainText('Protocol conformance')
+    await expect(support).toContainText('End-to-end interoperability')
+    await expect(support.getByText('Not tested', { exact: true })).toHaveCount(2)
+    await expect(support.getByText('Not applicable', { exact: true })).toHaveCount(2)
   })
 
   test('keeps a deep-linked detail page after a reload and returns to the catalog', async ({
@@ -89,7 +94,10 @@ test.describe('rulebook detail against the real API', () => {
     await page.reload()
     await expect(page.getByRole('heading', { name: 'PID Rulebook', level: 1 })).toBeVisible()
 
-    await page.getByRole('link', { name: 'Rulebook catalog' }).click()
+    await page
+      .getByRole('navigation', { name: 'Primary' })
+      .getByRole('link', { name: 'Catalog' })
+      .click()
     await expect(page).toHaveURL('/')
     await expect(page.getByRole('heading', { name: 'Rulebook catalog', level: 1 })).toBeVisible()
   })
@@ -141,16 +149,13 @@ test.describe('rulebook detail against the real API', () => {
     await expect(page.getByRole('heading', { name: 'PID Rulebook', level: 1 })).toBeVisible()
   })
 
-  test('distinguishes hosted and external schema references and fetches hosted bytes anonymously', async ({
+  test('downloads hosted schema references and links external ones anonymously', async ({
     page,
     request,
   }) => {
     await page.goto(await pidDetail(page))
 
     const references = page.getByRole('region', { name: 'Attestation types' })
-    await expect(references.getByText('Hosted by AttestBook').first()).toBeVisible()
-    await expect(references.getByText('External URL').first()).toBeVisible()
-    await expect(references.getByText('application/schema+json').first()).toBeVisible()
 
     const externalLink = references.getByRole('link', {
       name: /https:\/\/issuer\.example\.org\/schemas\/pid/,
@@ -188,8 +193,6 @@ test.describe('rulebook detail against the real API', () => {
       panel.getByRole('heading', { name: 'Schema references in version 1.0' }),
     ).toBeVisible()
     await expect(panel.getByText(/Exact frozen version/)).toBeVisible()
-    await expect(panel.getByText('Hosted by AttestBook').first()).toBeVisible()
-    await expect(panel.getByText('External URL').first()).toBeVisible()
     await expect(
       panel
         .getByRole('link', { name: /Download the JSON Schema 2020-12 document for mso_mdoc/ })

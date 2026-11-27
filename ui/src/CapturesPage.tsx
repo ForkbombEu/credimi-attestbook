@@ -14,7 +14,7 @@ import { Alert } from './components/Alert'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { ValidationStatusBadge } from './components/Badges'
-import { AppLink, CATALOG_PATH, capturePath } from './router'
+import { AppLink, capturePath } from './router'
 import type { CaptureExplorerPage, CaptureExplorerSummary } from './types'
 
 interface CapturesPageProps {
@@ -164,21 +164,7 @@ export function CapturesPage({ api, onNavigate }: CapturesPageProps) {
       <SiteHeader section="Capture explorer" onNavigate={onNavigate} />
 
       <main className="page-main" id="main-content">
-        <PageHero
-          title="Capture explorer"
-          breadcrumb={
-            <nav className="breadcrumb" aria-label="Breadcrumb">
-              <ol>
-                <li>
-                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                    Rulebook catalog
-                  </AppLink>
-                </li>
-                <li aria-current="page">Capture explorer</li>
-              </ol>
-            </nav>
-          }
-        >
+        <PageHero title="Capture explorer">
           <p>
             Normalized evidence from issued and presented credentials, correlated with the pinned
             rulebook version a validation ran against and with the source&rsquo;s opaque test
@@ -269,7 +255,7 @@ export function CapturesPage({ api, onNavigate }: CapturesPageProps) {
         </div>
       </main>
 
-      <SiteFooter />
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   )
 }

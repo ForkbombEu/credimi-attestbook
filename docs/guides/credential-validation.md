@@ -40,6 +40,12 @@ A structural pass therefore says the artifact matches the pinned rulebook
 constraints. It does not say the credential is authentic, trusted, unrevoked or
 usable.
 
+The playground lists the same eight dimensions under **What this playground
+checks**, marked **Supported per credential**, **Not tested** or **Not
+applicable**. These describe this build, not any rulebook: AttestBook records no
+rulebook-level standards-compatibility result yet, so a rulebook's detail page
+reports its compatibility as **Not tested**.
+
 ## Use synthetic credentials only
 
 Build the artifact from synthetic claims and a throwaway signing key. **Never
