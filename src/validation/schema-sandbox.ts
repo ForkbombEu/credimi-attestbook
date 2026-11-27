@@ -403,7 +403,10 @@ export async function runSandboxChild(
 
   let child: Bun.Subprocess<'pipe', 'pipe', 'pipe'>
   try {
-    child = Bun.spawn([process.execPath, entry], {
+    // `--no-env-file`: Bun would otherwise load a `.env` from the working
+    // directory into the child, handing deployment secrets (such as the
+    // administrator password hash) to code evaluating untrusted schemas.
+    child = Bun.spawn([process.execPath, '--no-env-file', entry], {
       stdin: 'pipe',
       stdout: 'pipe',
       stderr: 'pipe',
