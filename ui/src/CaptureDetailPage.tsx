@@ -135,7 +135,7 @@ function MetadataRow({
 function EvidenceSummary({ detail }: { readonly detail: CaptureExplorerDetail }) {
   const party = detail.party
   return (
-    <section className="detail-card" aria-labelledby="capture-evidence-heading">
+    <section className="content-section" aria-labelledby="capture-evidence-heading">
       <h2 id="capture-evidence-heading">Normalized evidence</h2>
       <p className="table-note">
         Metadata is separated from the artifact. An inline artifact is shown only as its redacted
@@ -226,7 +226,7 @@ function EvidenceSummary({ detail }: { readonly detail: CaptureExplorerDetail })
 function ArtifactEvidence({ detail }: { readonly detail: CaptureExplorerDetail }) {
   const projection = detail.artifactProjection
   return (
-    <section className="detail-card" aria-labelledby="capture-artifact-heading">
+    <section className="content-section" aria-labelledby="capture-artifact-heading">
       <h2 id="capture-artifact-heading">Artifact evidence</h2>
       {detail.artifact.availability === 'external' ? (
         <Alert variant="warning" title="External artifact not fetched">
@@ -299,7 +299,7 @@ function ArtifactEvidence({ detail }: { readonly detail: CaptureExplorerDetail }
 
 function Timeline({ events }: { readonly events: readonly CaptureTimelineEvent[] }) {
   return (
-    <section className="detail-card" aria-labelledby="capture-timeline-heading">
+    <section className="content-section" aria-labelledby="capture-timeline-heading">
       <h2 id="capture-timeline-heading">Evidence timeline</h2>
       <p className="table-note">
         Events are ordered by their own timestamps. The capture timestamp is asserted by the source;
@@ -323,7 +323,7 @@ function Timeline({ events }: { readonly events: readonly CaptureTimelineEvent[]
 
 function EvidenceGaps({ detail }: { readonly detail: CaptureExplorerDetail }) {
   return (
-    <section className="detail-card" aria-labelledby="capture-gaps-heading">
+    <section className="content-section" aria-labelledby="capture-gaps-heading">
       <h2 id="capture-gaps-heading">Missing and unavailable evidence</h2>
       {detail.evidenceGaps.length === 0 ? (
         <p className="table-note">
@@ -395,7 +395,7 @@ function CorrelationPanel({
       : null
 
   return (
-    <section className="detail-card" aria-labelledby="capture-correlation-heading">
+    <section className="content-section" aria-labelledby="capture-correlation-heading">
       <h2 id="capture-correlation-heading">Pinned rulebook correlation</h2>
       {detail.rulebook === null ? (
         <p className="table-note">
@@ -905,7 +905,10 @@ export function CaptureDetailPage({
 
                   <Timeline events={detail.timeline} />
 
-                  <section className="detail-card" aria-labelledby="capture-limitations-heading">
+                  <section
+                    className="content-section"
+                    aria-labelledby="capture-limitations-heading"
+                  >
                     <h2 id="capture-limitations-heading">Limitations</h2>
                     <ul className="limitation-list">
                       {detail.limitations.map((limitation) => (

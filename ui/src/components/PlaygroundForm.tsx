@@ -75,7 +75,7 @@ export function PlaygroundForm({
   const errorEntries = Object.entries(errors) as [PlaygroundFormField, string][]
 
   return (
-    <section className="detail-card" aria-labelledby="playground-request-heading">
+    <section className="content-section" aria-labelledby="playground-request-heading">
       <h2 id="playground-request-heading">Validation request</h2>
       <p className="table-note playground-disclosure">
         The credential is sent only to <code>POST /api/v1/credentials/validate</code> for this run.

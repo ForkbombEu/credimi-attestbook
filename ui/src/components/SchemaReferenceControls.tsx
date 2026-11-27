@@ -560,7 +560,7 @@ export function SchemaReferenceControls({
   }
 
   return (
-    <section className="detail-card" aria-labelledby={`${prefix}-heading`}>
+    <section className="content-section" aria-labelledby={`${prefix}-heading`}>
       <h2 id={`${prefix}-heading`}>Schema references</h2>
       <p className="field-hint schema-reference-intro">
         Add one schema reference per attestation format. The controls update the Draft JSON above;

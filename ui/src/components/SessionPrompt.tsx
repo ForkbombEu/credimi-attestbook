@@ -116,7 +116,7 @@ export function SessionRenewalForm({
   }
 
   return (
-    <section className="detail-card session-renewal" aria-labelledby={`${fieldPrefix}-heading`}>
+    <section className="content-section session-renewal" aria-labelledby={`${fieldPrefix}-heading`}>
       <h2 id={`${fieldPrefix}-heading`}>{title}</h2>
       <p className="field-hint">{description}</p>
       {error === null ? null : (

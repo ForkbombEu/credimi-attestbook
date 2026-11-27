@@ -146,17 +146,28 @@ describe('rulebook detail content', () => {
     expect(document.title).toBe('PID Rulebook · AttestBook')
   })
 
-  test('shows every schema reference including rulebook-level ones', async () => {
+  test('shows every schema reference once, with rulebook-level ones in their own group', async () => {
     renderDetail()
 
-    const section = await screen.findByRole('region', { name: 'Schema references' })
-    expect(within(section).getByText('dc+sd-jwt')).toBeInTheDocument()
-    expect(within(section).getByText('mso_mdoc')).toBeInTheDocument()
-    expect(within(section).getByText('Rulebook-level')).toBeInTheDocument()
-    expect(within(section).getByText('None recorded')).toBeInTheDocument()
+    const section = await screen.findByRole('region', { name: 'Attestation types' })
+    // The attestation types carry the references; there is no second, repeated section.
+    expect(screen.queryByRole('region', { name: 'Schema references' })).toBeNull()
+    const attestationTable = within(section).getByRole('table', {
+      name: 'Schema references for Person Identification Data',
+    })
+    expect(within(attestationTable).getByText('dc+sd-jwt')).toBeInTheDocument()
     expect(
-      within(section).getByText('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='),
+      within(attestationTable).getByText('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU='),
     ).toBeInTheDocument()
+
+    expect(
+      within(section).getByRole('heading', { name: 'Rulebook-level schema references' }),
+    ).toBeInTheDocument()
+    const rulebookTable = within(section).getByRole('table', {
+      name: 'Rulebook-level schema references',
+    })
+    expect(within(rulebookTable).getByText('mso_mdoc')).toBeInTheDocument()
+    expect(within(rulebookTable).getByText('None recorded')).toBeInTheDocument()
   })
 
   test('reports standards compatibility and marks unsupported evaluations', async () => {
@@ -259,7 +270,9 @@ describe('rulebook detail content', () => {
       screen.getByText('The version history could not be loaded, so no versions are shown.'),
     ).toBeInTheDocument()
     expect(
-      screen.getByText('The schema references could not be loaded, so none are shown.'),
+      screen.getByText(
+        'The schema references could not be loaded, so only those embedded in each attestation type are shown.',
+      ),
     ).toBeInTheDocument()
   })
 
@@ -319,7 +332,7 @@ describe('hosted and external schema provenance', () => {
   test('distinguishes hosted documents from external URLs in the same rulebook', async () => {
     renderDetail(createFakeApi(dataset))
 
-    const section = await screen.findByRole('region', { name: 'Schema references' })
+    const section = await screen.findByRole('region', { name: 'Attestation types' })
     expect(within(section).getAllByText('Hosted by AttestBook').length).toBeGreaterThan(0)
     expect(within(section).getAllByText('External URL').length).toBeGreaterThan(0)
     expect(within(section).getAllByText('JSON Schema 2020-12').length).toBeGreaterThan(0)

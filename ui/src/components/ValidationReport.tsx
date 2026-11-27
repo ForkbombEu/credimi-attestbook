@@ -200,7 +200,7 @@ function ResultMetadata({ result }: { readonly result: CredentialValidationResul
 
 function SchemaReferences({ result }: { readonly result: CredentialValidationResult }) {
   return (
-    <section className="detail-card" aria-labelledby="validation-schema-heading">
+    <section className="content-section" aria-labelledby="validation-schema-heading">
       <h2 id="validation-schema-heading">Schema references</h2>
       {result.schemaReferences.length === 0 ? (
         <p className="muted">
@@ -275,7 +275,7 @@ export function ValidationReport({
   const summary = validationSummary(result)
   return (
     <div className="validation-report">
-      <section className="detail-card" aria-labelledby="validation-overall-heading">
+      <section className="content-section" aria-labelledby="validation-overall-heading">
         <div className="validation-overall">
           <div>
             <h2 id="validation-overall-heading">Overall result</h2>
@@ -296,7 +296,7 @@ export function ValidationReport({
         <ResultMetadata result={result} />
       </section>
 
-      <section className="detail-card" aria-labelledby="validation-dimensions-heading">
+      <section className="content-section" aria-labelledby="validation-dimensions-heading">
         <h2 id="validation-dimensions-heading">Validation dimensions</h2>
         <p className="table-note">
           Every FR-010 dimension is listed in normative order with its status, whether it was
@@ -326,7 +326,7 @@ export function ValidationReport({
         </div>
       </section>
 
-      <section className="detail-card" aria-labelledby="validation-violations-heading">
+      <section className="content-section" aria-labelledby="validation-violations-heading">
         <h2 id="validation-violations-heading">Violations</h2>
         {result.violations.length === 0 ? (
           <p className="muted">
@@ -382,7 +382,7 @@ export function ValidationReport({
         )}
       </section>
 
-      <section className="detail-card" aria-labelledby="validation-limitations-heading">
+      <section className="content-section" aria-labelledby="validation-limitations-heading">
         <h2 id="validation-limitations-heading">Limitations of this result</h2>
         {result.limitations.length === 0 ? (
           <p className="muted">No limitations were reported for this run.</p>

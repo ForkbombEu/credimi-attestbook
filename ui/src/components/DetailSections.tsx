@@ -16,6 +16,7 @@ import {
   hostedSchemaDownloadName,
   latestVersion,
   referencesForAttestation,
+  rulebookLevelReferences,
   versionsNewestFirst,
   type ReferenceWithHostedSchema,
 } from '../detail'
@@ -222,7 +223,7 @@ function rulebookRows(references: readonly SchemaReference[]): readonly SchemaRe
 export function MetadataSection({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
   const { rulebook, provider, attestations, schemaReferences, versions, availability } = snapshot
   return (
-    <section className="detail-card" aria-labelledby="metadata-heading">
+    <section className="content-section" aria-labelledby="metadata-heading">
       <h2 id="metadata-heading">Rulebook metadata</h2>
       <dl className="metadata-grid">
         <div>
@@ -281,7 +282,7 @@ export function ProvenanceSection({ snapshot }: { readonly snapshot: RulebookDet
   const { rulebook } = snapshot
   const source = describeSourceFor(rulebook)
   return (
-    <section className="detail-card" aria-labelledby="provenance-heading">
+    <section className="content-section" aria-labelledby="provenance-heading">
       <h2 id="provenance-heading">Source provenance</h2>
       <dl className="metadata-grid">
         <div>
@@ -339,20 +340,34 @@ function describeSourceFor(rulebook: Rulebook) {
   return { href: null as string | null, label: value }
 }
 
+/**
+ * The attestation types with their schema references. Each attestation lists
+ * its own references; references bound to no attestation type follow as the
+ * rulebook-level group, so every reference appears exactly once on the page.
+ */
 export function AttestationsSection({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
   const { attestations, schemaReferences, availability } = snapshot
+  const rulebookLevel = availability.schemaReferences
+    ? rulebookLevelReferences(schemaReferences)
+    : []
   return (
-    <section className="detail-card" aria-labelledby="attestations-heading">
+    <section className="content-section" aria-labelledby="attestations-heading">
       <h2 id="attestations-heading">Attestation types</h2>
       {availability.attestations ? null : (
         <SectionUnavailable>
           The attestation types could not be loaded, so none are shown.
         </SectionUnavailable>
       )}
+      {availability.schemaReferences ? null : (
+        <SectionUnavailable>
+          The schema references could not be loaded, so only those embedded in each attestation type
+          are shown.
+        </SectionUnavailable>
+      )}
       {availability.attestations && attestations.length === 0 ? (
         <p className="muted">No attestation types are recorded for this rulebook.</p>
       ) : null}
-      {attestations.length > 0 ? (
+      {attestations.length > 0 || rulebookLevel.length > 0 ? (
         <ul className="attestation-list">
           {attestations.map((attestation) => {
             const references = availability.schemaReferences
@@ -403,49 +418,35 @@ export function AttestationsSection({ snapshot }: { readonly snapshot: RulebookD
               </li>
             )
           })}
+          {rulebookLevel.length === 0 ? null : (
+            <li className="attestation-card">
+              <h3>Rulebook-level schema references</h3>
+              <p className="table-note">These references belong to no single attestation type.</p>
+              <SchemaReferenceTable
+                rows={rulebookRows(rulebookLevel)}
+                attestations={attestations}
+                showAttestation={false}
+                caption="Rulebook-level schema references"
+              />
+            </li>
+          )}
         </ul>
       ) : null}
-    </section>
-  )
-}
-
-export function SchemaReferencesSection({
-  snapshot,
-}: {
-  readonly snapshot: RulebookDetailSnapshot
-}) {
-  const { schemaReferences, attestations, availability } = snapshot
-  return (
-    <section className="detail-card" aria-labelledby="schema-references-heading">
-      <h2 id="schema-references-heading">Schema references</h2>
-      {availability.schemaReferences ? null : (
-        <SectionUnavailable>
-          The schema references could not be loaded, so none are shown.
-        </SectionUnavailable>
-      )}
-      {availability.schemaReferences && schemaReferences.length === 0 ? (
-        <p className="muted">No schema references are recorded for this rulebook.</p>
-      ) : null}
       {schemaReferences.length > 0 ? (
-        <SchemaReferenceTable
-          rows={rulebookRows(schemaReferences)}
-          attestations={attestations}
-          caption="Schema references with their format identifier, source, URI, media type, digest, integrity pin and attestation type"
-        />
+        <p className="table-note">
+          A reference is <strong>Hosted by AttestBook</strong> only when its exact URI names an
+          immutable stored schema document on this deployment; every other http(s) value stays an
+          external link. Hosted rows link to the public, unauthenticated content route and show the
+          stored media type and digest the bytes must match.
+        </p>
       ) : null}
-      <p className="table-note">
-        A reference is <strong>Hosted by AttestBook</strong> only when its exact URI names an
-        immutable stored schema document on this deployment; every other http(s) value stays an
-        external link. Hosted rows link to the public, unauthenticated content route and show the
-        stored media type and digest the bytes must match.
-      </p>
     </section>
   )
 }
 
 export function CompatibilitySection() {
   return (
-    <section className="detail-card" aria-labelledby="compatibility-heading">
+    <section className="content-section" aria-labelledby="compatibility-heading">
       <h2 id="compatibility-heading">Standards compatibility</h2>
       <p className="compatibility-summary">
         <CompatibilityBadge /> <strong>Rulebook-level compatibility: not tested.</strong>
@@ -630,7 +631,7 @@ export function VersionsSection({
   const [openVersionId, setOpenVersionId] = useState<string | null>(null)
   const panelPrefix = `version-panel-${useId().replaceAll(':', '')}`
   return (
-    <section className="detail-card" aria-labelledby="versions-heading">
+    <section className="content-section" aria-labelledby="versions-heading">
       <h2 id="versions-heading">Version history</h2>
       {availability.versions ? null : (
         <SectionUnavailable>

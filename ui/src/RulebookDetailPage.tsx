@@ -8,7 +8,6 @@ import {
   CompatibilitySection,
   MetadataSection,
   ProvenanceSection,
-  SchemaReferencesSection,
   VersionsSection,
   VersionSummary,
 } from './components/DetailSections'
@@ -222,7 +221,6 @@ function DetailContent({
       </div>
 
       <AttestationsSection snapshot={snapshot} />
-      <SchemaReferencesSection snapshot={snapshot} />
       <CompatibilitySection />
       <VersionsSection snapshot={snapshot} api={api} />
       <VersionComparisonPanel api={api} rulebookId={rulebook.id} versions={versions} />

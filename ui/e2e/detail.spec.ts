@@ -30,7 +30,9 @@ test.describe('rulebook detail against the real API', () => {
     await expect(attestations).toContainText('cryptographic')
     await expect(attestations).toContainText('dc+sd-jwt')
 
-    const references = page.getByRole('region', { name: 'Schema references' })
+    // Schema references live with their attestation type; there is no repeated section.
+    await expect(page.getByRole('region', { name: 'Schema references' })).toHaveCount(0)
+    const references = attestations
     await expect(
       references.getByRole('link', { name: /https:\/\/issuer\.example\.org\/schemas\/pid/ }),
     ).toHaveAttribute('href', 'https://issuer.example.org/schemas/pid')
@@ -144,7 +146,7 @@ test.describe('rulebook detail against the real API', () => {
   }) => {
     await page.goto(await pidDetail(page))
 
-    const references = page.getByRole('region', { name: 'Schema references' })
+    const references = page.getByRole('region', { name: 'Attestation types' })
     await expect(references.getByText('Hosted by AttestBook').first()).toBeVisible()
     await expect(references.getByText('External URL').first()).toBeVisible()
     await expect(references.getByText('application/schema+json').first()).toBeVisible()

@@ -217,7 +217,7 @@ export function DraftLifecyclePanel({
   const canFreeze = publicationStatus === 'draft'
 
   return (
-    <section className="detail-card" aria-labelledby="draft-lifecycle-heading">
+    <section className="content-section" aria-labelledby="draft-lifecycle-heading">
       <h2 id="draft-lifecycle-heading">Draft lifecycle and publication</h2>
       <p className="field-hint">
         Freeze the working copy as a version, refresh a draft snapshot, check publication readiness,

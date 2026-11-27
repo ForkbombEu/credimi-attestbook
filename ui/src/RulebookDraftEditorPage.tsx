@@ -612,7 +612,10 @@ export function RulebookDraftEditorPage({
           )}
 
           <form onSubmit={handleSubmit} noValidate>
-            <section className="detail-card" aria-labelledby={`${fieldPrefix}-metadata-heading`}>
+            <section
+              className="content-section"
+              aria-labelledby={`${fieldPrefix}-metadata-heading`}
+            >
               <h2 id={`${fieldPrefix}-metadata-heading`}>Rulebook metadata</h2>
               <div className="editor-grid">
                 <div className="field">
@@ -687,7 +690,7 @@ export function RulebookDraftEditorPage({
               </div>
             </section>
 
-            <section className="detail-card" aria-labelledby={`${fieldPrefix}-json-heading`}>
+            <section className="content-section" aria-labelledby={`${fieldPrefix}-json-heading`}>
               <h2 id={`${fieldPrefix}-json-heading`}>Attestations and schema references</h2>
               <p className="field-hint">
                 JSON object with an <code>attestations</code> array and a rulebook-level{' '}
@@ -749,7 +752,10 @@ export function RulebookDraftEditorPage({
               }}
             />
 
-            <section className="detail-card" aria-labelledby={`${fieldPrefix}-validation-heading`}>
+            <section
+              className="content-section"
+              aria-labelledby={`${fieldPrefix}-validation-heading`}
+            >
               <h2 id={`${fieldPrefix}-validation-heading`}>Live validation</h2>
               <p className="editor-status" role="status" aria-live="polite">
                 {summary}

@@ -84,7 +84,7 @@ export function VersionComparisonPanel({ api, rulebookId, versions }: VersionCom
   const sameVersion = fromLabel === toLabel
 
   return (
-    <section className="detail-card" aria-labelledby="version-comparison-heading">
+    <section className="content-section" aria-labelledby="version-comparison-heading">
       <h2 id="version-comparison-heading">Compare versions</h2>
       <p className="field-hint">
         A deterministic structural comparison of two snapshots. Snapshot identity fields (format,

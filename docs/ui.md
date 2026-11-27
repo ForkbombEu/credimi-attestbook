@@ -690,9 +690,17 @@ keeps `ui/src/styles.css` to AttestBook's own layouts:
   (`CodeOutput`); Shiki itself is not bundled, so the blocks are unhighlighted;
 - identifiers, versions, digests and URIs are Inter with `.data` (tabular digits,
   slashed zero, disambiguation); Source Code Pro is reserved for code;
-- data tables follow the Scoreboard band, cards use the 6px radius with a
-  hairline title row and no colon, forms sit on the section rather than in a
-  card, and the guide index uses link cards;
+- content sits in `.content-section`s directly on the lavender wash, not in
+  cards: each opens like a section intro (primary title over a
+  `--border-strong` rule, no colon) and the next follows 64px below; forms,
+  guide articles, empty states and the guide navigation are uncarded too, and the
+  only cards left are the guide index's link cards;
+- data tables follow the Scoreboard: a white 6px surface, a 40px
+  `--brand-secondary-strong` header band with vertically centred uppercase
+  primary labels, 13px cells with 12px padding, the row-naming first cell in
+  sans bold, hairline rows and `--bg-muted` on hover;
+- the rulebook page lists each schema reference once, under its attestation
+  type, with references bound to no attestation type in a rulebook-level group;
 - the footer closes with two sub-bars: “Proudly developed by ForkBomb BV”, then
   the Credimi Extras strip.
 

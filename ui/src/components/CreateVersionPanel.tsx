@@ -80,8 +80,10 @@ export function CreateVersionPanel({
   }
 
   return (
-    <section className="detail-card create-version-panel" aria-labelledby={`${fieldId}-heading`}>
-      <p className="eyebrow">Published version</p>
+    <section
+      className="content-section create-version-panel"
+      aria-labelledby={`${fieldId}-heading`}
+    >
       <h2 id={`${fieldId}-heading`}>Create a new version</h2>
       <p className="field-hint">
         The published version is immutable. Creating a new draft version reopens the working copy
