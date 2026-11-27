@@ -67,14 +67,18 @@ export function parseMdoc(credential: string): MdocParseOutcome {
 
   const docType = issuerSigned.issuerAuth.mobileSecurityObject.docType
   if (typeof docType !== 'string' || docType.trim() === '') {
-    return invalid('missing_mdoc_doctype', 'The mso_mdoc Mobile Security Object has no document type.')
+    return invalid(
+      'missing_mdoc_doctype',
+      'The mso_mdoc Mobile Security Object has no document type.',
+    )
   }
 
   const namespaces = issuerSigned.issuerNamespaces?.issuerNamespaces
   const namespaceCount = namespaces?.size ?? 0
-  const elementCount = namespaces === undefined
-    ? 0
-    : Array.from(namespaces.values()).reduce((count, elements) => count + elements.length, 0)
+  const elementCount =
+    namespaces === undefined
+      ? 0
+      : Array.from(namespaces.values()).reduce((count, elements) => count + elements.length, 0)
 
   return {
     ok: true,
