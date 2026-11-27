@@ -1,7 +1,7 @@
 // Capture explorer read model and rulebook correlation (FR-019, UI-006, issue #48).
 //
-// The explorer is a bounded, in-memory projection of the normalized capture
-// evidence served by the configured capture sources. It joins one capture
+// The explorer is a bounded projection of the normalized capture evidence served
+// by the configured capture sources, backed by the durable capture store. It joins one capture
 // artifact with the exact rulebook version it was validated against and with
 // the opaque test-execution reference the source supplied, so a consumer can
 // follow source -> capture -> pinned rulebook version -> validation findings
@@ -9,14 +9,15 @@
 //
 // Everything here is mock-backed: the only sources this build can construct
 // are deterministic mock adapters, every source says `transport: "mock"` and
-// no live `capture-issuer`/`capture-verifier` endpoint is contacted. The
-// explorer keeps capture evidence and validation correlations in memory only;
-// it does not persist them and it never fetches an external artifact reference.
+// no live `capture-issuer`/`capture-verifier` endpoint is contacted. Evidence
+// and correlations are read and written through a `CaptureStore`; the server
+// wires the SQLite implementation, so a capture and its binding survive a
+// restart. External artifact references are never fetched.
 //
-// Raw inline evidence stays segregated in `NormalizedCaptureArtifact.sensitive`
-// and is never returned by a read model. The explorer displays only the
-// redacted default-policy projection, and validation is refused for evidence
-// that is external or already redacted by its source.
+// Raw inline evidence stays segregated in the store's artifact table and is
+// never returned by a read model. The explorer displays only the redacted
+// default-policy projection, and validation is refused for evidence that is
+// external or already redacted by its source.
 
 import { randomUUID } from 'node:crypto'
 
@@ -31,12 +32,12 @@ import {
 } from '../validation'
 
 import {
+  captureAdapterError,
   hashCaptureCredential,
   MockCaptureSource,
   mockCaptureEnvelopes,
   type CaptureAdapterTransport,
   type CapturePullAdapter,
-  type CaptureSource,
 } from './adapters'
 import { DEFAULT_CAPTURE_LIMITS, type CaptureLimits } from './limits'
 import {
@@ -44,6 +45,15 @@ import {
   redactNormalizedCaptureArtifact,
   type CaptureRedactionPolicy,
 } from './redaction'
+import {
+  canonicalCaptureSubmission,
+  MemoryCaptureStore,
+  type CaptureArtifactMetadata,
+  type CaptureCorrelation,
+  type CaptureRulebookBinding,
+  type CaptureStore,
+  type CaptureStoreEntry,
+} from './store'
 import type {
   CaptureArtifact,
   CaptureArtifactEncoding,
@@ -56,6 +66,7 @@ import type {
   CaptureParty,
   CaptureProtocol,
   CaptureProvenance,
+  CaptureRawArtifact,
   CaptureRedaction,
   CaptureSourceComponent,
   NormalizedCaptureArtifact,
@@ -109,21 +120,7 @@ export interface CaptureArtifactSummary {
 }
 
 /** The exact pinned rulebook version one validation ran against. */
-export interface CaptureRulebookBinding {
-  readonly rulebookId: string
-  readonly rulebookName: string
-  readonly version: string
-  /** Lowercase hex SHA-256 of the stored snapshot bytes. */
-  readonly contentDigest: string
-  /** Always `true`: a mismatching digest aborts the validation run. */
-  readonly digestVerified: true
-  readonly specVersion: string
-  readonly rulebookStatus: 'draft' | 'published' | 'historical'
-  /** The selected attestation type inside that exact snapshot. */
-  readonly attestationType: string
-  /** AttestBook timestamp of the correlation, RFC 3339 UTC. */
-  readonly boundAt: string
-}
+export type { CaptureRulebookBinding } from './store'
 
 /** One dimension of a correlated validation result, without its evidence. */
 export interface CaptureValidationDimensionSummary {
@@ -211,7 +208,7 @@ export interface CaptureCorrelationResult {
   readonly validation: CredentialValidationResult
 }
 
-/** The list of captures, with the in-memory page bounds. */
+/** The list of captures, with the page bounds. */
 export interface CaptureExplorerPage {
   readonly captures: readonly CaptureExplorerSummary[]
   readonly total: number
@@ -238,13 +235,13 @@ export const DEFAULT_CAPTURE_PAGE_LIMIT = 50
 export const MAX_CAPTURE_PAGE_LIMIT = 100
 /** Bound on pages pulled from one source while seeding the explorer. */
 export const MAX_CAPTURE_SOURCE_PAGES = 100
-/** Bound on the number of captures the in-memory explorer will hold. */
-export const MAX_CAPTURE_RECORDS = 10_000
+
+export { MAX_CAPTURE_RECORDS } from './store'
 
 /** Explicit limitations of every capture explorer read. */
 export const CAPTURE_EXPLORER_LIMITATIONS: readonly string[] = Object.freeze([
   'The capture explorer is backed by the deterministic local mock source. No live capture-issuer or capture-verifier interaction is shown and none is claimed operational.',
-  'Capture evidence is held in memory for the lifetime of this server process; nothing is persisted and external artifact references are not fetched.',
+  'Capture evidence and correlations are persisted in SQLite by the server and survive a restart; external artifact references are not fetched.',
   'Inline artifacts are shown only as the redacted default-policy projection; the segregated raw artifact is never returned by the API.',
   'Validation runs the structural credential engine on a captured issued credential. External, source-redacted or non-credential evidence is reported as unavailable instead of being validated.',
   'A structural validation status never implies cryptographic, issuer-trust, protocol or interoperability success.',
@@ -302,18 +299,17 @@ function parseOptionalRulebookDigest(value: unknown): string | null {
   return value
 }
 
-interface CaptureExplorerRecord {
-  readonly source: CaptureSource
-  readonly normalized: NormalizedCaptureArtifact
-  binding: CaptureRulebookBinding | null
-  validation: CredentialValidationResult | null
-}
-
 export interface CaptureExplorerOptions {
   /** Configured pull adapters; the only implemented transport is `mock`. */
   readonly sources: readonly CapturePullAdapter[]
   /** The structural validation service a correlation runs against. */
   readonly validation: CredentialValidationService
+  /**
+   * Evidence and correlation store. Defaults to an in-memory store for isolated
+   * tests; the server wires the SQLite implementation so data survives a
+   * restart.
+   */
+  readonly store?: CaptureStore
   /** Clock for the correlation timestamp; injectable for tests. */
   readonly now?: () => Date
   /** Redaction policy used for the display projection. */
@@ -328,25 +324,36 @@ const DEFAULT_REDACTION_POLICY: CaptureRedactionPolicy = {
 }
 
 /**
- * Bounded in-memory capture evidence joined with validation correlations.
- * Loading is lazy and shared: concurrent reads trigger one pull per source.
+ * Bounded capture evidence joined with validation correlations. Loading is
+ * lazy and shared: concurrent reads trigger one pull per source, and every
+ * insert is idempotent by `captureId` through the store.
  */
 export class CaptureExplorer {
   private readonly sources: readonly CapturePullAdapter[]
   private readonly validation: CredentialValidationService
+  private readonly store: CaptureStore
   private readonly now: () => Date
   private readonly redactionPolicy: CaptureRedactionPolicy
   private readonly limits: CaptureLimits
-  private readonly records = new Map<string, CaptureExplorerRecord>()
   private loaded = false
   private loadPromise: Promise<void> | null = null
 
   constructor(options: CaptureExplorerOptions) {
     this.sources = [...options.sources]
     this.validation = options.validation
+    this.store = options.store ?? new MemoryCaptureStore()
     this.now = options.now ?? (() => new Date())
     this.redactionPolicy = options.redactionPolicy ?? DEFAULT_REDACTION_POLICY
     this.limits = options.limits ?? DEFAULT_CAPTURE_LIMITS
+  }
+
+  /**
+   * Seeds the store from every configured source. Idempotent: a restart over
+   * the same database re-inserts nothing and keeps recorded correlations. The
+   * server calls this during startup; a read also triggers it lazily.
+   */
+  initialize(): Promise<void> {
+    return this.ensureLoaded()
   }
 
   /** Captures, newest first, with the requested page bounds. */
@@ -356,10 +363,9 @@ export class CaptureExplorer {
     await this.ensureLoaded()
     const limit = options.limit ?? DEFAULT_CAPTURE_PAGE_LIMIT
     const offset = options.offset ?? 0
-    const summaries = this.sortedRecords().map((record) => this.toSummary(record))
     return {
-      captures: summaries.slice(offset, offset + limit),
-      total: summaries.length,
+      captures: this.store.list({ limit, offset }).map((entry) => this.toSummary(entry)),
+      total: this.store.count(),
       limit,
       offset,
     }
@@ -368,8 +374,11 @@ export class CaptureExplorer {
   /** One capture with its redacted projection, timeline and linked validation. */
   async get(captureId: string): Promise<CaptureExplorerDetail | null> {
     await this.ensureLoaded()
-    const record = this.records.get(captureId)
-    return record === undefined ? null : this.toDetail(record)
+    const entry = this.store.get(captureId)
+    if (entry === null) {
+      return null
+    }
+    return this.toDetail(entry, this.store.readArtifact(captureId))
   }
 
   /**
@@ -386,12 +395,13 @@ export class CaptureExplorer {
   async correlate(captureId: string, input: unknown): Promise<CaptureCorrelationResult> {
     await this.ensureLoaded()
     const request = parseCaptureCorrelationInput(input)
-    const record = this.records.get(captureId)
-    if (record === undefined) {
+    const entry = this.store.get(captureId)
+    if (entry === null) {
       throw notFound('The requested capture does not exist.')
     }
-    const envelope = record.normalized.envelope
-    if (envelope.artifactRef !== null || record.normalized.sensitive === null) {
+    const envelope = entry.envelope
+    const artifact = this.store.readArtifact(captureId)
+    if (envelope.artifactRef !== null || artifact === null) {
       throw conflict(
         'The capture artifact is stored behind an external reference and AttestBook has not fetched it. External evidence cannot be validated against a rulebook version.',
       )
@@ -410,7 +420,7 @@ export class CaptureExplorer {
         `Credential validation is not applicable to artifact type "${envelope.artifactType}". Only a captured issued credential carries a credential AttestBook can validate.`,
       )
     }
-    const text = decodeArtifactText(record.normalized)
+    const text = decodeArtifactText(artifact)
     const result = await this.validation.validate({
       rulebookId: request.rulebookId,
       rulebookVersion: request.rulebookVersion,
@@ -440,8 +450,7 @@ export class CaptureExplorer {
       attestationType: result.attestation.name,
       boundAt: boundAt.toISOString(),
     }
-    record.binding = binding
-    record.validation = result
+    this.store.upsertCorrelation(envelope.captureId, { rulebook: binding, validation: result })
     return {
       captureId: envelope.captureId,
       correlationId: envelope.correlationId,
@@ -451,31 +460,25 @@ export class CaptureExplorer {
     }
   }
 
-  private sortedRecords(): readonly CaptureExplorerRecord[] {
-    return [...this.records.values()].sort((left, right) => {
-      const byTime =
-        right.normalized.envelope.provenance.capturedAtMs -
-        left.normalized.envelope.provenance.capturedAtMs
-      return byTime !== 0
-        ? byTime
-        : left.normalized.envelope.captureId.localeCompare(right.normalized.envelope.captureId)
-    })
-  }
-
-  private toSummary(record: CaptureExplorerRecord): CaptureExplorerSummary {
-    const envelope = record.normalized.envelope
-    const validation = record.validation === null ? null : toValidationSummary(record.validation)
-    const evidenceGaps = evidenceGapsFor(envelope, record.binding, record.validation)
+  private toSummary(entry: CaptureStoreEntry): CaptureExplorerSummary {
+    const envelope = entry.envelope
+    const correlation = entry.correlation
+    const validation = correlation === null ? null : toValidationSummary(correlation.validation)
+    const evidenceGaps = evidenceGapsFor(
+      envelope,
+      correlation?.rulebook ?? null,
+      correlation?.validation ?? null,
+    )
     return {
       captureId: envelope.captureId,
       correlationId: envelope.correlationId,
       kind: envelope.kind,
       envelopeVersion: envelope.envelopeVersion,
       source: {
-        sourceId: record.source.sourceId,
-        component: record.source.component,
-        transport: record.source.transport,
-        description: record.source.description,
+        sourceId: entry.source.sourceId,
+        component: entry.source.component,
+        transport: entry.source.transport,
+        description: entry.source.description,
       },
       provenance: envelope.provenance,
       interactionType: envelope.interactionType,
@@ -486,21 +489,29 @@ export class CaptureExplorer {
       testExecutionRef: envelope.testExecutionRef,
       integrity: envelope.integrity,
       declaredRedaction: envelope.redaction,
-      artifact: artifactSummaryFor(record.normalized),
-      rulebook: record.binding,
+      artifact: artifactSummaryFor(envelope, entry.artifact),
+      rulebook: correlation?.rulebook ?? null,
       validation,
       evidenceGaps,
       evidenceComplete: evidenceGaps.length === 0,
     }
   }
 
-  private toDetail(record: CaptureExplorerRecord): CaptureExplorerDetail {
+  private toDetail(
+    entry: CaptureStoreEntry,
+    artifact: CaptureRawArtifact | null,
+  ): CaptureExplorerDetail {
     return {
-      ...this.toSummary(record),
-      metadata: { ...record.normalized.envelope.metadata },
-      artifactProjection: projectionFor(record.normalized, this.redactionPolicy, this.limits),
-      validationResult: record.validation,
-      timeline: timelineFor(record),
+      ...this.toSummary(entry),
+      metadata: { ...entry.envelope.metadata },
+      artifactProjection: projectionFor(
+        entry.envelope,
+        artifact,
+        this.redactionPolicy,
+        this.limits,
+      ),
+      validationResult: entry.correlation?.validation ?? null,
+      timeline: timelineFor(entry.envelope, entry.correlation),
       limitations: [...CAPTURE_EXPLORER_LIMITATIONS],
     }
   }
@@ -532,19 +543,17 @@ export class CaptureExplorer {
     for (let page = 0; page < MAX_CAPTURE_SOURCE_PAGES; page += 1) {
       const result = await source.pull(cursor === null ? {} : { cursor })
       for (const artifact of result.artifacts) {
-        const captureId = artifact.envelope.captureId
-        if (this.records.has(captureId)) {
-          continue
-        }
-        if (this.records.size >= MAX_CAPTURE_RECORDS) {
-          throw new Error('the capture explorer reached its in-memory record bound')
-        }
-        this.records.set(captureId, {
-          source: result.source,
+        const outcome = this.store.insert({
           normalized: artifact,
-          binding: null,
-          validation: null,
+          source: result.source,
+          submissionBytes: canonicalCaptureSubmission(artifact),
         })
+        if (outcome === 'duplicate_conflict') {
+          throw captureAdapterError(
+            'duplicate_conflict',
+            'a capture identifier was already stored with different submission bytes',
+          )
+        }
       }
       cursor = result.nextCursor
       if (cursor === null) {
@@ -555,14 +564,10 @@ export class CaptureExplorer {
   }
 }
 
-function decodeArtifactText(normalized: NormalizedCaptureArtifact): string {
-  const sensitive = normalized.sensitive
-  if (sensitive === null) {
-    throw conflict('The capture artifact content is not available.')
-  }
+function decodeArtifactText(artifact: CaptureRawArtifact): string {
   let text: string
   try {
-    text = new TextDecoder('utf-8', { fatal: true }).decode(sensitive.bytes)
+    text = new TextDecoder('utf-8', { fatal: true }).decode(artifact.bytes)
   } catch {
     throw conflict(
       'The capture artifact is not valid UTF-8 text, so it cannot be validated as a credential artifact.',
@@ -574,9 +579,11 @@ function decodeArtifactText(normalized: NormalizedCaptureArtifact): string {
   return text
 }
 
-function artifactSummaryFor(normalized: NormalizedCaptureArtifact): CaptureArtifactSummary {
-  const envelope = normalized.envelope
-  if (normalized.sensitive === null) {
+function artifactSummaryFor(
+  envelope: CaptureArtifact,
+  artifact: CaptureArtifactMetadata | null,
+): CaptureArtifactSummary {
+  if (artifact === null) {
     return {
       availability: 'external',
       mediaType: envelope.artifactRef?.mediaType ?? '',
@@ -586,19 +593,25 @@ function artifactSummaryFor(normalized: NormalizedCaptureArtifact): CaptureArtif
   }
   return {
     availability: 'inline',
-    mediaType: normalized.sensitive.mediaType,
-    byteLength: normalized.sensitive.byteLength,
+    mediaType: artifact.mediaType,
+    byteLength: artifact.byteLength,
     uri: null,
   }
 }
 
 function projectionFor(
-  normalized: NormalizedCaptureArtifact,
+  envelope: CaptureArtifact,
+  artifact: CaptureRawArtifact | null,
   policy: CaptureRedactionPolicy,
   limits: CaptureLimits,
 ): CaptureArtifactProjection | null {
-  if (normalized.sensitive === null) {
+  if (artifact === null) {
     return null
+  }
+  const normalized: NormalizedCaptureArtifact = {
+    envelope,
+    sensitive: artifact,
+    diagnostics: [],
   }
   const redacted = redactNormalizedCaptureArtifact(normalized, policy, limits)
   const sensitive = redacted.sensitive
@@ -688,8 +701,10 @@ function evidenceGapsFor(
   return codes.map((code) => ({ code, message: EVIDENCE_GAP_MESSAGES[code] }))
 }
 
-function timelineFor(record: CaptureExplorerRecord): readonly CaptureTimelineEvent[] {
-  const envelope = record.normalized.envelope
+function timelineFor(
+  envelope: CaptureArtifact,
+  correlation: CaptureCorrelation | null,
+): readonly CaptureTimelineEvent[] {
   const events: CaptureTimelineEvent[] = [
     {
       kind: 'captured',
@@ -707,20 +722,18 @@ function timelineFor(record: CaptureExplorerRecord): readonly CaptureTimelineEve
       detail: 'AttestBook receipt timestamp; the source asserted capturedAt itself.',
     },
   ]
-  if (record.binding !== null) {
+  if (correlation !== null) {
     events.push({
       kind: 'bound',
-      at: record.binding.boundAt,
+      at: correlation.rulebook.boundAt,
       label: 'Bound to pinned rulebook version',
-      detail: `${record.binding.rulebookName} ${record.binding.version} · ${record.binding.attestationType} · SHA-256 ${record.binding.contentDigest}`,
+      detail: `${correlation.rulebook.rulebookName} ${correlation.rulebook.version} · ${correlation.rulebook.attestationType} · SHA-256 ${correlation.rulebook.contentDigest}`,
     })
-  }
-  if (record.validation !== null) {
     events.push({
       kind: 'validated',
-      at: record.validation.validatedAt,
+      at: correlation.validation.validatedAt,
       label: 'Validation recorded',
-      detail: `${record.validation.overallStatus} · ${record.validation.violations.length} violation(s) · ${record.validation.limitations.length} limitation(s)`,
+      detail: `${correlation.validation.overallStatus} · ${correlation.validation.violations.length} violation(s) · ${correlation.validation.limitations.length} limitation(s)`,
     })
   }
   return events
@@ -735,6 +748,8 @@ function timelineFor(record: CaptureExplorerRecord): readonly CaptureTimelineEve
 
 export interface MockCaptureExplorerOptions {
   readonly validation: CredentialValidationService
+  /** Evidence store; defaults to an in-memory store for isolated tests. */
+  readonly store?: CaptureStore
   /** Extra capture-issuer envelopes appended to the deterministic fixtures. */
   readonly additionalIssuerEnvelopes?: readonly unknown[]
   /** Extra capture-verifier envelopes appended to the deterministic fixtures. */
@@ -794,6 +809,7 @@ export function createMockCaptureExplorer(options: MockCaptureExplorerOptions): 
       ),
     ],
     validation: options.validation,
+    ...(options.store === undefined ? {} : { store: options.store }),
     ...(options.now === undefined ? {} : { now: options.now }),
     ...(options.limits === undefined ? {} : { limits: options.limits }),
   })

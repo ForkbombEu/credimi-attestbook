@@ -105,6 +105,23 @@ export {
   type MockCaptureSourceOptions,
 } from './adapters'
 
+// Durable capture evidence and correlation storage (FR-015/FR-019, issue #156).
+// The server wires the SQLite implementation; the explorer defaults to the
+// in-memory implementation only when no database is available.
+export {
+  MemoryCaptureStore,
+  SqliteCaptureStore,
+  canonicalCaptureSubmission,
+  type CaptureArtifactMetadata,
+  type CaptureCorrelation,
+  type CaptureStore,
+  type CaptureStoreEntry,
+  type CaptureStoreInsert,
+  type CaptureStoreInsertResult,
+  type CaptureStoreOptions,
+  type CaptureStorePage,
+} from './store'
+
 // Capture explorer read model and pinned-rulebook correlation (FR-019,
 // UI-006, issue #48). Reads are mock-backed: the server builds the explorer
 // from deterministic mock sources and no live capture endpoint is contacted.

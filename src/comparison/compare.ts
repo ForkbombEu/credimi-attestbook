@@ -58,7 +58,7 @@ export const HEADLESS_WALLET_COMPARISON_LIMITATIONS: readonly string[] = Object.
   'The AttestBook side is structural and schema validation only. A structural PASS is not a cryptographic, issuer-trust, protocol or interoperability conclusion.',
   'The report places the two evidence sources side by side; it is not an interoperability verdict and never upgrades an unexecuted dimension.',
   'An external observation is labelled as external and never changes an AttestBook validation status.',
-  'The correlated capture evidence is mock-backed in this build and held in memory for the lifetime of the server process; the comparison is computed on demand and is not persisted.',
+  'The correlated capture evidence is mock-backed in this build; its evidence and correlation are persisted by the capture store, while the comparison itself is computed on demand and is not persisted.',
 ])
 
 export interface BuildHeadlessWalletComparisonInput {

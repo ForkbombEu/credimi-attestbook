@@ -2,7 +2,7 @@ import { existsSync } from 'node:fs'
 
 import { createApp } from './app'
 import { AdminAuth, loadAdminLoginConfig } from './auth'
-import { createMockCaptureExplorer } from './capture'
+import { createMockCaptureExplorer, SqliteCaptureStore } from './capture'
 import { loadConfig } from './config'
 import { openDatabase } from './db/database'
 import { applyMigrations } from './db/migrations'
@@ -90,7 +90,13 @@ const issuerFixtures = new IssuerFixtureGenerator({
 })
 // UI-006 is deliberately mock-backed: the explorer is seeded from the
 // deterministic local mock source and labels every capture `transport: mock`.
-const captures = createMockCaptureExplorer({ validation })
+// Evidence and recorded correlations live in SQLite, so a binding survives a
+// restart; startup seeding is idempotent by capture id.
+const captures = createMockCaptureExplorer({
+  validation,
+  store: new SqliteCaptureStore(database),
+})
+await captures.initialize()
 if (config.publicBaseUrl === null) {
   console.warn(
     'PUBLIC_BASE_URL is not set: hosted credential schema URLs and their metadata are unavailable',

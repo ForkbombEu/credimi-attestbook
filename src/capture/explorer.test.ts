@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test'
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
+import { openDatabase } from '../db/database'
+import { applyMigrations } from '../db/migrations'
 import { isRegistryError } from '../registry/errors'
 import { VALIDATION_DIMENSIONS } from '../validation'
 import type { CredentialValidationResult, CredentialValidationService } from '../validation'
@@ -10,6 +15,7 @@ import {
   createMockCaptureExplorer,
   parseCaptureCorrelationInput,
 } from './explorer'
+import { SqliteCaptureStore } from './store'
 
 const NOW = new Date('2026-11-09T10:00:00.000Z')
 
@@ -102,7 +108,7 @@ describe('capture explorer list', () => {
     expect(page.captures[0]?.artifactType).toBe('error-response')
   })
 
-  test('pages the in-memory capture list without changing the total', async () => {
+  test('pages the capture list without changing the total', async () => {
     const explorer = explorerWith(fakeValidation())
     const page = await explorer.list({ limit: 3, offset: 2 })
 
@@ -220,7 +226,7 @@ describe('capture explorer correlation', () => {
     expect(times).toEqual([...times].sort((left, right) => left - right))
   })
 
-  test('keeps evidence and correlations instance-local with no shared store', async () => {
+  test('keeps separate explorers isolated when each has its own store', async () => {
     const validation = fakeValidation()
     const first = explorerWith(validation)
     await first.correlate('mock-capture-capture-issuer-3', {
@@ -231,18 +237,13 @@ describe('capture explorer correlation', () => {
     })
     expect((await first.get('mock-capture-capture-issuer-3'))?.validation).not.toBeNull()
 
-    // The explorer is constructed without a database or filesystem dependency,
-    // so a second instance has no shared store from which to reload the first
-    // instance's evidence or correlation. This asserts instance isolation; the
-    // no-persistence claim itself rests on the dependency-free constructor.
+    // A distinct explorer gets its own in-memory store. Sharing evidence is the
+    // job of an explicitly shared CaptureStore, not of the explorer class.
     const second = explorerWith(validation)
     const detail = await second.get('mock-capture-capture-issuer-3')
     expect(detail?.validation).toBeNull()
     expect(detail?.validationResult).toBeNull()
     expect(detail?.rulebook).toBeNull()
-    expect(detail?.limitations.join(' ')).toContain(
-      'held in memory for the lifetime of this server process',
-    )
   })
 
   test('refuses to validate an external artifact reference', async () => {
@@ -433,6 +434,67 @@ describe('capture correlation request parsing', () => {
       if (isRegistryError(error)) {
         expect(error.code).toBe('invalid_input')
       }
+    }
+  })
+})
+
+describe('capture explorer restart persistence', () => {
+  test('a second explorer over the same database file reloads the recorded binding and validation', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'attestbook-capture-explorer-'))
+    const databasePath = join(directory, 'attestbook.sqlite')
+    try {
+      const firstDatabase = openDatabase(databasePath)
+      try {
+        applyMigrations(firstDatabase)
+        const first = createMockCaptureExplorer({
+          validation: fakeValidation().service,
+          store: new SqliteCaptureStore(firstDatabase),
+          now: () => NOW,
+        })
+        expect((await first.list()).total).toBe(7)
+        await first.correlate('mock-capture-capture-issuer-3', {
+          rulebookId: 'rulebook-1',
+          rulebookVersion: '1.0',
+          attestationType: 'Person Identification Data',
+          rulebookDigest: 'a'.repeat(64),
+        })
+      } finally {
+        firstDatabase.close()
+      }
+
+      // A later process has a different receipt clock; seeding must recognise
+      // the same source evidence as a duplicate instead of conflicting, and the
+      // recorded correlation must still be there.
+      const secondDatabase = openDatabase(databasePath)
+      try {
+        const second = createMockCaptureExplorer({
+          validation: fakeValidation().service,
+          store: new SqliteCaptureStore(secondDatabase),
+          now: () => new Date(NOW.getTime() + 60 * 60 * 1_000),
+        })
+        const page = await second.list()
+        expect(page.total).toBe(7)
+        const detail = await second.get('mock-capture-capture-issuer-3')
+        expect(detail?.rulebook).toEqual({
+          rulebookId: 'rulebook-1',
+          rulebookName: 'PID Rulebook',
+          version: '1.0',
+          contentDigest: 'a'.repeat(64),
+          digestVerified: true,
+          specVersion: 'ts11@1.0.1',
+          rulebookStatus: 'published',
+          attestationType: 'Person Identification Data',
+          boundAt: NOW.toISOString(),
+        })
+        expect(detail?.validationResult).toEqual(PINNED_RESULT)
+        expect(detail?.evidenceGaps.map((gap) => gap.code)).not.toContain('no_rulebook_binding')
+        expect(detail?.evidenceGaps.map((gap) => gap.code)).not.toContain('validation_not_run')
+        expect(detail?.artifactProjection).not.toBeNull()
+      } finally {
+        secondDatabase.close()
+      }
+    } finally {
+      rmSync(directory, { recursive: true, force: true })
     }
   })
 })

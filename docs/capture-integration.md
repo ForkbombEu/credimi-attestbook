@@ -190,10 +190,13 @@ is implemented by [issue #47](https://github.com/ForkbombEu/credimi-attestbook/i
 ## 9. What is and is not claimed
 
 - **Implemented:** the envelope, bounded normalization, redaction, push/pull adapter
-  contracts and the deterministic offline mock source (`src/capture/`, `src/capture/adapters/`).
-- **Designed but not implemented:** correlation with validation results
-  ([#48](https://github.com/ForkbombEu/credimi-attestbook/issues/48)), persistence and
-  external artifact storage.
+  contracts, the deterministic offline mock source (`src/capture/`, `src/capture/adapters/`)
+  and durable capture evidence plus pinned-rulebook correlations in SQLite
+  (`src/capture/store.ts`, `migrations/0012_capture_evidence.sql`). Metadata and the
+  segregated inline artifact live in separate tables; seeding is idempotent by `captureId`
+  over the accepted submission digest, and a restart keeps a recorded correlation.
+- **Designed but not implemented:** ingestion of a real capture submission over HTTP, and
+  external artifact storage/fetching (`artifactRef`).
 - **Not implemented, not claimed operational:** any real `capture-issuer` /
   `capture-verifier` integration, live capture transport, or capture-backed validation. These
   remain Phase 4 work (spec §11.4) gated on the components' actual contracts.
