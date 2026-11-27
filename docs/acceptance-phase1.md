@@ -140,8 +140,10 @@ These are deliberate Phase 1 boundaries or residual gaps, not silent successes:
   issuer trust is `NOT_TESTED` because no trust anchors are applied; protocol conformance and
   interoperability are `NOT_APPLICABLE` to a single credential artifact. A structural `PASS`
   never produces an overall `PASS` (FR-010, FR-012, D-8, D-17).
-- **Only `dc+sd-jwt` is structurally parsed.** `mso_mdoc`, `jwt_vc_json`, `jwt_vc_json-ld`
-  and `ldp_vc` are recognised and reported `NOT_TESTED`/`INCONCLUSIVE`; no mdoc parser exists.
+- **`dc+sd-jwt` and OpenID4VCI `mso_mdoc` IssuerSigned artifacts are structurally parsed.**
+  mdoc schema mapping, MSO/IssuerAuth and device-authentication cryptography, status, trust and
+  presentation validation remain `NOT_TESTED`; `jwt_vc_json`, `jwt_vc_json-ld` and `ldp_vc`
+  are recognised but unparsed.
 - **Schema documents are caller-supplied.** The validation API does not fetch remote schemas,
   and import retains but does not fetch, resolve or SRI-verify schema references. JSON Schema
   keywords that cannot be bounded (`format`, `pattern`, `patternProperties`, `uniqueItems`,

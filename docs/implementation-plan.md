@@ -118,8 +118,9 @@ the two without a current migrated issue are marked explicitly.
   executable positive and negative outcomes, and no conformance claim
   ([`docs/etsi-interoperability.md`](etsi-interoperability.md), `src/standards/interoperability.test.ts`,
   spec §3 and Phase 6).
-- mdoc/mDL validation. Phase 1 recognises the format from metadata but reports it
-  `NOT_TESTED`; no fake parser and no implied support (FR-011).
+- mdoc/mDL schema, cryptographic, trust, protocol and interoperability validation. Phase 1
+  structurally parses base64url OpenID4VCI `mso_mdoc` IssuerSigned artifacts with `@owf/mdoc`,
+  but reports schema mapping and every unexecuted verification dimension as `NOT_TESTED` (FR-011).
 - Real cryptographic, trust, protocol or interoperability validation of credentials.
   Phase 1 reports those dimensions `NOT_TESTED` or `INCONCLUSIVE`; it never derives PASS
   from structural checks (FR-010, FR-012, AC-16, AC-17).

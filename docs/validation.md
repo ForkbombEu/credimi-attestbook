@@ -157,7 +157,7 @@ Content-Type: application/json
   "rulebookId": "9f1c1f6e-3a8e-4e7d-9d2c-0f3b5a7c1e11",
   "rulebookVersion": "1.0",
   "attestationType": "PID",
-  "credential": "<compact SD-JWT VC or { \"format\": \"mso_mdoc\", \"value\": \"...\" }>",
+  "credential": "<compact SD-JWT VC or { \"format\": \"mso_mdoc\", \"value\": \"<base64url IssuerSigned>\" }>",
   "schemaDocuments": [
     {
       "uri": "https://example.org/vct/pid",
@@ -210,17 +210,18 @@ here, a structurally valid credential returns `overallStatus: "NOT_TESTED"` with
 valid" or interoperable, and an overall `PASS` is not reachable in this slice (FR-012,
 AC-16/AC-17).
 
-## 6. Unsupported formats
+## 6. Credential-format support
 
 The issuer-signed JWT must carry a `typ` header of `dc+sd-jwt` or `vc+sd-jwt`.
-`dc+sd-jwt` is the only format with a structural parser. `mso_mdoc`, `jwt_vc_json`,
-`jwt_vc_json-ld` and `ldp_vc` are recognised from an explicit `format` hint or from the TS11
-baseline (`src/standards/profiles.ts`) and reported as recognised. Their parsing and schema
-dimensions are `NOT_TESTED`; the attestation-constraints dimension is `INCONCLUSIVE` because
-the rulebook-level checks ran but the credential-dependent key-binding check did not. A format
-backed only by the caller hint and not confirmed by parsing is `INCONCLUSIVE`, not `PASS`. A
-rulebook that does not list the credential format fails the attestation-constraints dimension.
-No generic JSON validator is presented as mdoc or W3C VC support (FR-011).
+`dc+sd-jwt` and OpenID4VCI `mso_mdoc` IssuerSigned artifacts are structurally parsed.
+The mdoc parser validates the CBOR data model and reports its document type and disclosed
+namespace/element counts without exposing values. mdoc schema-to-rulebook mapping remains
+`NOT_TESTED`; so do MSO/IssuerAuth and device-authentication cryptography, status and trust
+checks. `jwt_vc_json`, `jwt_vc_json-ld` and `ldp_vc` remain recognised but unparsed.
+
+A format backed only by a caller hint and not confirmed by parsing is `INCONCLUSIVE`, not
+`PASS`. A rulebook that does not list the credential format fails the attestation-constraints
+dimension. No generic JSON validator is presented as mdoc or W3C VC support (FR-011).
 
 ## 7. Privacy, logging and limits
 

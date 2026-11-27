@@ -866,7 +866,7 @@ export async function runAcceptance(
     // --------------------------------- negative: an unsupported credential format
     const unsupportedFormatResponse = await validate({
       ...validBody,
-      credential: { format: 'mso_mdoc', value: credential },
+      credential: { format: 'jwt_vc_json', value: credential },
     })
     expectStatus(
       checker,

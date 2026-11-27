@@ -22,6 +22,7 @@ import {
   type HostedSchemaOptions,
   type HostedSchemaResolution,
 } from './hosted-schema'
+import { parseMdoc, type ParsedMdoc } from './mdoc'
 import { parseValidateCredentialInput } from './request'
 import type { SchemaValidationOutcome } from './schema'
 import { validateSchemaDocuments, type SchemaSandboxLimits } from './schema-sandbox'
@@ -75,6 +76,12 @@ export interface CredentialValidatorOptions {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+type ParsedCredential = ParsedSdJwtVc | ParsedMdoc
+
+function isParsedMdoc(parsed: ParsedCredential): parsed is ParsedMdoc {
+  return 'docType' in parsed
 }
 
 /**
@@ -365,7 +372,7 @@ export class CredentialValidator {
         ),
       )
     }
-    let parsed: ParsedSdJwtVc | undefined
+    let parsed: ParsedCredential | undefined
     let parsingDimension: ValidationDimension
     if (!recognition.recognized) {
       parsingDimension = notExecutedDimension(
@@ -382,33 +389,59 @@ export class CredentialValidator {
         { format: recognition.format, parser_available: false },
       )
     } else {
-      const outcome = await parseSdJwtVc(artifact.value)
+      const outcome =
+        recognition.format === 'mso_mdoc'
+          ? parseMdoc(artifact.value)
+          : await parseSdJwtVc(artifact.value)
       if (outcome.ok) {
         parsed = outcome.value
-        parsingDimension = executedDimension(
-          'credential_parsing',
-          'PASS',
-          [
-            finding(
-              'credential_parsing',
-              'credential_parsed',
-              `The credential was parsed as SD-JWT VC with ${outcome.value.disclosureCount} disclosure(s).`,
-              'info',
-              '/credential',
-            ),
-          ],
-          'The credential parsed as SD-JWT VC and its disclosure structure and derived-type aliases were verified.',
-          {
-            format: 'dc+sd-jwt',
-            disclosure_count: outcome.value.disclosureCount,
-            max_disclosures: MAX_DISCLOSURES,
-            aka_vcts_present: outcome.value.akaVcts !== undefined,
-            aka_vcts_count: outcome.value.akaVcts?.length ?? 0,
-            // The compact artifact carries both the issuer-signed payload and the
-            // disclosures, so the non-disclosability rule is observable here.
-            aka_vcts_non_disclosability_observable: true,
-          },
-        )
+        if (isParsedMdoc(outcome.value)) {
+          parsingDimension = executedDimension(
+            'credential_parsing',
+            'PASS',
+            [
+              finding(
+                'credential_parsing',
+                'credential_parsed',
+                `The credential was parsed as an mso_mdoc IssuerSigned artifact with ${outcome.value.elementCount} disclosed element(s).`,
+                'info',
+                '/credential',
+              ),
+            ],
+            'The OpenID4VCI mso_mdoc IssuerSigned artifact parsed as a structurally valid CBOR credential.',
+            {
+              format: 'mso_mdoc',
+              doc_type: outcome.value.docType,
+              namespace_count: outcome.value.namespaceCount,
+              element_count: outcome.value.elementCount,
+            },
+          )
+        } else {
+          parsingDimension = executedDimension(
+            'credential_parsing',
+            'PASS',
+            [
+              finding(
+                'credential_parsing',
+                'credential_parsed',
+                `The credential was parsed as SD-JWT VC with ${outcome.value.disclosureCount} disclosure(s).`,
+                'info',
+                '/credential',
+              ),
+            ],
+            'The credential parsed as SD-JWT VC and its disclosure structure and derived-type aliases were verified.',
+            {
+              format: 'dc+sd-jwt',
+              disclosure_count: outcome.value.disclosureCount,
+              max_disclosures: MAX_DISCLOSURES,
+              aka_vcts_present: outcome.value.akaVcts !== undefined,
+              aka_vcts_count: outcome.value.akaVcts?.length ?? 0,
+              // The compact artifact carries both the issuer-signed payload and the
+              // disclosures, so the non-disclosability rule is observable here.
+              aka_vcts_non_disclosability_observable: true,
+            },
+          )
+        }
       } else if (outcome.kind === 'unsupported') {
         parsingDimension = createDimension({
           id: 'credential_parsing',
@@ -432,7 +465,10 @@ export class CredentialValidator {
           findings: outcome.findings,
           evidence: {
             scope: dimensionDefinition('credential_parsing').scope,
-            reason: 'The credential could not be parsed as a structurally valid SD-JWT VC.',
+            reason:
+              recognition.format === 'mso_mdoc'
+                ? 'The credential could not be parsed as a structurally valid mso_mdoc IssuerSigned artifact.'
+                : 'The credential could not be parsed as a structurally valid SD-JWT VC.',
             details: { format: recognition.format, structurally_valid: false },
           },
         })
@@ -482,6 +518,14 @@ export class CredentialValidator {
         'credential_not_parsed',
         'Schema validation was not executed because the credential was not parsed.',
         { references: matchingReferences.length },
+      )
+      schemaReferences = unparsedSchemaReferences(matchingReferences)
+    } else if (isParsedMdoc(parsed)) {
+      schemaDimension = notExecutedDimension(
+        'schema_validation',
+        'mdoc_schema_mapping_not_implemented',
+        'mso_mdoc namespaces and data elements are structurally parsed, but no rulebook schema-mapping evaluator is implemented.',
+        { references: matchingReferences.length, format: 'mso_mdoc' },
       )
       schemaReferences = unparsedSchemaReferences(matchingReferences)
     } else if (matchingReferences.length === 0) {
@@ -566,7 +610,11 @@ export class CredentialValidator {
           ),
         )
       }
-      if (parsed !== undefined && attestation.bindingType === 'key') {
+      if (
+        parsed !== undefined &&
+        !isParsedMdoc(parsed) &&
+        attestation.bindingType === 'key'
+      ) {
         const cnf = parsed.packedPayload.cnf
         if (cnf === undefined) {
           findings.push(
@@ -642,7 +690,57 @@ export class CredentialValidator {
     // FR-010 order: parsing, format recognition, crypto, schema, attestation,
     // trust, protocol, interoperability.
     const cryptoReason =
-      'Issuer JWS signatures, key-binding (KB-JWT) proofs and status-list tokens were not verified; this endpoint performs structural validation only.'
+      recognition.format === 'mso_mdoc'
+        ? 'The MSO IssuerAuth signature, issuer-signed-item digests, device authentication and credential status were not verified; this endpoint performs structural validation only.'
+        : 'Issuer JWS signatures, key-binding (KB-JWT) proofs and status-list tokens were not verified; this endpoint performs structural validation only.'
+    const cryptoFindings =
+      recognition.format === 'mso_mdoc'
+        ? [
+            finding(
+              'cryptographic_verification',
+              'issuer_auth_not_verified',
+              'The mso_mdoc IssuerAuth signature and MSO were not cryptographically verified.',
+              'warning',
+              '/issuerAuth',
+            ),
+            finding(
+              'cryptographic_verification',
+              'device_auth_not_verified',
+              'mso_mdoc device authentication was not verified because no presentation session transcript was supplied.',
+              'warning',
+              '/deviceAuth',
+            ),
+            finding(
+              'cryptographic_verification',
+              'status_not_checked',
+              'The mso_mdoc credential status was not checked against a status or identifier list.',
+              'warning',
+              '/status',
+            ),
+          ]
+        : [
+            finding(
+              'cryptographic_verification',
+              'signature_not_verified',
+              'The issuer JWS signature was not verified; structural validity is not cryptographic validity.',
+              'warning',
+              '/credential',
+            ),
+            finding(
+              'cryptographic_verification',
+              'key_binding_proof_not_verified',
+              'Any key-binding (KB-JWT) proof was not verified, and possession of the bound key was not demonstrated.',
+              'warning',
+              '/cnf',
+            ),
+            finding(
+              'cryptographic_verification',
+              'status_list_not_checked',
+              'The credential status was not checked against a status-list token or revocation policy.',
+              'warning',
+              '/status',
+            ),
+          ]
     const finalDimensions: readonly ValidationDimension[] = [
       parsingDimension,
       formatDimension,
@@ -651,38 +749,25 @@ export class CredentialValidator {
         status: 'NOT_TESTED',
         applicable: true,
         executed: false,
-        findings: [
-          finding(
-            'cryptographic_verification',
-            'signature_not_verified',
-            'The issuer JWS signature was not verified; structural validity is not cryptographic validity.',
-            'warning',
-            '/credential',
-          ),
-          finding(
-            'cryptographic_verification',
-            'key_binding_proof_not_verified',
-            'Any key-binding (KB-JWT) proof was not verified, and possession of the bound key was not demonstrated.',
-            'warning',
-            '/cnf',
-          ),
-          finding(
-            'cryptographic_verification',
-            'status_list_not_checked',
-            'The credential status was not checked against a status-list token or revocation policy.',
-            'warning',
-            '/status',
-          ),
-        ],
+        findings: cryptoFindings,
         evidence: {
           scope: dimensionDefinition('cryptographic_verification').scope,
           reason: cryptoReason,
-          details: {
-            executed: false,
-            issuer_jws_signature_verified: false,
-            key_binding_proof_verified: false,
-            status_list_token_verified: false,
-          },
+          details:
+            recognition.format === 'mso_mdoc'
+              ? {
+                  executed: false,
+                  issuer_auth_verified: false,
+                  issuer_signed_item_digests_verified: false,
+                  device_authentication_verified: false,
+                  status_checked: false,
+                }
+              : {
+                  executed: false,
+                  issuer_jws_signature_verified: false,
+                  key_binding_proof_verified: false,
+                  status_list_token_verified: false,
+                },
         },
       }),
       schemaDimension,
@@ -726,8 +811,8 @@ export class CredentialValidator {
       attestation: attestationEvidence(attestation),
       credential: {
         format: recognition.format,
-        vct: parsed?.vct ?? null,
-        disclosureCount: parsed?.disclosureCount ?? 0,
+        vct: parsed !== undefined && !isParsedMdoc(parsed) ? parsed.vct : null,
+        disclosureCount: parsed !== undefined && !isParsedMdoc(parsed) ? parsed.disclosureCount : 0,
         keyBindingPresent: parsed?.keyBindingPresent ?? false,
       },
       schemaReferences,

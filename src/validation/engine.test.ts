@@ -7,8 +7,10 @@ import { CredentialValidator } from './engine'
 import {
   defaultCredentialClaims,
   issueTestCredential,
+  issueTestMdoc,
   PID_JSON_SCHEMA_TEXT,
   seedPublishedRulebook,
+  TEST_MDOC_DOCTYPE,
   type SeedRulebookOptions,
   type SeededRulebook,
 } from './test-support'
@@ -337,7 +339,7 @@ describe('CredentialValidator with a pinned rulebook version', () => {
     )
   })
 
-  test('reports an unsupported format explicitly instead of mocking a parser', async () => {
+  test('fails a malformed mso_mdoc artifact instead of claiming it is parsed', async () => {
     const { seeded, validator } = setup({
       supportedFormats: ['mso_mdoc'],
       schemaFormatIdentifier: 'mso_mdoc',
@@ -348,16 +350,14 @@ describe('CredentialValidator with a pinned rulebook version', () => {
       request(seeded, { format: 'mso_mdoc', value: 'o2dnb2N0eXBl' }, []),
     )
 
-    expect(result.overallStatus).toBe('INCONCLUSIVE')
+    expect(result.overallStatus).toBe('FAIL')
     expect(dimension(result, 'format_recognition').status).toBe('INCONCLUSIVE')
-    expect(dimension(result, 'credential_parsing').status).toBe('NOT_TESTED')
+    expect(dimension(result, 'credential_parsing').status).toBe('FAIL')
     expect(dimension(result, 'schema_validation').status).toBe('NOT_TESTED')
-    // Rulebook-level checks ran, but the credential-dependent key-binding check
-    // did not, so the dimension is executed and inconclusive, not PASS.
     expect(dimension(result, 'attestation_constraints').status).toBe('INCONCLUSIVE')
     expect(dimension(result, 'attestation_constraints').executed).toBe(true)
     expect(dimension(result, 'cryptographic_verification').status).toBe('NOT_TESTED')
-    expect(result.violations.map((entry) => entry.code)).toContain('format_parser_unavailable')
+    expect(result.violations.map((entry) => entry.code)).toContain('invalid_mdoc_issuer_signed')
     expect(result.limitations.map((entry) => entry.code)).toContain(
       'credential_dependent_checks_not_run',
     )
@@ -397,6 +397,41 @@ describe('CredentialValidator with a pinned rulebook version', () => {
         ),
       'invalid_input',
     )
+  })
+
+  test('parses an mso_mdoc IssuerSigned artifact without conflating parsing and cryptography', async () => {
+    const { seeded, validator } = setup({
+      supportedFormats: ['mso_mdoc'],
+      schemaFormatIdentifier: 'mso_mdoc',
+      schemaUri: 'https://example.org/schemas/mdl.json',
+      schemaContent: '{}',
+      bindingType: 'key',
+    })
+    const result = await validator.validate(
+      request(seeded, { format: 'mso_mdoc', value: issueTestMdoc() }),
+    )
+
+    expect(result.credential).toEqual({
+      format: 'mso_mdoc',
+      vct: null,
+      disclosureCount: 0,
+      keyBindingPresent: true,
+    })
+    expect(dimension(result, 'credential_parsing').status).toBe('PASS')
+    expect(dimension(result, 'credential_parsing').evidence.details).toMatchObject({
+      doc_type: TEST_MDOC_DOCTYPE,
+      namespace_count: 1,
+      element_count: 1,
+    })
+    expect(dimension(result, 'format_recognition').status).toBe('PASS')
+    expect(dimension(result, 'schema_validation').status).toBe('NOT_TESTED')
+    expect(dimension(result, 'schema_validation').findings[0]?.code).toBe(
+      'mdoc_schema_mapping_not_implemented',
+    )
+    expect(dimension(result, 'attestation_constraints').status).toBe('PASS')
+    expect(dimension(result, 'cryptographic_verification').status).toBe('NOT_TESTED')
+    expect(result.violations.map((entry) => entry.code)).toContain('issuer_auth_not_verified')
+    expect(result.overallStatus).toBe('NOT_TESTED')
   })
 
   test('rejects an unknown rulebook, version or attestation type', async () => {

@@ -90,6 +90,7 @@ Explicit non-claims:
 | OWF repository | `main` at `23f227b`, 2026-11-02 | package source unchanged from `039145c` to `23f227b` for this package |
 | OWF prerelease | `0.6.0-alpha-20261102161059`, 2026-11-02 | Not evaluated; depends on `@owf/*` `0.7.0-alpha` |
 | OWF dependencies | `@owf/crypto` 0.6.2, `@owf/identity-common` 0.6.2, `@sd-jwt/sd-jwt-vc` 0.24.1, `zod` 4.6.7 | `npm ls` against the installed 0.5.4 |
+| mdoc package | `@owf/mdoc` **0.9.1** | Pinned with the compatible `@owf/*` 0.6.2 family; parser integration in `src/validation/mdoc.ts` is covered by `src/validation/engine.test.ts` |
 
 Provenance notes:
 

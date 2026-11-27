@@ -1,15 +1,15 @@
 // Credential format recognition for the validation engine (issue #32).
 //
-// Only `dc+sd-jwt` has a structural parser in this slice. The other TS11
-// formats are recognised so the engine can report them explicitly instead of
-// pretending a generic JSON validator means mdoc or W3C VC support (FR-011).
+// SD-JWT VC and OpenID4VCI `mso_mdoc` issuance artifacts have structural
+// parsers. The other TS11 formats are recognised so the engine can report them
+// explicitly instead of pretending a generic JSON validator means support.
 
 import { TS11_FORMAT_VALUES } from '../standards/profiles'
 
 const BASE64URL_PATTERN = /^[A-Za-z0-9_-]+$/
 
 /** Formats with a real structural parser in this slice. */
-export const STRUCTURAL_PARSER_FORMATS = ['dc+sd-jwt'] as const
+export const STRUCTURAL_PARSER_FORMATS = ['dc+sd-jwt', 'mso_mdoc'] as const
 export type StructuralParserFormat = (typeof STRUCTURAL_PARSER_FORMATS)[number]
 
 export interface CredentialArtifact {
@@ -72,7 +72,7 @@ export function recognizeCredentialFormat(artifact: CredentialArtifact): FormatR
     return {
       format: artifact.format,
       recognized: known,
-      parserAvailable: known && artifact.format === 'dc+sd-jwt',
+      parserAvailable: (STRUCTURAL_PARSER_FORMATS as readonly string[]).includes(artifact.format),
       source: 'hint',
     }
   }
@@ -80,7 +80,8 @@ export function recognizeCredentialFormat(artifact: CredentialArtifact): FormatR
   return {
     format: detected,
     recognized: detected !== null,
-    parserAvailable: detected === 'dc+sd-jwt',
+    parserAvailable:
+      detected !== null && (STRUCTURAL_PARSER_FORMATS as readonly string[]).includes(detected),
     source: 'detected',
   }
 }

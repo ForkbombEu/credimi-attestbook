@@ -1,14 +1,24 @@
-// Shared fixtures for credential-validation tests (issue #32).
+// Shared fixtures for credential-validation tests.
 //
-// Credentials are real SD-JWT VC compact serializations produced by the pinned
-// `@sd-jwt/sd-jwt-vc` package signed with a throwaway ES256 test key. No real
-// key, certificate or personal data is used, and the registry is a real migrated
-// SQLite database from `../registry/test-support`.
+// Fixtures exercise the pinned SD-JWT VC and mdoc packages with synthetic,
+// non-sensitive data. The registry is a real migrated SQLite database from
+// `../registry/test-support`.
 
 import type { Database } from 'bun:sqlite'
 import { createHash } from 'node:crypto'
 
 import { ES256 } from '@owf/crypto'
+import {
+  DeviceKey,
+  DeviceKeyInfo,
+  IssuerAuth,
+  IssuerNamespaces,
+  IssuerSigned,
+  IssuerSignedItem,
+  MobileSecurityObject,
+  ValidityInfo,
+  ValueDigests,
+} from '@owf/mdoc'
 import { SDJwtVcInstance, type SdJwtVcPayload } from '@sd-jwt/sd-jwt-vc'
 
 import { provisionProvider } from '../registry/bootstrap'
@@ -124,6 +134,59 @@ export async function issueTestCredential(options: IssueCredentialOptions = {}):
     options.disclosureFrame ??
     (selectiveClaims.length === 0 ? undefined : { _sd: [...selectiveClaims] })
   return instance.issue(claims, frame as never)
+}
+
+export const TEST_MDOC_DOCTYPE = 'org.iso.18013.5.1.mDL'
+const TEST_MDOC_NAMESPACE = 'org.iso.18013.5.1'
+
+/**
+ * Builds a structurally valid mso_mdoc IssuerSigned issuance artifact with a
+ * deliberately unverifiable COSE signature. Parser tests must exercise the
+ * actual OWF model without implying cryptographic validity.
+ */
+export function issueTestMdoc(): string {
+  const mobileSecurityObject = MobileSecurityObject.create({
+    digestAlgorithm: 'SHA-256',
+    docType: TEST_MDOC_DOCTYPE,
+    valueDigests: ValueDigests.create({
+      digests: new Map([[TEST_MDOC_NAMESPACE, new Map([[1, new Uint8Array(32)]])]]),
+    }),
+    validityInfo: ValidityInfo.create({
+      signed: new Date('2026-01-01T00:00:00.000Z'),
+      validFrom: new Date('2026-01-01T00:00:00.000Z'),
+      validUntil: new Date('2030-01-01T00:00:00.000Z'),
+    }),
+    deviceKeyInfo: DeviceKeyInfo.create({
+      deviceKey: DeviceKey.fromJwk({
+        kty: 'EC',
+        crv: 'P-256',
+        x: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
+        y: 'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE',
+      }),
+    }),
+  })
+  const issuerAuth = IssuerAuth.create({
+    payload: mobileSecurityObject,
+    signature: new Uint8Array(64),
+  })
+  return IssuerSigned.create({
+    issuerAuth,
+    issuerNamespaces: IssuerNamespaces.create({
+      issuerNamespaces: new Map([
+        [
+          TEST_MDOC_NAMESPACE,
+          [
+            IssuerSignedItem.fromOptions({
+              digestId: 1,
+              random: new Uint8Array(32),
+              elementIdentifier: 'family_name',
+              elementValue: 'Test',
+            }),
+          ],
+        ],
+      ]),
+    }),
+  }).encodedForOid4Vci
 }
 
 export interface SeedRulebookOptions {
