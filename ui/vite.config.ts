@@ -1,10 +1,33 @@
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 import react from '@vitejs/plugin-react'
 import { defineConfig, type Plugin } from 'vitest/config'
 
+import { versionBrandStylesheet } from './src/brand-version'
+
 const uiRoot = fileURLToPath(new URL('.', import.meta.url))
+
+/**
+ * Adds the brand stylesheet's content hash to its link in the entry document.
+ * `/brand/style.css` keeps a stable path and an hour-long cache, so a deploy
+ * that changes it must change the URL too; the server ignores the query.
+ */
+function brandStylesheetVersion(): Plugin {
+  return {
+    name: 'attestbook-brand-stylesheet-version',
+    transformIndexHtml(html, context) {
+      if (!context.filename.endsWith('index.html')) {
+        return html
+      }
+      const stylesheet = readFileSync(resolve(uiRoot, 'public/brand/style.css'))
+      const version = createHash('sha256').update(stylesheet).digest('hex').slice(0, 12)
+      return versionBrandStylesheet(html, version)
+    },
+  }
+}
 
 /**
  * Development-only routing for the documentation entry document.
@@ -33,7 +56,7 @@ function docsRoute(): Plugin {
 // (issue #126).
 export default defineConfig({
   root: uiRoot,
-  plugins: [react(), docsRoute()],
+  plugins: [react(), docsRoute(), brandStylesheetVersion()],
   // Scalar's bundled Vue runtime reads these build-time feature flags. Vite's
   // React setup does not define them, so define them explicitly to avoid the
   // development warning and keep the production bundle predictable.

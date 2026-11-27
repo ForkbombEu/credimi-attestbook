@@ -4,6 +4,8 @@ import { join, resolve } from 'node:path'
 
 import { describe, expect, test } from 'vitest'
 
+import { versionBrandStylesheet } from './brand-version'
+
 /**
  * The Credimi brand directory is a runtime copy of the canonical template
  * assets (DESIGN.md §1). Pinning the logo and font bytes keeps an edit from
@@ -67,6 +69,20 @@ describe('Credimi brand assets', () => {
     expect(brandLink).toBeGreaterThan(-1)
     expect(html.indexOf('/src/main.tsx')).toBeGreaterThan(brandLink)
     expect(readFileSync(mainEntry, 'utf8')).toContain("import './styles.css'")
+  })
+
+  test('a build pins the brand stylesheet link to a content version', () => {
+    const html = readFileSync(indexHtml, 'utf8')
+    const versioned = versionBrandStylesheet(html, '0123456789ab')
+
+    // A changed stylesheet gets a new URL, so a deploy never pairs new markup
+    // with the previous rules from an hour-long browser or proxy cache.
+    expect(versioned).toContain('href="/brand/style.css?v=0123456789ab"')
+    expect(versioned).not.toContain('href="/brand/style.css"')
+    expect(versioned.indexOf('/src/main.tsx')).toBeGreaterThan(
+      versioned.indexOf('/brand/style.css?v='),
+    )
+    expect(() => versionBrandStylesheet('<html></html>', 'x')).toThrow(/brand stylesheet/)
   })
 
   test('loads no external web assets', () => {

@@ -686,7 +686,10 @@ template's 26/11/2026 layout and typography update (commit `fd5d283`, `DESIGN.md
 `ui/public/brand/` and served unchanged at `/brand/`:
 
 - `/brand/style.css` — the Credimi brand stylesheet, loaded by `ui/index.html`
-  before the application stylesheet;
+  before the application stylesheet. The `/brand/` files keep stable paths with a
+  one-hour cache, so the build appends the stylesheet's content hash
+  (`/brand/style.css?v=<sha256 prefix>`, `ui/vite.config.ts`): a deploy that changes it
+  changes the URL, and a browser or proxy never pairs new markup with stale brand rules;
 - `/brand/fonts/InterVariable.ttf` and
   `/brand/fonts/SourceCodeProVariable.ttf` — the self-hosted families with their
   SIL OFL 1.1 licences;

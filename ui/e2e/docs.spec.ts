@@ -68,7 +68,7 @@ test('leaves the Scalar reference styling untouched', async ({ page }) => {
   const result = await page.evaluate(() => {
     const sectionHeadings = Array.from(document.querySelectorAll('#docs-root .section-header h2'))
     return {
-      brandStylesheet: document.querySelector('link[href="/brand/style.css"]') !== null,
+      brandStylesheet: document.querySelector('link[href^="/brand/style.css"]') !== null,
       sectionCount: sectionHeadings.length,
       sectionAfter: sectionHeadings.map((heading) => getComputedStyle(heading, '::after').content),
     }
