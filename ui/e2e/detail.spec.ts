@@ -10,7 +10,7 @@ async function pidDetail(page: Page): Promise<string> {
 }
 
 test.describe('rulebook detail against the real API', () => {
-  test('opens from the catalog and shows metadata, attestations, references and provenance', async ({
+  test('opens from the catalog and summarizes the rulebook, attestations and references', async ({
     page,
   }) => {
     await page.goto('/')
@@ -19,10 +19,18 @@ test.describe('rulebook detail against the real API', () => {
     await expect(page).toHaveURL(/\/rulebooks\/[0-9a-f-]+$/)
     await expect(page.getByRole('heading', { name: 'PID Rulebook', level: 1 })).toBeVisible()
 
-    const metadata = page.getByRole('region', { name: 'Rulebook metadata' })
-    await expect(metadata).toContainText('Example Issuer')
-    await expect(metadata).toContainText('Draft')
-    await expect(metadata).toContainText('ts11@1.0.1')
+    // Status, provider, specification and source sit in the hero; there is no
+    // separate metadata or provenance section.
+    const hero = page.getByRole('region', { name: 'PID Rulebook', exact: true })
+    await expect(hero).toContainText('Example Issuer')
+    await expect(hero.locator('.badge--draft')).toHaveText('Draft')
+    await expect(hero).toContainText('ts11@1.0.1')
+    await expect(hero).toContainText('Last updated')
+    await expect(
+      hero.getByRole('link', { name: /https:\/\/issuer\.example\.org\/rulebooks\/pid/ }),
+    ).toHaveAttribute('href', 'https://issuer.example.org/rulebooks/pid')
+    await expect(page.getByRole('region', { name: 'Rulebook metadata' })).toHaveCount(0)
+    await expect(page.getByRole('region', { name: 'Source provenance' })).toHaveCount(0)
 
     const attestations = page.getByRole('region', { name: 'Attestation types' })
     await expect(attestations).toContainText('Person Identification Data')
@@ -30,18 +38,13 @@ test.describe('rulebook detail against the real API', () => {
     await expect(attestations).toContainText('cryptographic')
     await expect(attestations).toContainText('dc+sd-jwt')
 
-    const references = page.getByRole('region', { name: 'Schema references' })
+    // Schema references live with their attestation type; there is no repeated section.
+    await expect(page.getByRole('region', { name: 'Schema references' })).toHaveCount(0)
+    const references = attestations
     await expect(
       references.getByRole('link', { name: /https:\/\/issuer\.example\.org\/schemas\/pid/ }),
     ).toHaveAttribute('href', 'https://issuer.example.org/schemas/pid')
     await expect(references).toContainText('sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU=')
-
-    const provenance = page.getByRole('region', { name: 'Source provenance' })
-    await expect(
-      provenance.getByRole('link', { name: /https:\/\/issuer\.example\.org\/rulebooks\/pid/ }),
-    ).toHaveAttribute('href', 'https://issuer.example.org/rulebooks/pid')
-    await expect(provenance).toContainText('Registered')
-    await expect(provenance).toContainText('Last updated')
   })
 
   test('shows version history newest first with statuses, digests and exports', async ({
@@ -144,7 +147,7 @@ test.describe('rulebook detail against the real API', () => {
   }) => {
     await page.goto(await pidDetail(page))
 
-    const references = page.getByRole('region', { name: 'Schema references' })
+    const references = page.getByRole('region', { name: 'Attestation types' })
     await expect(references.getByText('Hosted by AttestBook').first()).toBeVisible()
     await expect(references.getByText('External URL').first()).toBeVisible()
     await expect(references.getByText('application/schema+json').first()).toBeVisible()

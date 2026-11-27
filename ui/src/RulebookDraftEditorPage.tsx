@@ -2,12 +2,13 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type FormEven
 
 import type { EditorApi } from './api'
 import { CatalogApiError, isAbortError, isSessionAuthError } from './api'
+import { Alert } from './components/Alert'
 import { SeverityBadge } from './components/Badges'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import { CreateVersionPanel } from './components/CreateVersionPanel'
 import { DraftLifecyclePanel } from './components/DraftLifecyclePanel'
 import { GuideLink } from './components/GuideLink'
-import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { SchemaReferenceControls } from './components/SchemaReferenceControls'
 import { SessionRenewalForm, SignInRequiredNotice } from './components/SessionPrompt'
 import {
@@ -411,11 +412,14 @@ export function RulebookDraftEditorPage({
       <div className="app-shell">
         <SkipLink href="#main-content">Skip to the draft editor</SkipLink>
         <SiteHeader section="Rulebook editor" onNavigate={onNavigate} />
-        <main className="page" id="main-content">
-          <LoadingState
-            title="Checking your administrator session…"
-            detail="The editor needs a signed-in administrator."
-          />
+        <main className="page-main" id="main-content">
+          <PageHero title="Rulebook editor" />
+          <div className="page">
+            <LoadingState
+              title="Checking your administrator session…"
+              detail="The editor needs a signed-in administrator."
+            />
+          </div>
         </main>
         <SiteFooter />
       </div>
@@ -427,7 +431,7 @@ export function RulebookDraftEditorPage({
       <div className="app-shell">
         <SkipLink href="#main-content">Skip to the draft editor</SkipLink>
         <SiteHeader section="Rulebook editor" onNavigate={onNavigate} />
-        <main className="page" id="main-content">
+        <main className="page-main" id="main-content">
           <SignInRequiredNotice
             title="Sign in to author rulebooks"
             message="Creating and editing a rulebook needs the configured administrator session. The catalogue, rulebook details and the validation playground stay available without signing in."
@@ -444,8 +448,11 @@ export function RulebookDraftEditorPage({
       <div className="app-shell">
         <SkipLink href="#main-content">Skip to the draft editor</SkipLink>
         <SiteHeader section="Rulebook editor" onNavigate={onNavigate} />
-        <main className="page" id="main-content">
-          <LoadingState title="Loading the draft…" detail="Reading the draft working copy." />
+        <main className="page-main" id="main-content">
+          <PageHero title="Rulebook editor" />
+          <div className="page">
+            <LoadingState title="Loading the draft…" detail="Reading the draft working copy." />
+          </div>
         </main>
         <SiteFooter />
       </div>
@@ -456,18 +463,19 @@ export function RulebookDraftEditorPage({
     return (
       <div className="app-shell">
         <SiteHeader section="Rulebook editor" onNavigate={onNavigate} />
-        <main className="page" id="main-content">
-          <div className="state-panel state-panel--empty" role="alert">
-            <h1 className="state-title">Rulebook not found</h1>
-            <p className="state-detail">No rulebook matches this address.</p>
-            <button
-              type="button"
-              className="button button--primary"
-              onClick={() => onNavigate(CATALOG_PATH)}
-            >
-              Back to the catalog
-            </button>
-          </div>
+        <main className="page-main" id="main-content">
+          <PageHero title="Rulebook not found" alert>
+            <p>No rulebook matches this address.</p>
+            <p className="hero-actions">
+              <button
+                type="button"
+                className="btn btn-outline btn-lg"
+                onClick={() => onNavigate(CATALOG_PATH)}
+              >
+                Back to the catalog
+              </button>
+            </p>
+          </PageHero>
         </main>
         <SiteFooter />
       </div>
@@ -478,12 +486,15 @@ export function RulebookDraftEditorPage({
     return (
       <div className="app-shell">
         <SiteHeader section="Rulebook editor" onNavigate={onNavigate} />
-        <main className="page" id="main-content">
-          <ErrorState
-            title="The draft could not be loaded."
-            message={state.message}
-            onRetry={reload}
-          />
+        <main className="page-main" id="main-content">
+          <PageHero title="Rulebook editor" />
+          <div className="page">
+            <ErrorState
+              title="The draft could not be loaded."
+              message={state.message}
+              onRetry={reload}
+            />
+          </div>
         </main>
         <SiteFooter />
       </div>
@@ -494,43 +505,38 @@ export function RulebookDraftEditorPage({
     <div className="app-shell">
       <SkipLink href="#draft-editor">Skip to the draft editor</SkipLink>
       <SiteHeader section="Rulebook editor" onNavigate={onNavigate} />
-      <main className="page" id="main-content">
-        <nav className="breadcrumb" aria-label="Breadcrumb">
-          <ol>
-            <li>
-              <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                Rulebook catalog
-              </AppLink>
-            </li>
-            {rulebookId === undefined ? null : (
-              <li>
-                <AppLink href={rulebookPath(rulebookId)} onNavigate={onNavigate}>
-                  {nameForHeading}
-                </AppLink>
-              </li>
-            )}
-            <li aria-current="page">
-              {creating ? 'New rulebook' : creatingNextVersion ? 'New version' : 'Edit draft'}
-            </li>
-          </ol>
-        </nav>
-
-        <div className="page-heading">
-          <p className="eyebrow">
-            {creating
-              ? 'Authoring'
-              : creatingNextVersion
-                ? 'Published rulebook'
-                : 'Draft working copy'}
-          </p>
-          <h1>
-            {creating
+      <main className="page-main" id="main-content">
+        <PageHero
+          title={
+            creating
               ? 'New rulebook draft'
               : creatingNextVersion
                 ? `Create a new version of ${nameForHeading}`
-                : `Edit ${nameForHeading} draft`}
-          </h1>
-          <p className="lede">
+                : `Edit ${nameForHeading} draft`
+          }
+          breadcrumb={
+            <nav className="breadcrumb" aria-label="Breadcrumb">
+              <ol>
+                <li>
+                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
+                    Rulebook catalog
+                  </AppLink>
+                </li>
+                {rulebookId === undefined ? null : (
+                  <li>
+                    <AppLink href={rulebookPath(rulebookId)} onNavigate={onNavigate}>
+                      {nameForHeading}
+                    </AppLink>
+                  </li>
+                )}
+                <li aria-current="page">
+                  {creating ? 'New rulebook' : creatingNextVersion ? 'New version' : 'Edit draft'}
+                </li>
+              </ol>
+            </nav>
+          }
+        >
+          <p>
             {creatingNextVersion
               ? 'This rulebook is published and immutable. Create a new draft version to reopen the working copy for editing; the published artifact is not changed.'
               : 'Edit the rulebook metadata and its attestation JSON. Validation runs as you type; saving a draft never changes a frozen or published version.'}
@@ -539,9 +545,9 @@ export function RulebookDraftEditorPage({
             New to rulebook authoring? Read the{' '}
             <GuideLink slug="rulebook-authoring">rulebook authoring guide</GuideLink>.
           </p>
-        </div>
+        </PageHero>
 
-        <div id="draft-editor" tabIndex={-1}>
+        <div className="page" id="draft-editor" tabIndex={-1}>
           {rulebookId === undefined || !creatingNextVersion ? null : (
             <CreateVersionPanel
               api={api}
@@ -556,27 +562,36 @@ export function RulebookDraftEditorPage({
           )}
 
           {nextVersionNotice === null ? null : (
-            <p className="notice editor-saved" role="status">
-              {nextVersionNotice}
-            </p>
+            <Alert variant="success" role="status">
+              <p>{nextVersionNotice}</p>
+            </Alert>
           )}
 
           {readOnly ? (
-            <div className="notice notice--warning" role="status">
-              <p className="notice-title">This rulebook is {draft?.publicationStatus}.</p>
-              {creatingNextVersion
-                ? 'The form below is read-only until you create the new version. The published bytes and digest are not changed by this flow.'
-                : draft?.publicationStatus === 'published'
-                  ? 'Only its draft working copy can be edited; creating a new version needs the administrator of the provider that owns this rulebook.'
-                  : 'Only its draft working copy can be edited. A historical rulebook cannot be transitioned again.'}
-            </div>
+            <Alert
+              variant="warning"
+              role="status"
+              title={`This rulebook is ${draft?.publicationStatus}.`}
+            >
+              <p>
+                {creatingNextVersion
+                  ? 'The form below is read-only until you create the new version. The published bytes and digest are not changed by this flow.'
+                  : draft?.publicationStatus === 'published'
+                    ? 'Only its draft working copy can be edited; creating a new version needs the administrator of the provider that owns this rulebook.'
+                    : 'Only its draft working copy can be edited. A historical rulebook cannot be transitioned again.'}
+              </p>
+            </Alert>
           ) : null}
 
           {formError === null ? null : (
-            <div className="state-panel state-panel--error playground-error-summary" role="alert">
-              <h2 className="state-title">The draft cannot be saved</h2>
+            <Alert
+              variant="destructive"
+              role="alert"
+              title="The draft cannot be saved"
+              titleAs="h2"
+            >
               <p>{formError}</p>
-            </div>
+            </Alert>
           )}
 
           {sessionExpired || (needsSignIn && keepUnsavedForm) ? (
@@ -591,13 +606,16 @@ export function RulebookDraftEditorPage({
             />
           ) : null}
           {renewedNotice === null ? null : (
-            <p className="notice" role="status">
-              {renewedNotice}
-            </p>
+            <Alert variant="info" role="status">
+              <p>{renewedNotice}</p>
+            </Alert>
           )}
 
           <form onSubmit={handleSubmit} noValidate>
-            <section className="detail-card" aria-labelledby={`${fieldPrefix}-metadata-heading`}>
+            <section
+              className="content-section"
+              aria-labelledby={`${fieldPrefix}-metadata-heading`}
+            >
               <h2 id={`${fieldPrefix}-metadata-heading`}>Rulebook metadata</h2>
               <div className="editor-grid">
                 <div className="field">
@@ -672,7 +690,7 @@ export function RulebookDraftEditorPage({
               </div>
             </section>
 
-            <section className="detail-card" aria-labelledby={`${fieldPrefix}-json-heading`}>
+            <section className="content-section" aria-labelledby={`${fieldPrefix}-json-heading`}>
               <h2 id={`${fieldPrefix}-json-heading`}>Attestations and schema references</h2>
               <p className="field-hint">
                 JSON object with an <code>attestations</code> array and a rulebook-level{' '}
@@ -734,20 +752,19 @@ export function RulebookDraftEditorPage({
               }}
             />
 
-            <section className="detail-card" aria-labelledby={`${fieldPrefix}-validation-heading`}>
+            <section
+              className="content-section"
+              aria-labelledby={`${fieldPrefix}-validation-heading`}
+            >
               <h2 id={`${fieldPrefix}-validation-heading`}>Live validation</h2>
               <p className="editor-status" role="status" aria-live="polite">
                 {summary}
                 {validation?.profile === null ? ' Standards checks did not run.' : null}
               </p>
               {validationError === null ? null : (
-                <div
-                  className="state-panel state-panel--error playground-error-summary"
-                  role="alert"
-                >
-                  <p className="state-title">Live validation failed</p>
+                <Alert variant="destructive" role="alert" title="Live validation failed">
                   <p>{validationError}</p>
-                </div>
+                </Alert>
               )}
               {validation === null ? null : (
                 <>
@@ -767,26 +784,32 @@ export function RulebookDraftEditorPage({
             </section>
 
             {saveError === null ? null : (
-              <div className="state-panel state-panel--error playground-error-summary" role="alert">
-                <h2 className="state-title">The draft was not saved</h2>
+              <Alert
+                variant="destructive"
+                role="alert"
+                title="The draft was not saved"
+                titleAs="h2"
+              >
                 <p>{saveError}</p>
-              </div>
+              </Alert>
             )}
             {savedAt === null ? null : (
-              <p className="notice editor-saved" role="status">
-                Draft saved at {new Date(savedAt).toLocaleTimeString()}. Frozen and published
-                versions were not changed.
-              </p>
+              <Alert variant="success" role="status">
+                <p>
+                  Draft saved at {new Date(savedAt).toLocaleTimeString()}. Frozen and published
+                  versions were not changed.
+                </p>
+              </Alert>
             )}
 
             <div className="editor-actions">
-              <button type="submit" className="button button--primary" disabled={!canSave}>
+              <button type="submit" className="btn btn-primary btn-lg" disabled={!canSave}>
                 {saving ? 'Saving…' : creating ? 'Create draft' : 'Save draft'}
               </button>
               <AppLink
                 href={rulebookId === undefined ? CATALOG_PATH : rulebookPath(rulebookId)}
                 onNavigate={onNavigate}
-                className="button button--ghost"
+                className="btn btn-outline btn-lg"
               >
                 Cancel
               </AppLink>

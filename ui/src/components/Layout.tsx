@@ -12,6 +12,7 @@ import {
 import { useSession } from '../session'
 
 const CREDIMI_URL = 'https://credimi.io'
+const FORKBOMB_URL = 'https://forkbomb.solutions/'
 
 export function SkipLink({
   href,
@@ -133,7 +134,7 @@ function SessionControls({
           <span className="site-session__provider">{providerName}</span>
         </span>
         <button
-          className="button button--ghost button--small"
+          className="btn btn-outline btn-sm"
           type="button"
           disabled={signingOut}
           onClick={() => {
@@ -158,7 +159,7 @@ function SessionControls({
   return (
     <div className="site-session" role="group" aria-label="Administrator session">
       <AppLink
-        className="button button--ghost button--small"
+        className="btn btn-outline btn-sm"
         href={loginPath(currentPath())}
         onNavigate={onNavigate}
       >
@@ -185,17 +186,18 @@ export function SiteHeader({ section, onNavigate, showLoginLink = true }: SiteHe
       <CredimiExtrasBanner />
       <header className="site-header">
         <div className="site-header__inner">
-          <span className="wordmark">
+          {/* DESIGN.md §8 topbar identity: the 32px Credimi mark with the product
+              title; neither wordmark appears in the topbar. */}
+          <AppLink className="topbar-brand" href={CATALOG_PATH} onNavigate={onNavigate}>
             <img
-              className="wordmark__logo"
-              src="/brand/logos/credimi_logo-transp.svg"
+              className="topbar-logo"
+              src="/brand/logos/credimi_logo.svg"
               alt="Credimi"
-              width={106}
-              height={22}
+              width={32}
+              height={32}
             />
-            <span className="wordmark__divider" aria-hidden="true" />
-            <span className="wordmark__product">AttestBook</span>
-          </span>
+            <span className="topbar-project-title">AttestBook</span>
+          </AppLink>
           <nav className="site-nav" aria-label="Primary">
             <AppLink
               href={CATALOG_PATH}
@@ -244,6 +246,52 @@ export function SiteHeader({ section, onNavigate, showLoginLink = true }: SiteHe
   )
 }
 
+/**
+ * The page title band every view opens with (DESIGN.md §8): the indigo hero
+ * band carrying the breadcrumb, the page's only `h1` and its description. A
+ * view whose whole content is a state (a not-found address) passes `alert` so
+ * the band itself is announced.
+ */
+export function PageHero({
+  title,
+  breadcrumb,
+  badge,
+  alert = false,
+  children,
+}: {
+  readonly title: ReactNode
+  readonly breadcrumb?: ReactNode
+  /** A status chip set right beside the title. */
+  readonly badge?: ReactNode
+  readonly alert?: boolean
+  readonly children?: ReactNode
+}) {
+  // A `header` cannot take the alert role, so an announced intro is a `div`.
+  const Intro = alert ? 'div' : 'header'
+  return (
+    <section className="hero-band" aria-labelledby="page-title">
+      <div className="hero-inner">
+        {breadcrumb}
+        <Intro className="section-intro" {...(alert ? { role: 'alert' } : {})}>
+          <div className="section-intro-heading">
+            <h1 className="section-intro-title" id="page-title">
+              {title}
+            </h1>
+            {badge}
+          </div>
+          {children === undefined ? null : (
+            <div className="section-intro-description">{children}</div>
+          )}
+        </Intro>
+      </div>
+    </section>
+  )
+}
+
+/**
+ * The indigo footer: the product disclaimer, then the two translucent sub-bars
+ * of DESIGN.md §8 — the ForkBomb attribution, then the Credimi Extras strip.
+ */
 export function SiteFooter() {
   return (
     <footer className="site-footer">
@@ -251,6 +299,14 @@ export function SiteFooter() {
         <p>
           Structural credential validation runs per credential against a pinned rulebook version.
           AttestBook does not test or claim trust, interoperability or standards conformance.
+        </p>
+      </div>
+      <div className="footer-sub-bar site-footer__attribution">
+        <p>
+          Proudly developed by{' '}
+          <a href={FORKBOMB_URL} target="_blank" rel="noopener noreferrer">
+            ForkBomb BV
+          </a>
         </p>
       </div>
       <CredimiExtrasBanner variant="footer" />

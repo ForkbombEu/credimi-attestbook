@@ -610,11 +610,7 @@ export class CredentialValidator {
           ),
         )
       }
-      if (
-        parsed !== undefined &&
-        !isParsedMdoc(parsed) &&
-        attestation.bindingType === 'key'
-      ) {
+      if (parsed !== undefined && !isParsedMdoc(parsed) && attestation.bindingType === 'key') {
         const cnf = parsed.packedPayload.cnf
         if (cnf === undefined) {
           findings.push(

@@ -252,7 +252,11 @@ describe('capture detail correlation', () => {
       'href',
       '/rulebooks/rulebook-pid',
     )
-    expect(screen.getByText('1.0 · published')).toBeInTheDocument()
+    expect(
+      screen.getByText(
+        (_, element) => element?.tagName === 'DD' && element.textContent === '1.0 · published',
+      ),
+    ).toBeInTheDocument()
     expect(screen.getByText(/linked to the pinned rulebook version/)).toBeInTheDocument()
     expect(screen.getByRole('button', { name: 'Export result (JSON)' })).toBeInTheDocument()
   })

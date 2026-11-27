@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
 import { CatalogApiError, isAbortError, type CatalogApi, type ValidationApi } from './api'
+import { Alert } from './components/Alert'
 import { EmptyState, ErrorState, LoadingState } from './components/CatalogStates'
 import { GuideLink } from './components/GuideLink'
-import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { PlaygroundForm } from './components/PlaygroundForm'
 import { ValidationReport } from './components/ValidationReport'
 import { versionsNewestFirst } from './detail'
@@ -306,22 +307,23 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
 
       <SiteHeader section="Credential playground" onNavigate={onNavigate} />
 
-      <main className="page" id="main-content">
-        <nav className="breadcrumb" aria-label="Breadcrumb">
-          <ol>
-            <li>
-              <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                Rulebook catalog
-              </AppLink>
-            </li>
-            <li aria-current="page">Credential playground</li>
-          </ol>
-        </nav>
-
-        <div className="page-heading">
-          <p className="eyebrow">Validator</p>
-          <h1>Credential playground</h1>
-          <p className="lede">
+      <main className="page-main" id="main-content">
+        <PageHero
+          title="Credential playground"
+          breadcrumb={
+            <nav className="breadcrumb" aria-label="Breadcrumb">
+              <ol>
+                <li>
+                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
+                    Rulebook catalog
+                  </AppLink>
+                </li>
+                <li aria-current="page">Credential playground</li>
+              </ol>
+            </nav>
+          }
+        >
+          <p>
             Run the real structural validation API against a pinned rulebook version. Inspect the
             per-dimension evidence and violations, then export the typed result. This page never
             reports an untested dimension as a pass.
@@ -330,73 +332,77 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
             Read the <GuideLink slug="credential-validation">credential validation guide</GuideLink>{' '}
             for what each result and its limits mean.
           </p>
-        </div>
+        </PageHero>
 
-        <div id="playground" tabIndex={-1}>
-          {catalog.status === 'loading' ? (
-            <LoadingState
-              title="Loading rulebooks…"
-              detail="Reading the public rulebook API."
-              rowCount={3}
-            />
-          ) : null}
-
-          {catalog.status === 'error' ? (
-            <ErrorState
-              title="The rulebooks could not be loaded."
-              message={catalog.message}
-              onRetry={() => setCatalogReloadToken((token) => token + 1)}
-            />
-          ) : null}
-
-          {catalog.status === 'ready' && catalog.rulebooks.length === 0 ? (
-            <EmptyState filtering={false} onClear={() => undefined} />
-          ) : null}
-
-          {catalog.status === 'ready' && catalog.rulebooks.length > 0 ? (
-            <>
-              {catalog.total > catalog.rulebooks.length ? (
-                <p className="notice">
-                  Showing the first {catalog.rulebooks.length} of {catalog.total} rulebooks; the
-                  rulebook selector covers only these {catalog.rulebooks.length}.
-                </p>
-              ) : null}
-              <PlaygroundForm
-                rulebooks={catalog.rulebooks}
-                versions={versions}
-                attestations={attestations}
-                values={values}
-                errors={errors}
-                relatedState={related.status}
-                relatedMessage={relatedMessage}
-                fileError={fileError}
-                running={run.status === 'running'}
-                onChange={handleChange}
-                onSubmit={handleSubmit}
-                onClear={handleClear}
-                onRetryRelated={handleRetryRelated}
-                onFile={handleFile}
+        <div className="page">
+          <div id="playground" tabIndex={-1}>
+            {catalog.status === 'loading' ? (
+              <LoadingState
+                title="Loading rulebooks…"
+                detail="Reading the public rulebook API."
+                rowCount={3}
               />
+            ) : null}
 
-              {run.status === 'error' ? (
-                <ErrorState
-                  title="The validation request failed."
-                  message={run.message}
-                  onRetry={handleSubmit}
+            {catalog.status === 'error' ? (
+              <ErrorState
+                title="The rulebooks could not be loaded."
+                message={catalog.message}
+                onRetry={() => setCatalogReloadToken((token) => token + 1)}
+              />
+            ) : null}
+
+            {catalog.status === 'ready' && catalog.rulebooks.length === 0 ? (
+              <EmptyState filtering={false} onClear={() => undefined} />
+            ) : null}
+
+            {catalog.status === 'ready' && catalog.rulebooks.length > 0 ? (
+              <>
+                {catalog.total > catalog.rulebooks.length ? (
+                  <Alert variant="info">
+                    <p>
+                      Showing the first {catalog.rulebooks.length} of {catalog.total} rulebooks; the
+                      rulebook selector covers only these {catalog.rulebooks.length}.
+                    </p>
+                  </Alert>
+                ) : null}
+                <PlaygroundForm
+                  rulebooks={catalog.rulebooks}
+                  versions={versions}
+                  attestations={attestations}
+                  values={values}
+                  errors={errors}
+                  relatedState={related.status}
+                  relatedMessage={relatedMessage}
+                  fileError={fileError}
+                  running={run.status === 'running'}
+                  onChange={handleChange}
+                  onSubmit={handleSubmit}
+                  onClear={handleClear}
+                  onRetryRelated={handleRetryRelated}
+                  onFile={handleFile}
                 />
-              ) : null}
 
-              {run.status === 'success' ? (
-                <>
-                  <p className="sr-only" role="status" aria-live="polite">
-                    Validation finished with overall status {run.result.overallStatus}.
-                    {exported ? ' The result was exported as JSON.' : ''}
-                  </p>
-                  <ValidationReport result={run.result} onExport={handleExport} />
-                </>
-              ) : null}
-            </>
-          ) : null}
+                {run.status === 'error' ? (
+                  <ErrorState
+                    title="The validation request failed."
+                    message={run.message}
+                    onRetry={handleSubmit}
+                  />
+                ) : null}
+
+                {run.status === 'success' ? (
+                  <>
+                    <p className="sr-only" role="status" aria-live="polite">
+                      Validation finished with overall status {run.result.overallStatus}.
+                      {exported ? ' The result was exported as JSON.' : ''}
+                    </p>
+                    <ValidationReport result={run.result} onExport={handleExport} />
+                  </>
+                ) : null}
+              </>
+            ) : null}
+          </div>
         </div>
       </main>
 

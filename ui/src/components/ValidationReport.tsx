@@ -8,6 +8,7 @@ import {
   type ValidationSummary,
 } from '../playground'
 import type { CredentialValidationResult, ValidationDimension, ValidationStatus } from '../types'
+import { Alert } from './Alert'
 
 const OVERALL_EXPLANATIONS: Readonly<Record<ValidationStatus, string>> = {
   PASS: 'Every applicable dimension executed and passed.',
@@ -41,8 +42,7 @@ function UntestedNotice({ summary }: { readonly summary: ValidationSummary }) {
     return null
   }
   return (
-    <div className="notice notice--warning">
-      <p className="notice-title">Untested dimensions are not passes.</p>
+    <Alert variant="warning" title="Untested dimensions are not passes.">
       <p>
         {summary.notExecuted} of {summary.applicable} applicable dimensions did not execute
         {summary.notApplicable === 0
@@ -51,7 +51,7 @@ function UntestedNotice({ summary }: { readonly summary: ValidationSummary }) {
               summary.notApplicable === 1 ? 'dimension is' : 'dimensions are'
             } not applicable to a single credential artifact.`}
       </p>
-    </div>
+    </Alert>
   )
 }
 
@@ -72,43 +72,45 @@ function DimensionRow({ dimension }: { readonly dimension: ValidationDimension }
       <td>{dimension.applicable ? 'Applicable' : 'Not applicable'}</td>
       <td>
         <p className="dimension-reason">{dimension.evidence.reason}</p>
-        <details className="evidence-details">
+        <details className="disclosure">
           <summary>
             Evidence
             {findingCount === 0
               ? ''
               : ` and ${findingCount} ${findingCount === 1 ? 'finding' : 'findings'}`}
           </summary>
-          <dl className="evidence-grid">
-            <div>
-              <dt>Scope</dt>
-              <dd>{dimension.evidence.scope}</dd>
-            </div>
-            {Object.entries(dimension.evidence.details).map(([key, value]) => (
-              <div key={key}>
-                <dt>
-                  <code>{key}</code>
-                </dt>
-                <dd>{String(value)}</dd>
+          <div className="disclosure-body">
+            <dl className="evidence-grid">
+              <div>
+                <dt>Scope</dt>
+                <dd>{dimension.evidence.scope}</dd>
               </div>
-            ))}
-          </dl>
-          {dimension.findings.length === 0 ? null : (
-            <ul className="finding-list">
-              {dimension.findings.map((finding, index) => (
-                <li key={`${finding.code}-${String(index)}`}>
-                  <SeverityBadge severity={finding.severity} /> <code>{finding.code}</code>{' '}
-                  {finding.message}
-                  {finding.path === undefined ? null : (
-                    <>
-                      {' '}
-                      at <code>{finding.path}</code>
-                    </>
-                  )}
-                </li>
+              {Object.entries(dimension.evidence.details).map(([key, value]) => (
+                <div key={key}>
+                  <dt>
+                    <code>{key}</code>
+                  </dt>
+                  <dd>{String(value)}</dd>
+                </div>
               ))}
-            </ul>
-          )}
+            </dl>
+            {dimension.findings.length === 0 ? null : (
+              <ul className="finding-list">
+                {dimension.findings.map((finding, index) => (
+                  <li key={`${finding.code}-${String(index)}`}>
+                    <SeverityBadge severity={finding.severity} /> <code>{finding.code}</code>{' '}
+                    {finding.message}
+                    {finding.path === undefined ? null : (
+                      <>
+                        {' '}
+                        at <code>{finding.path}</code>
+                      </>
+                    )}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
         </details>
       </td>
     </tr>
@@ -121,7 +123,7 @@ function ResultMetadata({ result }: { readonly result: CredentialValidationResul
       <div>
         <dt>Validation ID</dt>
         <dd>
-          <code>{result.validationId}</code>
+          <span className="data">{result.validationId}</span>
         </dd>
       </div>
       <div>
@@ -139,16 +141,17 @@ function ResultMetadata({ result }: { readonly result: CredentialValidationResul
       <div>
         <dt>Pinned version</dt>
         <dd>
-          <code>{result.rulebook.version}</code> <StatusBadge status={result.rulebook.status} />{' '}
+          <span className="data">{result.rulebook.version}</span>{' '}
+          <StatusBadge status={result.rulebook.status} />{' '}
           <span className="muted">{result.rulebook.specVersion}</span>
         </dd>
       </div>
       <div>
         <dt>Snapshot digest (SHA-256)</dt>
         <dd>
-          <code className="digest" title={result.rulebook.digest}>
+          <span className="data digest" title={result.rulebook.digest}>
             {formatDigest(result.rulebook.digest)}
-          </code>{' '}
+          </span>{' '}
           <span className="muted">
             {result.rulebook.digestVerified ? 'recomputed and verified' : 'not verified'}
           </span>
@@ -179,7 +182,7 @@ function ResultMetadata({ result }: { readonly result: CredentialValidationResul
           {result.credential.vct === null ? (
             <span className="muted">Not available</span>
           ) : (
-            <code>{result.credential.vct}</code>
+            <span className="data">{result.credential.vct}</span>
           )}
         </dd>
       </div>
@@ -197,7 +200,7 @@ function ResultMetadata({ result }: { readonly result: CredentialValidationResul
 
 function SchemaReferences({ result }: { readonly result: CredentialValidationResult }) {
   return (
-    <section className="detail-card" aria-labelledby="validation-schema-heading">
+    <section className="content-section" aria-labelledby="validation-schema-heading">
       <h2 id="validation-schema-heading">Schema references</h2>
       {result.schemaReferences.length === 0 ? (
         <p className="muted">
@@ -232,7 +235,9 @@ function SchemaReferences({ result }: { readonly result: CredentialValidationRes
                     {reference.integrity === null ? (
                       <span className="muted">None recorded</span>
                     ) : (
-                      <code title={reference.integrity}>{reference.integrity}</code>
+                      <span className="data" title={reference.integrity}>
+                        {reference.integrity}
+                      </span>
                     )}
                   </td>
                   <td>
@@ -270,7 +275,7 @@ export function ValidationReport({
   const summary = validationSummary(result)
   return (
     <div className="validation-report">
-      <section className="detail-card" aria-labelledby="validation-overall-heading">
+      <section className="content-section" aria-labelledby="validation-overall-heading">
         <div className="validation-overall">
           <div>
             <h2 id="validation-overall-heading">Overall result</h2>
@@ -279,7 +284,7 @@ export function ValidationReport({
               <span>{OVERALL_EXPLANATIONS[result.overallStatus]}</span>
             </p>
           </div>
-          <button type="button" className="button button--primary" onClick={onExport}>
+          <button type="button" className="btn btn-primary btn-md" onClick={onExport}>
             Export result (JSON)
           </button>
         </div>
@@ -291,7 +296,7 @@ export function ValidationReport({
         <ResultMetadata result={result} />
       </section>
 
-      <section className="detail-card" aria-labelledby="validation-dimensions-heading">
+      <section className="content-section" aria-labelledby="validation-dimensions-heading">
         <h2 id="validation-dimensions-heading">Validation dimensions</h2>
         <p className="table-note">
           Every FR-010 dimension is listed in normative order with its status, whether it was
@@ -321,7 +326,7 @@ export function ValidationReport({
         </div>
       </section>
 
-      <section className="detail-card" aria-labelledby="validation-violations-heading">
+      <section className="content-section" aria-labelledby="validation-violations-heading">
         <h2 id="validation-violations-heading">Violations</h2>
         {result.violations.length === 0 ? (
           <p className="muted">
@@ -377,7 +382,7 @@ export function ValidationReport({
         )}
       </section>
 
-      <section className="detail-card" aria-labelledby="validation-limitations-heading">
+      <section className="content-section" aria-labelledby="validation-limitations-heading">
         <h2 id="validation-limitations-heading">Limitations of this result</h2>
         {result.limitations.length === 0 ? (
           <p className="muted">No limitations were reported for this run.</p>

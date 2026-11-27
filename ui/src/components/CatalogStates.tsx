@@ -1,3 +1,5 @@
+import { Alert } from './Alert'
+
 interface LoadingStateProps {
   readonly rowCount?: number
   readonly title?: string
@@ -43,13 +45,19 @@ export function ErrorState({
   title = 'The rulebook catalog could not be loaded.',
 }: ErrorStateProps) {
   return (
-    <div className="state-panel state-panel--error" role="alert">
-      <h2 className="state-title">{title}</h2>
-      <p className="state-detail">{message}</p>
-      <button type="button" className="button button--primary" onClick={onRetry}>
-        Retry
-      </button>
-    </div>
+    <Alert
+      variant="destructive"
+      title={title}
+      titleAs="h2"
+      role="alert"
+      action={
+        <button type="button" className="btn btn-outline btn-sm" onClick={onRetry}>
+          Retry
+        </button>
+      }
+    >
+      <p>{message}</p>
+    </Alert>
   )
 }
 
@@ -80,7 +88,7 @@ export function EmptyState({ filtering, partial = false, onClear }: EmptyStatePr
           Only the loaded page was searched; the catalog has more entries than the API page limit.
         </p>
       ) : null}
-      <button type="button" className="button button--primary" onClick={onClear}>
+      <button type="button" className="btn btn-primary btn-md" onClick={onClear}>
         Reset search and filters
       </button>
     </div>

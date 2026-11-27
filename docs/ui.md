@@ -654,9 +654,10 @@ Markdown is imported by the UI source, changing a guide requires a UI rebuild
 
 ### Brand assets and design checks
 
-The UI adopts the Credimi Extras Template visual system. Its canonical assets are
-installed byte-for-byte under `ui/public/brand/` and served unchanged at
-`/brand/`:
+The UI adopts the Credimi Extras Template visual system, synchronised with the
+template's 26/11/2026 layout and typography update (commit `fd5d283`, `DESIGN.md`
+§17–§18). Its canonical assets are installed byte-for-byte under
+`ui/public/brand/` and served unchanged at `/brand/`:
 
 - `/brand/style.css` — the Credimi brand stylesheet, loaded by `ui/index.html`
   before the application stylesheet;
@@ -671,6 +672,42 @@ No web asset is loaded from an external CDN, and the two banners mandated by
 `ui/src/brand.test.ts` pins the canonical logo and font bytes and fails if any
 stylesheet or entry document starts loading an external asset.
 
+The application uses the brand stylesheet's shared components as they are and
+keeps `ui/src/styles.css` to AttestBook's own layouts:
+
+- the topbar pairs the 32px `credimi_logo.svg` mark with the `AttestBook` title
+  (on `/docs` too); no wordmark appears in either header;
+- every view opens with the indigo `.hero-band` (`PageHero` in
+  `ui/src/components/Layout.tsx`) carrying the breadcrumb, the only `h1` and the
+  description; content follows in 96px page sections (64px on mobile) on the
+  lavender wash, and a not-found address is the hero itself, announced as an alert;
+- buttons are the brand `.btn` sizes (`btn-lg` for a page's or form's main
+  action, `btn-md` in panels, `btn-sm` in rows and toolbars);
+- failures, warnings, hints and confirmations are brand `.alert`s (`Alert`
+  component) with their Lucide icon; field-level messages stay under the field;
+- JSON and code output (the redacted capture projection, the schema preview and
+  guide code blocks) uses the shared Catppuccin Frappé class contract
+  (`CodeOutput`); Shiki itself is not bundled, so the blocks are unhighlighted;
+- identifiers, versions, digests and URIs are Inter with `.data` (tabular digits,
+  slashed zero, disambiguation); Source Code Pro is reserved for code;
+- content sits in `.content-section`s directly on the lavender wash, not in
+  cards: each opens like a section intro (primary title over a
+  `--border-strong` rule, no colon) and the next follows 64px below; forms,
+  guide articles, empty states and the guide navigation are uncarded too, and the
+  only cards left are the guide index's link cards;
+- data tables follow the Scoreboard: a white 6px surface, a 40px
+  `--brand-secondary-strong` header band with vertically centred uppercase
+  primary labels, 13px cells with 12px padding, the row-naming first cell in
+  sans bold, hairline rows and `--bg-muted` on hover;
+- the rulebook page puts its publication status beside the title and its
+  provider, specification, last update, version count and, only for an imported
+  rulebook, the source URL on one line in the hero; there is no separate metadata
+  or provenance section, and each schema reference is listed once, under its
+  attestation type, with references bound to no attestation type in a
+  rulebook-level group;
+- the footer closes with two sub-bars: “Proudly developed by ForkBomb BV”, then
+  the Credimi Extras strip.
+
 Impeccable provides the design vocabulary and the anti-slop detector. Version
 4.8.2 (engine 0.1.21, Apache-2.0, from
 <https://github.com/pbakaus/impeccable>) is installed for the project under
@@ -678,10 +715,10 @@ Impeccable provides the design vocabulary and the anti-slop detector. Version
 `.impeccable/config.json` as its project context), and
 `bun run lint:design` runs the mechanical detector over `ui/src`. CI runs the
 same command in the `quality` job, so a UI change that trips a design
-anti-pattern does not merge. `.impeccable/config.json` records the two
-deliberate brand exceptions: the overused-font rule for the self-hosted Inter
-brand face, and the generic `kicker-above-heading` rule, because `DESIGN.md` §6
-mandates the Credimi eyebrow pattern above every page heading.
+anti-pattern does not merge. `.impeccable/config.json` records the one
+deliberate brand exception: the overused-font rule for the self-hosted Inter
+brand face. Page titles no longer carry an eyebrow (`DESIGN.md` §6, §17), so the
+former `kicker-above-heading` exception was removed.
 
 ### Visual comparison
 

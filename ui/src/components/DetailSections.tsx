@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useId, useRef, useState } from 'react'
+import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNode } from 'react'
 
 import { versionContentPath, type CatalogApi } from '../api'
 import { formatDate } from '../catalog'
@@ -16,18 +16,20 @@ import {
   hostedSchemaDownloadName,
   latestVersion,
   referencesForAttestation,
+  rulebookLevelReferences,
   versionsNewestFirst,
   type ReferenceWithHostedSchema,
 } from '../detail'
-import type { HostedSchema, Rulebook, SchemaReference, VersionSchemaReferences } from '../types'
+import type { HostedSchema, SchemaReference, VersionSchemaReferences } from '../types'
 
+import { Alert } from './Alert'
 import { CompatibilityBadge, StatusBadge } from './Badges'
 
 function SectionUnavailable({ children }: { readonly children: string }) {
   return (
-    <p className="notice notice--warning" role="status">
-      {children}
-    </p>
+    <Alert variant="warning" role="status">
+      <p>{children}</p>
+    </Alert>
   )
 }
 
@@ -110,7 +112,9 @@ function ReferenceIntegrity({ reference }: { readonly reference: ReferenceWithHo
       {reference.integrity === null ? (
         <span className="muted">None recorded</span>
       ) : (
-        <code title={reference.integrity}>{reference.integrity}</code>
+        <span className="data" title={reference.integrity}>
+          {reference.integrity}
+        </span>
       )}
       {state === 'matches' ? (
         <span className="reference-pin reference-pin--ok">Pin matches stored digest</span>
@@ -169,9 +173,9 @@ function SchemaReferenceTable({
                       </span>
                       <span>
                         SHA-256:{' '}
-                        <code className="digest" title={hosted.contentDigest}>
+                        <span className="data" title={hosted.contentDigest}>
                           {formatDigest(hosted.contentDigest)}
-                        </code>
+                        </span>
                       </span>
                     </p>
                   )}
@@ -187,7 +191,7 @@ function SchemaReferenceTable({
                     <span className="muted">—</span>
                   ) : (
                     <a
-                      className="button button--small button--ghost"
+                      className="btn btn-outline btn-sm"
                       href={hosted.url}
                       download={hostedSchemaDownloadName(hosted)}
                       aria-label={`Download the ${hostedSchemaKindLabel(hosted.kind)} document for ${row.formatIdentifier}`}
@@ -216,140 +220,110 @@ function rulebookRows(references: readonly SchemaReference[]): readonly SchemaRe
   }))
 }
 
-export function MetadataSection({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
-  const { rulebook, provider, attestations, schemaReferences, versions, availability } = snapshot
+/**
+ * The rulebook's one-line summary under the hero title: its provider,
+ * specification, last update and version count, plus the source it was
+ * imported from. A locally authored rulebook has no source, so none is shown.
+ */
+export function RulebookSummary({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
+  const { rulebook, provider, versions } = snapshot
+  const source = externalSourceUrl(rulebook.sourceUrl)
+  const parts: { readonly key: string; readonly node: ReactNode }[] = [
+    {
+      key: 'provider',
+      node:
+        provider === null ? (
+          <span className="data">{rulebook.providerId} (not in the provider list)</span>
+        ) : (
+          <span>{provider.name}</span>
+        ),
+    },
+    { key: 'spec', node: <span className="data">{rulebook.applicableSpec}</span> },
+    {
+      key: 'updated',
+      node: (
+        <span>
+          Last updated{' '}
+          <time className="data" dateTime={rulebook.updatedAt}>
+            {formatDate(rulebook.updatedAt)}
+          </time>
+        </span>
+      ),
+    },
+  ]
+  if (versions.length > 0) {
+    parts.push({
+      key: 'versions',
+      node: <span>{versions.length === 1 ? '1 version' : `${versions.length} versions`}</span>,
+    })
+  }
+  if (source !== null) {
+    parts.push({
+      key: 'source',
+      node: (
+        <span>
+          Source{' '}
+          <a href={source} target="_blank" rel="noopener noreferrer">
+            {source}
+            <span className="sr-only"> (opens in a new tab)</span>
+          </a>
+        </span>
+      ),
+    })
+  }
   return (
-    <section className="detail-card" aria-labelledby="metadata-heading">
-      <h2 id="metadata-heading">Rulebook metadata</h2>
-      <dl className="metadata-grid">
-        <div>
-          <dt>Rulebook ID</dt>
-          <dd>
-            <code>{rulebook.id}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>Provider</dt>
-          <dd>
-            {provider === null ? (
-              <span className="muted">{rulebook.providerId} (not in the provider list)</span>
-            ) : (
-              <>
-                {provider.name} <span className="muted">({provider.id})</span>
-              </>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Publication status</dt>
-          <dd>
-            <StatusBadge status={rulebook.publicationStatus} />
-          </dd>
-        </div>
-        <div>
-          <dt>Applicable specification</dt>
-          <dd>
-            <code>{rulebook.applicableSpec}</code>
-          </dd>
-        </div>
-        <div>
-          <dt>Attestation types</dt>
-          <dd>{availability.attestations ? attestations.length : 'Unavailable'}</dd>
-        </div>
-        <div>
-          <dt>Schema references</dt>
-          <dd>{availability.schemaReferences ? schemaReferences.length : 'Unavailable'}</dd>
-        </div>
-        <div>
-          <dt>Versions</dt>
-          <dd>{availability.versions ? versions.length : 'Unavailable'}</dd>
-        </div>
-      </dl>
-      {availability.provider ? null : (
-        <p className="notice">
-          The provider list could not be loaded, so only the provider identifier is shown.
-        </p>
-      )}
-    </section>
+    <p className="detail-heading__meta">
+      {parts.map((part, index) => (
+        <Fragment key={part.key}>
+          {index === 0 ? null : <span aria-hidden="true"> · </span>}
+          {part.node}
+        </Fragment>
+      ))}
+    </p>
   )
 }
 
-export function ProvenanceSection({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
-  const { rulebook } = snapshot
-  const source = describeSourceFor(rulebook)
-  return (
-    <section className="detail-card" aria-labelledby="provenance-heading">
-      <h2 id="provenance-heading">Source provenance</h2>
-      <dl className="metadata-grid">
-        <div>
-          <dt>Source</dt>
-          <dd>
-            {source.href === null ? (
-              source.label
-            ) : (
-              <a href={source.href} target="_blank" rel="noopener noreferrer">
-                {source.href}
-                <span className="sr-only"> (opens in a new tab)</span>
-              </a>
-            )}
-          </dd>
-        </div>
-        <div>
-          <dt>Registered</dt>
-          <dd>
-            <time dateTime={rulebook.createdAt}>{formatDate(rulebook.createdAt)}</time>
-          </dd>
-        </div>
-        <div>
-          <dt>Last updated</dt>
-          <dd>
-            <time dateTime={rulebook.updatedAt}>{formatDate(rulebook.updatedAt)}</time>
-          </dd>
-        </div>
-        <div>
-          <dt>Publication authority</dt>
-          <dd>Owned by the provider recorded above.</dd>
-        </div>
-      </dl>
-      <p className="table-note">
-        This is the public provenance projection: source URL and registry timestamps.
-        Import-internal provenance is not exposed by the public API.
-      </p>
-    </section>
-  )
-}
-
-function describeSourceFor(rulebook: Rulebook) {
-  // Reuse the catalog's URL-safety rule without importing its display label.
-  const value = rulebook.sourceUrl
+/** The imported-from URL when it is a safe http(s) link; anything else is not shown. */
+function externalSourceUrl(value: string | null): string | null {
   if (value === null || value === '') {
-    return { href: null as string | null, label: 'Locally authored' }
+    return null
   }
   try {
     const url = new URL(value)
-    if (url.protocol === 'http:' || url.protocol === 'https:') {
-      return { href: url.toString(), label: url.toString() }
-    }
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null
   } catch {
-    // Fall through to inert text.
+    return null
   }
-  return { href: null as string | null, label: value }
 }
 
+/**
+ * The attestation types with their schema references. Each attestation lists
+ * its own references; references bound to no attestation type follow as the
+ * rulebook-level group, so every reference appears exactly once on the page.
+ */
 export function AttestationsSection({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
   const { attestations, schemaReferences, availability } = snapshot
+  const rulebookLevel = availability.schemaReferences
+    ? rulebookLevelReferences(schemaReferences)
+    : []
   return (
-    <section className="detail-card" aria-labelledby="attestations-heading">
+    <section className="content-section" aria-labelledby="attestations-heading">
       <h2 id="attestations-heading">Attestation types</h2>
       {availability.attestations ? null : (
         <SectionUnavailable>
           The attestation types could not be loaded, so none are shown.
         </SectionUnavailable>
       )}
+      {availability.schemaReferences ? null : (
+        <SectionUnavailable>
+          The schema references could not be loaded, so only those embedded in each attestation type
+          are shown.
+        </SectionUnavailable>
+      )}
       {availability.attestations && attestations.length === 0 ? (
         <p className="muted">No attestation types are recorded for this rulebook.</p>
       ) : null}
-      {attestations.length > 0 ? (
+      {attestations.length > 0 || rulebookLevel.length > 0 ? (
         <ul className="attestation-list">
           {attestations.map((attestation) => {
             const references = availability.schemaReferences
@@ -400,49 +374,27 @@ export function AttestationsSection({ snapshot }: { readonly snapshot: RulebookD
               </li>
             )
           })}
+          {rulebookLevel.length === 0 ? null : (
+            <li className="attestation-card">
+              <h3>Rulebook-level schema references</h3>
+              <p className="table-note">These references belong to no single attestation type.</p>
+              <SchemaReferenceTable
+                rows={rulebookRows(rulebookLevel)}
+                attestations={attestations}
+                showAttestation={false}
+                caption="Rulebook-level schema references"
+              />
+            </li>
+          )}
         </ul>
       ) : null}
     </section>
   )
 }
 
-export function SchemaReferencesSection({
-  snapshot,
-}: {
-  readonly snapshot: RulebookDetailSnapshot
-}) {
-  const { schemaReferences, attestations, availability } = snapshot
-  return (
-    <section className="detail-card" aria-labelledby="schema-references-heading">
-      <h2 id="schema-references-heading">Schema references</h2>
-      {availability.schemaReferences ? null : (
-        <SectionUnavailable>
-          The schema references could not be loaded, so none are shown.
-        </SectionUnavailable>
-      )}
-      {availability.schemaReferences && schemaReferences.length === 0 ? (
-        <p className="muted">No schema references are recorded for this rulebook.</p>
-      ) : null}
-      {schemaReferences.length > 0 ? (
-        <SchemaReferenceTable
-          rows={rulebookRows(schemaReferences)}
-          attestations={attestations}
-          caption="Schema references with their format identifier, source, URI, media type, digest, integrity pin and attestation type"
-        />
-      ) : null}
-      <p className="table-note">
-        A reference is <strong>Hosted by AttestBook</strong> only when its exact URI names an
-        immutable stored schema document on this deployment; every other http(s) value stays an
-        external link. Hosted rows link to the public, unauthenticated content route and show the
-        stored media type and digest the bytes must match.
-      </p>
-    </section>
-  )
-}
-
 export function CompatibilitySection() {
   return (
-    <section className="detail-card" aria-labelledby="compatibility-heading">
+    <section className="content-section" aria-labelledby="compatibility-heading">
       <h2 id="compatibility-heading">Standards compatibility</h2>
       <p className="compatibility-summary">
         <CompatibilityBadge /> <strong>Rulebook-level compatibility: not tested.</strong>
@@ -550,18 +502,23 @@ function VersionSchemaReferencesPanel({
   }
   if (state.status === 'error') {
     return (
-      <div className="version-references__status" role="alert">
+      <Alert
+        variant="destructive"
+        role="alert"
+        action={
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => {
+              void load()
+            }}
+          >
+            Retry
+          </button>
+        }
+      >
         <p>{state.message}</p>
-        <button
-          type="button"
-          className="button button--small button--ghost"
-          onClick={() => {
-            void load()
-          }}
-        >
-          Retry
-        </button>
-      </div>
+      </Alert>
     )
   }
 
@@ -573,10 +530,10 @@ function VersionSchemaReferencesPanel({
     <div className="version-references">
       <h3 className="version-references__title">Schema references in version {data.version}</h3>
       <p className="version-references__pin">
-        Exact frozen version <code>{data.version}</code> · SHA-256{' '}
-        <code className="digest" title={data.contentDigest}>
+        Exact frozen version <span className="data">{data.version}</span> · SHA-256{' '}
+        <span className="data" title={data.contentDigest}>
           {formatDigest(data.contentDigest)}
-        </code>
+        </span>
       </p>
       {referenceCount === 0 ? (
         <p className="muted">No schema references are recorded in this version.</p>
@@ -622,7 +579,7 @@ export function VersionsSection({
   const [openVersionId, setOpenVersionId] = useState<string | null>(null)
   const panelPrefix = `version-panel-${useId().replaceAll(':', '')}`
   return (
-    <section className="detail-card" aria-labelledby="versions-heading">
+    <section className="content-section" aria-labelledby="versions-heading">
       <h2 id="versions-heading">Version history</h2>
       {availability.versions ? null : (
         <SectionUnavailable>
@@ -656,7 +613,7 @@ export function VersionsSection({
                     <Fragment key={version.id}>
                       <tr>
                         <th scope="row">
-                          <code>{version.version}</code>
+                          <span className="data">{version.version}</span>
                           {current?.id === version.id ? (
                             <span className="badge badge--latest">Latest</span>
                           ) : null}
@@ -665,12 +622,12 @@ export function VersionsSection({
                           <StatusBadge status={version.status} />
                         </td>
                         <td>
-                          <code>{version.specVersion}</code>
+                          <span className="data">{version.specVersion}</span>
                         </td>
                         <td>
-                          <code className="digest" title={version.contentDigest}>
+                          <span className="data" title={version.contentDigest}>
                             {formatDigest(version.contentDigest)}
-                          </code>
+                          </span>
                         </td>
                         <td>
                           <time dateTime={version.createdAt}>{formatDate(version.createdAt)}</time>
@@ -688,7 +645,7 @@ export function VersionsSection({
                           <div className="version-actions">
                             <button
                               type="button"
-                              className="button button--small button--ghost"
+                              className="btn btn-outline btn-sm"
                               aria-expanded={open}
                               aria-controls={panelId}
                               aria-label={`${open ? 'Hide' : 'Inspect'} references for version ${version.version}`}
@@ -699,7 +656,7 @@ export function VersionsSection({
                               {open ? 'Hide references' : 'Inspect references'}
                             </button>
                             <a
-                              className="button button--small button--ghost"
+                              className="btn btn-outline btn-sm"
                               href={versionContentPath(rulebook.id, version.version)}
                               download={`rulebook-${rulebook.id}-${version.version}.json`}
                               aria-label={`Export version ${version.version} snapshot`}
@@ -747,7 +704,7 @@ export function VersionSummary({ snapshot }: { readonly snapshot: RulebookDetail
   }
   return (
     <a
-      className="button button--primary"
+      className="btn btn-outline btn-lg"
       href={versionContentPath(snapshot.rulebook.id, current.version)}
       download={`rulebook-${snapshot.rulebook.id}-${current.version}.json`}
     >

@@ -175,7 +175,7 @@ test.describe('draft lifecycle against the real API', () => {
     expect(after.headers()['content-digest']).toBe(beforeDigest)
 
     // Creating the next version reopens the working copy for editing.
-    const nextVersion = page.getByRole('region', { name: 'Create a new version' })
+    const nextVersion = page.getByRole('region', { name: 'Create a new version', exact: true })
     await expect(nextVersion).toBeVisible()
     await nextVersion.getByLabel('New version label').fill('2.0')
     await nextVersion.getByRole('button', { name: 'Create new version' }).click()
@@ -236,7 +236,9 @@ test.describe('next version from a published rulebook', () => {
     await expect(
       page.getByRole('heading', { name: /^Create a new version of /, level: 1 }),
     ).toBeVisible()
-    await expect(page.getByRole('region', { name: 'Create a new version' })).toBeVisible()
+    await expect(
+      page.getByRole('region', { name: 'Create a new version', exact: true }),
+    ).toBeVisible()
     await expect(page.getByText('This rulebook is published.', { exact: true })).toBeVisible()
   })
 
@@ -257,7 +259,7 @@ test.describe('next version from a published rulebook', () => {
     await page.goto(`/rulebooks/${rulebookId}`)
     await page.getByRole('link', { name: 'Create new version' }).click()
 
-    const createPanel = page.getByRole('region', { name: 'Create a new version' })
+    const createPanel = page.getByRole('region', { name: 'Create a new version', exact: true })
     await expect(createPanel).toBeVisible()
     await createPanel.getByLabel('New version label').fill('1.1.0')
     await createPanel.getByRole('button', { name: 'Create new version' }).click()
@@ -294,7 +296,9 @@ test.describe('next version from a published rulebook', () => {
     await expect(lifecycle.getByText(/is now published and immutable/)).toBeVisible()
 
     // Publishing closes the editable copy and offers the next version again.
-    await expect(page.getByRole('region', { name: 'Create a new version' })).toBeVisible()
+    await expect(
+      page.getByRole('region', { name: 'Create a new version', exact: true }),
+    ).toBeVisible()
 
     await page.goto(`/rulebooks/${rulebookId}`)
     const history = page.getByRole('region', { name: 'Version history' })
@@ -328,7 +332,7 @@ test.describe('next version from a published rulebook', () => {
 
     await signInAsAdmin(page)
     await page.goto(`/rulebooks/${rulebookId}/edit`)
-    const panel = page.getByRole('region', { name: 'Create a new version' })
+    const panel = page.getByRole('region', { name: 'Create a new version', exact: true })
     await panel.getByLabel('New version label').fill('1.0')
     await panel.getByRole('button', { name: 'Create new version' }).click()
 

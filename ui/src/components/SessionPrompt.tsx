@@ -12,6 +12,8 @@ import { useId, useState, type FormEvent, type ReactNode } from 'react'
 import { AuthApiError, currentPath, loginPath } from '../auth'
 import { AppLink } from '../router'
 import type { SessionController } from '../session'
+import { Alert } from './Alert'
+import { PageHero } from './Layout'
 
 interface SignInRequiredNoticeProps {
   readonly title: string
@@ -28,32 +30,30 @@ export function SignInRequiredNotice({
   onNavigate,
   variant = 'panel',
 }: SignInRequiredNoticeProps) {
-  const link = (
-    <AppLink
-      className="button button--primary"
-      href={loginPath(currentPath())}
-      onNavigate={onNavigate}
-    >
-      Sign in
-    </AppLink>
-  )
+  const href = loginPath(currentPath())
 
   if (variant === 'inline') {
     return (
-      <div className="notice notice--warning" role="status">
-        <p className="notice-title">{title}</p>
+      <Alert variant="warning" role="status" title={title}>
         <p>{message}</p>
-        <p>{link}</p>
-      </div>
+        <p>
+          <AppLink className="btn btn-primary btn-md" href={href} onNavigate={onNavigate}>
+            Sign in
+          </AppLink>
+        </p>
+      </Alert>
     )
   }
 
   return (
-    <div className="state-panel state-panel--empty" role="status">
-      <h1 className="state-title">{title}</h1>
-      <p className="state-detail">{message}</p>
-      {link}
-    </div>
+    <PageHero title={title}>
+      <p>{message}</p>
+      <p className="hero-actions">
+        <AppLink className="btn btn-outline btn-lg" href={href} onNavigate={onNavigate}>
+          Sign in
+        </AppLink>
+      </p>
+    </PageHero>
   )
 }
 
@@ -116,7 +116,7 @@ export function SessionRenewalForm({
   }
 
   return (
-    <section className="detail-card session-renewal" aria-labelledby={`${fieldPrefix}-heading`}>
+    <section className="content-section session-renewal" aria-labelledby={`${fieldPrefix}-heading`}>
       <h2 id={`${fieldPrefix}-heading`}>{title}</h2>
       <p className="field-hint">{description}</p>
       {error === null ? null : (
@@ -164,7 +164,7 @@ export function SessionRenewalForm({
           />
         </div>
         <div className="login-form__actions">
-          <button className="button button--primary" type="submit" disabled={submitting}>
+          <button className="btn btn-primary btn-lg" type="submit" disabled={submitting}>
             {submitting ? 'Signing in…' : submitLabel}
           </button>
           {submitting ? (

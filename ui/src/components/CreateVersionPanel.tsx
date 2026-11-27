@@ -12,6 +12,7 @@ import { useId, useRef, useState, type FormEvent } from 'react'
 import type { EditorApi } from '../api'
 import { isSessionAuthError } from '../api'
 import type { RulebookVersion } from '../types'
+import { Alert } from './Alert'
 
 interface CreateVersionPanelProps {
   readonly api: EditorApi
@@ -79,8 +80,10 @@ export function CreateVersionPanel({
   }
 
   return (
-    <section className="detail-card create-version-panel" aria-labelledby={`${fieldId}-heading`}>
-      <p className="eyebrow">Published version</p>
+    <section
+      className="content-section create-version-panel"
+      aria-labelledby={`${fieldId}-heading`}
+    >
       <h2 id={`${fieldId}-heading`}>Create a new version</h2>
       <p className="field-hint">
         The published version is immutable. Creating a new draft version reopens the working copy
@@ -117,15 +120,14 @@ export function CreateVersionPanel({
             </p>
           )}
         </div>
-        <button type="submit" className="button button--primary" disabled={busy}>
+        <button type="submit" className="btn btn-primary btn-lg" disabled={busy}>
           {busy ? 'Creating…' : 'Create new version'}
         </button>
       </form>
       {error === null ? null : (
-        <div className="state-panel state-panel--error playground-error-summary" role="alert">
-          <p className="state-title">The new version was not created</p>
+        <Alert variant="destructive" role="alert" title="The new version was not created">
           <p>{error}</p>
-        </div>
+        </Alert>
       )}
     </section>
   )

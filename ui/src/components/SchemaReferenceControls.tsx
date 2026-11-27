@@ -10,6 +10,8 @@ import { useEffect, useId, useMemo, useRef, useState, type ChangeEvent } from 'r
 
 import { isSessionAuthError, type EditorApi } from '../api'
 import { formatDigest, hostedIntegrityState, hostedSchemaDownloadName } from '../detail'
+import { Alert } from './Alert'
+import { CODE_OUTPUT_CLASS } from './CodeOutput'
 import { GuideLink } from './GuideLink'
 import {
   HOSTED_SCHEMA_KIND,
@@ -417,7 +419,7 @@ export function SchemaReferenceControls({
                       <span className="muted"> · {preview.dialect}</span>
                     )}
                   </p>
-                  <pre className="schema-preview__text" tabIndex={0} aria-label="Schema preview">
+                  <pre className={CODE_OUTPUT_CLASS} tabIndex={0} aria-label="Schema preview">
                     {schemaText}
                   </pre>
                 </>
@@ -439,7 +441,7 @@ export function SchemaReferenceControls({
             <div className="schema-form__actions">
               <button
                 type="button"
-                className="button button--primary button--small"
+                className="btn btn-primary btn-sm"
                 onClick={() => {
                   void handleRegister(attestation, formatIdentifier)
                 }}
@@ -450,7 +452,7 @@ export function SchemaReferenceControls({
               </button>
               <button
                 type="button"
-                className="button button--ghost button--small"
+                className="btn btn-outline btn-sm"
                 onClick={closeForm}
                 disabled={working}
               >
@@ -529,7 +531,7 @@ export function SchemaReferenceControls({
             <div className="schema-form__actions">
               <button
                 type="button"
-                className="button button--primary button--small"
+                className="btn btn-primary btn-sm"
                 onClick={() => handleExternal(attestation, formatIdentifier)}
                 disabled={working || disabled}
                 aria-label={`Insert external reference for ${attestation.name} (${formatName(formatIdentifier)})`}
@@ -538,7 +540,7 @@ export function SchemaReferenceControls({
               </button>
               <button
                 type="button"
-                className="button button--ghost button--small"
+                className="btn btn-outline btn-sm"
                 onClick={closeForm}
                 disabled={working}
               >
@@ -558,7 +560,7 @@ export function SchemaReferenceControls({
   }
 
   return (
-    <section className="detail-card" aria-labelledby={`${prefix}-heading`}>
+    <section className="content-section" aria-labelledby={`${prefix}-heading`}>
       <h2 id={`${prefix}-heading`}>Schema references</h2>
       <p className="field-hint schema-reference-intro">
         Add one schema reference per attestation format. The controls update the Draft JSON above;
@@ -575,14 +577,13 @@ export function SchemaReferenceControls({
       {disabledReason === null ? null : <p className="field-hint">{disabledReason}</p>}
 
       {result === null ? null : (
-        <div className="notice schema-result" role="status">
-          <p className="notice-title">{result.title}</p>
+        <Alert variant="success" role="status" title={result.title}>
           <p className="schema-result__value">
-            <code>{result.uri}</code>
+            <span className="data">{result.uri}</span>
           </p>
           {result.integrity === null ? null : (
             <p className="schema-result__value">
-              Integrity: <code>{result.integrity}</code>
+              Integrity: <span className="data">{result.integrity}</span>
             </p>
           )}
           {result.href === null ? null : (
@@ -592,13 +593,13 @@ export function SchemaReferenceControls({
               </a>
             </p>
           )}
-        </div>
+        </Alert>
       )}
 
       {status === null ? null : (
-        <p className="notice schema-status" role="status">
-          {status}
-        </p>
+        <Alert variant="info" role="status">
+          <p>{status}</p>
+        </Alert>
       )}
 
       {attestations.length === 0 ? (
@@ -649,13 +650,13 @@ export function SchemaReferenceControls({
                     {reference === null ? null : (
                       <>
                         <p className="schema-row__uri">
-                          <code>{reference.uri}</code>
+                          <span className="data">{reference.uri}</span>
                         </p>
                         <p className="schema-row__integrity">
                           {reference.integrity === null ? (
                             'No integrity pin'
                           ) : (
-                            <code>{reference.integrity}</code>
+                            <span className="data">{reference.integrity}</span>
                           )}
                           {pinState === 'matches' ? (
                             <span className="schema-row__pin schema-row__pin--ok">
@@ -677,7 +678,8 @@ export function SchemaReferenceControls({
                               <code>{hosted.mediaType}</code>
                             </span>
                             <span title={hosted.contentDigest}>
-                              SHA-256 <code>{formatDigest(hosted.contentDigest)}</code>
+                              SHA-256{' '}
+                              <span className="data">{formatDigest(hosted.contentDigest)}</span>
                             </span>
                             <a
                               href={hosted.url}
@@ -696,7 +698,7 @@ export function SchemaReferenceControls({
                   <div className="schema-row__actions">
                     <button
                       type="button"
-                      className="button button--ghost button--small"
+                      className="btn btn-outline btn-sm"
                       onClick={() => openForm(attestation, formatIdentifier)}
                       disabled={disabled}
                       aria-expanded={open}
@@ -707,7 +709,7 @@ export function SchemaReferenceControls({
                     {reference === null ? null : (
                       <button
                         type="button"
-                        className="button button--ghost button--small"
+                        className="btn btn-outline btn-sm"
                         onClick={() => handleRemove(attestation, formatIdentifier)}
                         disabled={disabled}
                         aria-label={`Remove schema for ${attestation.name} (${formatName(formatIdentifier)})`}

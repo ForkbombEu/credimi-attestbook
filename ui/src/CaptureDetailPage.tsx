@@ -13,8 +13,10 @@ import {
   captureProjectionText,
   captureValidationEligibility,
 } from './capture'
+import { Alert } from './components/Alert'
 import { ErrorState, LoadingState } from './components/CatalogStates'
-import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { CodeOutput } from './components/CodeOutput'
+import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { SessionRenewalForm, SignInRequiredNotice } from './components/SessionPrompt'
 import { ValidationReport } from './components/ValidationReport'
 import { describeReference, formatDigest } from './detail'
@@ -133,7 +135,7 @@ function MetadataRow({
 function EvidenceSummary({ detail }: { readonly detail: CaptureExplorerDetail }) {
   const party = detail.party
   return (
-    <section className="detail-card" aria-labelledby="capture-evidence-heading">
+    <section className="content-section" aria-labelledby="capture-evidence-heading">
       <h2 id="capture-evidence-heading">Normalized evidence</h2>
       <p className="table-note">
         Metadata is separated from the artifact. An inline artifact is shown only as its redacted
@@ -142,10 +144,10 @@ function EvidenceSummary({ detail }: { readonly detail: CaptureExplorerDetail })
       <dl className="metadata-grid">
         <MetadataRow label="Capture source">
           {CAPTURE_SOURCE_COMPONENT_LABELS[detail.source.component]} ·{' '}
-          <code>{detail.source.sourceId}</code>
+          <span className="data">{detail.source.sourceId}</span>
         </MetadataRow>
         <MetadataRow label="Source version">
-          {detail.provenance.sourceVersion ?? 'Not declared'}
+          <span className="data">{detail.provenance.sourceVersion ?? 'Not declared'}</span>
         </MetadataRow>
         <MetadataRow label="Transport">
           <span className="badge badge--mock">Mock</span>
@@ -162,29 +164,33 @@ function EvidenceSummary({ detail }: { readonly detail: CaptureExplorerDetail })
             'Not declared'
           ) : (
             <>
-              {party.name ?? party.role} (<code>{party.identifier}</code>)
+              {party.name ?? party.role} (<span className="data">{party.identifier}</span>)
             </>
           )}
         </MetadataRow>
         <MetadataRow label="Correlation id">
-          <code>{detail.correlationId}</code>
+          <span className="data">{detail.correlationId}</span>
         </MetadataRow>
         <MetadataRow label="Test execution reference">
           {detail.testExecutionRef ?? 'Not declared'}
         </MetadataRow>
-        <MetadataRow label="Captured at">{formatDate(detail.provenance.capturedAt)}</MetadataRow>
-        <MetadataRow label="Received at">{formatDate(detail.provenance.receivedAt)}</MetadataRow>
+        <MetadataRow label="Captured at">
+          <span className="data">{formatDate(detail.provenance.capturedAt)}</span>
+        </MetadataRow>
+        <MetadataRow label="Received at">
+          <span className="data">{formatDate(detail.provenance.receivedAt)}</span>
+        </MetadataRow>
         <MetadataRow label="Declared redaction">
           {CAPTURE_REDACTION_LABELS[detail.declaredRedaction.status]}
           {detail.declaredRedaction.policyRef === null ? null : (
             <>
               {' '}
-              · <code>{detail.declaredRedaction.policyRef}</code>
+              · <span className="data">{detail.declaredRedaction.policyRef}</span>
             </>
           )}
         </MetadataRow>
         <MetadataRow label="Artifact integrity">
-          <code>{formatDigest(detail.integrity.digest)}</code>{' '}
+          <span className="data">{formatDigest(detail.integrity.digest)}</span>{' '}
           {detail.integrity.verified ? '(verified)' : '(declared, not verified)'}
         </MetadataRow>
       </dl>
@@ -197,18 +203,20 @@ function EvidenceSummary({ detail }: { readonly detail: CaptureExplorerDetail })
         </p>
       )}
       {Object.keys(detail.metadata).length === 0 ? null : (
-        <details className="evidence-details">
+        <details className="disclosure">
           <summary>Source metadata</summary>
-          <dl className="evidence-grid">
-            {Object.entries(detail.metadata).map(([key, value]) => (
-              <div key={key}>
-                <dt>
-                  <code>{key}</code>
-                </dt>
-                <dd>{value === null ? 'null' : String(value)}</dd>
-              </div>
-            ))}
-          </dl>
+          <div className="disclosure-body">
+            <dl className="evidence-grid">
+              {Object.entries(detail.metadata).map(([key, value]) => (
+                <div key={key}>
+                  <dt>
+                    <code>{key}</code>
+                  </dt>
+                  <dd>{value === null ? 'null' : String(value)}</dd>
+                </div>
+              ))}
+            </dl>
+          </div>
         </details>
       )}
     </section>
@@ -218,11 +226,10 @@ function EvidenceSummary({ detail }: { readonly detail: CaptureExplorerDetail })
 function ArtifactEvidence({ detail }: { readonly detail: CaptureExplorerDetail }) {
   const projection = detail.artifactProjection
   return (
-    <section className="detail-card" aria-labelledby="capture-artifact-heading">
+    <section className="content-section" aria-labelledby="capture-artifact-heading">
       <h2 id="capture-artifact-heading">Artifact evidence</h2>
       {detail.artifact.availability === 'external' ? (
-        <div className="notice notice--warning">
-          <p className="notice-title">External artifact not fetched</p>
+        <Alert variant="warning" title="External artifact not fetched">
           <p>
             The artifact is stored behind an external reference. AttestBook has not fetched it, so
             its content, media type body and recomputed digest are unavailable; the declared digest
@@ -233,7 +240,7 @@ function ArtifactEvidence({ detail }: { readonly detail: CaptureExplorerDetail }
               Reference: <SafeReference uri={detail.artifact.uri} /> ({detail.artifact.mediaType})
             </p>
           )}
-        </div>
+        </Alert>
       ) : projection === null ? (
         <p className="table-note">No artifact projection is available for this capture.</p>
       ) : (
@@ -247,12 +254,12 @@ function ArtifactEvidence({ detail }: { readonly detail: CaptureExplorerDetail }
               {projection.redaction.policyRef === null ? null : (
                 <>
                   {' '}
-                  · <code>{projection.redaction.policyRef}</code>
+                  · <span className="data">{projection.redaction.policyRef}</span>
                 </>
               )}
             </MetadataRow>
             <MetadataRow label="Redacted digest">
-              <code>{formatDigest(projection.digest)}</code>
+              <span className="data">{formatDigest(projection.digest)}</span>
             </MetadataRow>
           </dl>
           {projection.redaction.redactedPaths.length === 0 ? null : (
@@ -273,14 +280,16 @@ function ArtifactEvidence({ detail }: { readonly detail: CaptureExplorerDetail }
             </ul>
           )}
           {projection.document === null ? (
-            <p className="notice">
-              This artifact is opaque (not JSON) or could not be parsed, so only full redaction is
-              available and the original structure is not preserved.
-            </p>
+            <Alert variant="info">
+              <p>
+                This artifact is opaque (not JSON) or could not be parsed, so only full redaction is
+                available and the original structure is not preserved.
+              </p>
+            </Alert>
           ) : (
-            <pre className="capture-projection" aria-label="Redacted artifact projection">
+            <CodeOutput label="Redacted artifact projection">
               {captureProjectionText(projection.document)}
-            </pre>
+            </CodeOutput>
           )}
         </>
       )}
@@ -290,7 +299,7 @@ function ArtifactEvidence({ detail }: { readonly detail: CaptureExplorerDetail }
 
 function Timeline({ events }: { readonly events: readonly CaptureTimelineEvent[] }) {
   return (
-    <section className="detail-card" aria-labelledby="capture-timeline-heading">
+    <section className="content-section" aria-labelledby="capture-timeline-heading">
       <h2 id="capture-timeline-heading">Evidence timeline</h2>
       <p className="table-note">
         Events are ordered by their own timestamps. The capture timestamp is asserted by the source;
@@ -301,7 +310,9 @@ function Timeline({ events }: { readonly events: readonly CaptureTimelineEvent[]
           <li key={`${event.kind}-${event.at}-${String(index)}`}>
             <span className="badge badge--untested">{event.kind}</span>
             <p className="capture-timeline__label">{event.label}</p>
-            <p className="version-meta">{formatDate(event.at)}</p>
+            <p className="version-meta">
+              <span className="data">{formatDate(event.at)}</span>
+            </p>
             <p className="capture-timeline__detail">{event.detail}</p>
           </li>
         ))}
@@ -312,7 +323,7 @@ function Timeline({ events }: { readonly events: readonly CaptureTimelineEvent[]
 
 function EvidenceGaps({ detail }: { readonly detail: CaptureExplorerDetail }) {
   return (
-    <section className="detail-card" aria-labelledby="capture-gaps-heading">
+    <section className="content-section" aria-labelledby="capture-gaps-heading">
       <h2 id="capture-gaps-heading">Missing and unavailable evidence</h2>
       {detail.evidenceGaps.length === 0 ? (
         <p className="table-note">
@@ -384,7 +395,7 @@ function CorrelationPanel({
       : null
 
   return (
-    <section className="detail-card" aria-labelledby="capture-correlation-heading">
+    <section className="content-section" aria-labelledby="capture-correlation-heading">
       <h2 id="capture-correlation-heading">Pinned rulebook correlation</h2>
       {detail.rulebook === null ? (
         <p className="table-note">
@@ -396,27 +407,28 @@ function CorrelationPanel({
             <AppLink href={rulebookPath(detail.rulebook.rulebookId)} onNavigate={onNavigate}>
               {detail.rulebook.rulebookName}
             </AppLink>{' '}
-            (<code>{detail.rulebook.rulebookId}</code>)
+            (<span className="data">{detail.rulebook.rulebookId}</span>)
           </MetadataRow>
           <MetadataRow label="Pinned version">
-            {detail.rulebook.version} · {detail.rulebook.rulebookStatus}
+            <span className="data">{detail.rulebook.version}</span> ·{' '}
+            {detail.rulebook.rulebookStatus}
           </MetadataRow>
           <MetadataRow label="Snapshot digest">
-            <code>{formatDigest(detail.rulebook.contentDigest)}</code> (verified on validation)
+            <span className="data">{formatDigest(detail.rulebook.contentDigest)}</span> (verified on
+            validation)
           </MetadataRow>
           <MetadataRow label="Specification">{detail.rulebook.specVersion}</MetadataRow>
           <MetadataRow label="Attestation type">{detail.rulebook.attestationType}</MetadataRow>
           <MetadataRow label="Correlated at">
-            {formatValidatedAt(detail.rulebook.boundAt)}
+            <span className="data">{formatValidatedAt(detail.rulebook.boundAt)}</span>
           </MetadataRow>
         </dl>
       )}
 
       {!eligibility.allowed ? (
-        <div className="notice notice--warning">
-          <p className="notice-title">Credential validation is not available for this evidence</p>
+        <Alert variant="warning" title="Credential validation is not available for this evidence">
           <p>{eligibility.reason}</p>
-        </div>
+        </Alert>
       ) : (
         <>
           <h3>
@@ -436,28 +448,33 @@ function CorrelationPanel({
             </p>
           ) : null}
           {catalog.status === 'error' ? (
-            <div className="state-panel state-panel--error" role="alert">
-              <p className="state-detail">{catalog.message}</p>
-              <button type="button" className="button button--primary" onClick={onRetryCatalog}>
-                Retry
-              </button>
-            </div>
+            <Alert
+              variant="destructive"
+              role="alert"
+              action={
+                <button type="button" className="btn btn-outline btn-sm" onClick={onRetryCatalog}>
+                  Retry
+                </button>
+              }
+            >
+              <p>{catalog.message}</p>
+            </Alert>
           ) : null}
 
           {formError === null ? null : (
-            <div className="state-panel state-panel--error playground-error-summary" role="alert">
-              <p className="state-detail">{formError}</p>
-            </div>
+            <Alert variant="destructive" role="alert">
+              <p>{formError}</p>
+            </Alert>
           )}
           {run.status === 'error' ? (
-            <div className="state-panel state-panel--error playground-error-summary" role="alert">
-              <p className="state-detail">{run.message}</p>
-            </div>
+            <Alert variant="destructive" role="alert">
+              <p>{run.message}</p>
+            </Alert>
           ) : null}
           {run.status === 'success' ? (
-            <p className="notice" role="status">
-              The validation result is linked to the pinned rulebook version shown above.
-            </p>
+            <Alert variant="info" role="status">
+              <p>The validation result is linked to the pinned rulebook version shown above.</p>
+            </Alert>
           ) : null}
 
           <div className="playground-grid capture-validation-form">
@@ -533,7 +550,7 @@ function CorrelationPanel({
             <div className="field capture-validation-submit">
               <button
                 type="button"
-                className="button button--primary"
+                className="btn btn-primary btn-lg"
                 onClick={onSubmit}
                 disabled={
                   !authenticated ||
@@ -554,7 +571,7 @@ function CorrelationPanel({
               {related.status === 'error' ? (
                 <div role="alert">
                   <p className="field-error">{related.message}</p>
-                  <button type="button" className="button button--ghost" onClick={onRetryRelated}>
+                  <button type="button" className="btn btn-outline btn-sm" onClick={onRetryRelated}>
                     Retry related reads
                   </button>
                 </div>
@@ -786,117 +803,124 @@ export function CaptureDetailPage({
 
       <SiteHeader section="Capture detail" onNavigate={onNavigate} />
 
-      <main className="page" id="main-content">
-        <nav className="breadcrumb" aria-label="Breadcrumb">
-          <ol>
-            <li>
-              <AppLink href={CAPTURES_PATH} onNavigate={onNavigate}>
-                Capture explorer
-              </AppLink>
-            </li>
-            <li aria-current="page">{captureId}</li>
-          </ol>
-        </nav>
-
-        <div id="capture-detail" tabIndex={-1}>
-          {state.status === 'loading' ? (
-            <LoadingState
-              title="Loading capture evidence…"
-              detail="Reading the mock-backed capture explorer API."
-              rowCount={4}
-            />
-          ) : null}
-
+      <main className="page-main" id="main-content">
+        <PageHero
+          title={state.status === 'not-found' ? 'Capture not found' : captureId}
+          alert={state.status === 'not-found'}
+          breadcrumb={
+            <nav className="breadcrumb" aria-label="Breadcrumb">
+              <ol>
+                <li>
+                  <AppLink href={CAPTURES_PATH} onNavigate={onNavigate}>
+                    Capture explorer
+                  </AppLink>
+                </li>
+                <li aria-current="page">
+                  <span className="data">{captureId}</span>
+                </li>
+              </ol>
+            </nav>
+          }
+        >
           {state.status === 'not-found' ? (
-            <div className="state-panel state-panel--empty" role="alert">
-              <h1 className="state-title">Capture not found</h1>
-              <p className="state-detail">
+            <>
+              <p>
                 No capture matches this address. It may have been removed, or the identifier may be
                 incorrect.
               </p>
-              <button type="button" className="button button--primary" onClick={notFoundAction}>
-                Back to the capture explorer
-              </button>
-            </div>
-          ) : null}
-
-          {state.status === 'error' ? (
-            <ErrorState
-              title="The capture could not be loaded."
-              message={state.message}
-              onRetry={reload}
-            />
-          ) : null}
-
-          {detail === null ? null : (
-            <>
-              <div className="page-heading">
-                <div>
-                  <p className="eyebrow">
-                    {CAPTURE_INTERACTION_LABELS[detail.interactionType]} capture
-                  </p>
-                  <h1>{detail.captureId}</h1>
-                  <p className="lede">
-                    Normalized evidence from <code>{detail.source.sourceId}</code>, joined with its
-                    correlation identifiers and the exact pinned rulebook version of any recorded
-                    validation.
-                  </p>
-                </div>
-              </div>
-
-              <div className="notice notice--warning" role="note">
-                <p className="notice-title">Mock-backed capture evidence</p>
-                <p>
-                  This capture comes from the deterministic local mock source (
-                  <code>transport: mock</code>). No live <code>capture-issuer</code> or{' '}
-                  <code>capture-verifier</code> interaction is shown, and none is claimed
-                  operational.
-                </p>
-              </div>
-
-              <EvidenceSummary detail={detail} />
-
-              <ArtifactEvidence detail={detail} />
-
-              {detail.validationResult === null ? null : (
-                <LinkedValidationReport result={detail.validationResult} />
-              )}
-
-              <CorrelationPanel
-                detail={detail}
-                catalog={catalog}
-                related={related}
-                values={values}
-                session={session}
-                sessionExpired={sessionExpired}
-                onSessionRenewed={() => {
-                  setSessionExpired(false)
-                  setRun({ status: 'idle' })
-                }}
-                formError={formError}
-                run={run}
-                onChange={handleChange}
-                onSubmit={handleSubmit}
-                onRetryCatalog={retryCatalog}
-                onRetryRelated={retryRelated}
-                onNavigate={onNavigate}
-              />
-
-              <EvidenceGaps detail={detail} />
-
-              <Timeline events={detail.timeline} />
-
-              <section className="detail-card" aria-labelledby="capture-limitations-heading">
-                <h2 id="capture-limitations-heading">Limitations</h2>
-                <ul className="limitation-list">
-                  {detail.limitations.map((limitation) => (
-                    <li key={limitation}>{limitation}</li>
-                  ))}
-                </ul>
-              </section>
+              <p className="hero-actions">
+                <button type="button" className="btn btn-outline btn-lg" onClick={notFoundAction}>
+                  Back to the capture explorer
+                </button>
+              </p>
             </>
+          ) : detail === null ? null : (
+            <p>
+              Normalized evidence from <span className="data">{detail.source.sourceId}</span>,
+              joined with its correlation identifiers and the exact pinned rulebook version of any
+              recorded validation.
+            </p>
           )}
-        </div>
+        </PageHero>
+
+        {state.status === 'not-found' ? null : (
+          <div className="page">
+            <div id="capture-detail" tabIndex={-1}>
+              {state.status === 'loading' ? (
+                <LoadingState
+                  title="Loading capture evidence…"
+                  detail="Reading the mock-backed capture explorer API."
+                  rowCount={4}
+                />
+              ) : null}
+
+              {state.status === 'error' ? (
+                <ErrorState
+                  title="The capture could not be loaded."
+                  message={state.message}
+                  onRetry={reload}
+                />
+              ) : null}
+
+              {detail === null ? null : (
+                <>
+                  <Alert variant="warning" title="Mock-backed capture evidence" role="note">
+                    <p>
+                      This capture comes from the deterministic local mock source (
+                      <code>transport: mock</code>). No live <code>capture-issuer</code> or{' '}
+                      <code>capture-verifier</code> interaction is shown, and none is claimed
+                      operational.
+                    </p>
+                  </Alert>
+
+                  <EvidenceSummary detail={detail} />
+
+                  <ArtifactEvidence detail={detail} />
+
+                  {detail.validationResult === null ? null : (
+                    <LinkedValidationReport result={detail.validationResult} />
+                  )}
+
+                  <CorrelationPanel
+                    detail={detail}
+                    catalog={catalog}
+                    related={related}
+                    values={values}
+                    session={session}
+                    sessionExpired={sessionExpired}
+                    onSessionRenewed={() => {
+                      setSessionExpired(false)
+                      setRun({ status: 'idle' })
+                    }}
+                    formError={formError}
+                    run={run}
+                    onChange={handleChange}
+                    onSubmit={handleSubmit}
+                    onRetryCatalog={retryCatalog}
+                    onRetryRelated={retryRelated}
+                    onNavigate={onNavigate}
+                  />
+
+                  <EvidenceGaps detail={detail} />
+
+                  <Timeline events={detail.timeline} />
+
+                  <section
+                    className="content-section"
+                    aria-labelledby="capture-limitations-heading"
+                  >
+                    <h2 id="capture-limitations-heading">Limitations</h2>
+                    <ul className="limitation-list">
+                      {detail.limitations.map((limitation) => (
+                        <li key={limitation}>{limitation}</li>
+                      ))}
+                    </ul>
+                  </section>
+                </>
+              )}
+            </div>
+          </div>
+        )}
       </main>
 
       <SiteFooter />

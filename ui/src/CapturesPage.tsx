@@ -10,8 +10,9 @@ import {
   CAPTURE_SOURCE_COMPONENT_LABELS,
   captureBindingLabel,
 } from './capture'
+import { Alert } from './components/Alert'
 import { ErrorState, LoadingState } from './components/CatalogStates'
-import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { ValidationStatusBadge } from './components/Badges'
 import { AppLink, CATALOG_PATH, capturePath } from './router'
 import type { CaptureExplorerPage, CaptureExplorerSummary } from './types'
@@ -68,7 +69,7 @@ function CaptureRow({
           {capture.captureId}
         </AppLink>
         <p className="version-meta">
-          correlation <code>{capture.correlationId}</code>
+          correlation <span className="data">{capture.correlationId}</span>
         </p>
         <p className="version-meta">
           {capture.testExecutionRef === null
@@ -91,8 +92,10 @@ function CaptureRow({
         </p>
       </td>
       <td data-label="Captured">
-        <span>{formatDate(capture.provenance.capturedAt)}</span>
-        <p className="version-meta">received {formatDate(capture.provenance.receivedAt)}</p>
+        <span className="data">{formatDate(capture.provenance.capturedAt)}</span>
+        <p className="version-meta">
+          received <span className="data">{formatDate(capture.provenance.receivedAt)}</span>
+        </p>
       </td>
       <td data-label="Rulebook & validation">
         <span>{captureBindingLabel(capture)}</span>
@@ -160,106 +163,109 @@ export function CapturesPage({ api, onNavigate }: CapturesPageProps) {
 
       <SiteHeader section="Capture explorer" onNavigate={onNavigate} />
 
-      <main className="page" id="main-content">
-        <nav className="breadcrumb" aria-label="Breadcrumb">
-          <ol>
-            <li>
-              <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                Rulebook catalog
-              </AppLink>
-            </li>
-            <li aria-current="page">Capture explorer</li>
-          </ol>
-        </nav>
-
-        <div className="page-heading">
-          <div>
-            <p className="eyebrow">Capture integration</p>
-            <h1>Capture explorer</h1>
-            <p className="lede">
-              Normalized evidence from issued and presented credentials, correlated with the pinned
-              rulebook version a validation ran against and with the source&rsquo;s opaque test
-              execution reference.
-            </p>
-          </div>
-        </div>
-
-        <div className="notice notice--warning" role="note">
-          <p className="notice-title">Mock-backed explorer</p>
+      <main className="page-main" id="main-content">
+        <PageHero
+          title="Capture explorer"
+          breadcrumb={
+            <nav className="breadcrumb" aria-label="Breadcrumb">
+              <ol>
+                <li>
+                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
+                    Rulebook catalog
+                  </AppLink>
+                </li>
+                <li aria-current="page">Capture explorer</li>
+              </ol>
+            </nav>
+          }
+        >
           <p>
-            Every capture is served by the deterministic local mock source and is labelled{' '}
-            <code>mock</code>. No live <code>capture-issuer</code> or <code>capture-verifier</code>{' '}
-            interaction is shown, and AttestBook is not claimed operational for either component.
+            Normalized evidence from issued and presented credentials, correlated with the pinned
+            rulebook version a validation ran against and with the source&rsquo;s opaque test
+            execution reference.
           </p>
-        </div>
+        </PageHero>
 
-        <div id="captures" tabIndex={-1}>
-          {state.status === 'loading' ? (
-            <LoadingState
-              title="Loading capture evidence…"
-              detail="Reading the mock-backed capture explorer API."
-              rowCount={5}
-            />
-          ) : null}
+        <div className="page">
+          <Alert variant="warning" title="Mock-backed explorer" role="note">
+            <p>
+              Every capture is served by the deterministic local mock source and is labelled{' '}
+              <code>mock</code>. No live <code>capture-issuer</code> or{' '}
+              <code>capture-verifier</code> interaction is shown, and AttestBook is not claimed
+              operational for either component.
+            </p>
+          </Alert>
 
-          {state.status === 'error' ? (
-            <ErrorState
-              title="The capture explorer could not be loaded."
-              message={state.message}
-              onRetry={reload}
-            />
-          ) : null}
+          <div id="captures" tabIndex={-1}>
+            {state.status === 'loading' ? (
+              <LoadingState
+                title="Loading capture evidence…"
+                detail="Reading the mock-backed capture explorer API."
+                rowCount={5}
+              />
+            ) : null}
 
-          {state.status === 'ready' && state.page.data.length === 0 ? (
-            <div className="state-panel state-panel--empty">
-              <h2 className="state-title">No capture evidence yet</h2>
-              <p className="state-detail">
-                The configured capture source has not served any normalized artifact.
-              </p>
-            </div>
-          ) : null}
+            {state.status === 'error' ? (
+              <ErrorState
+                title="The capture explorer could not be loaded."
+                message={state.message}
+                onRetry={reload}
+              />
+            ) : null}
 
-          {state.status === 'ready' && state.page.data.length > 0 ? (
-            <>
-              <p className="result-count" role="status">
-                <strong>{state.page.data.length}</strong> of {total}{' '}
-                {total === 1 ? 'capture' : 'captures'} shown
-              </p>
-              <div className="table-wrap">
-                <table className="catalog-table capture-table">
-                  <caption className="sr-only">
-                    Normalized capture evidence with its source, correlation identifiers, pinned
-                    rulebook version and explicit evidence gaps.
-                  </caption>
-                  <thead>
-                    <tr>
-                      <th scope="col">Capture</th>
-                      <th scope="col">Source &amp; interaction</th>
-                      <th scope="col">Artifact</th>
-                      <th scope="col">Captured</th>
-                      <th scope="col">Rulebook &amp; validation</th>
-                      <th scope="col">Evidence</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {state.page.data.map((capture) => (
-                      <CaptureRow
-                        key={capture.captureId}
-                        capture={capture}
-                        onNavigate={onNavigate}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              {total > state.page.data.length ? (
-                <p className="notice">
-                  This view shows the first {state.page.data.length} of {total} captures; the
-                  explorer API page limit is {state.page.pagination.limit}.
+            {state.status === 'ready' && state.page.data.length === 0 ? (
+              <div className="state-panel state-panel--empty">
+                <h2 className="state-title">No capture evidence yet</h2>
+                <p className="state-detail">
+                  The configured capture source has not served any normalized artifact.
                 </p>
-              ) : null}
-            </>
-          ) : null}
+              </div>
+            ) : null}
+
+            {state.status === 'ready' && state.page.data.length > 0 ? (
+              <>
+                <p className="result-count" role="status">
+                  <strong>{state.page.data.length}</strong> of {total}{' '}
+                  {total === 1 ? 'capture' : 'captures'} shown
+                </p>
+                <div className="table-wrap">
+                  <table className="catalog-table capture-table">
+                    <caption className="sr-only">
+                      Normalized capture evidence with its source, correlation identifiers, pinned
+                      rulebook version and explicit evidence gaps.
+                    </caption>
+                    <thead>
+                      <tr>
+                        <th scope="col">Capture</th>
+                        <th scope="col">Source &amp; interaction</th>
+                        <th scope="col">Artifact</th>
+                        <th scope="col">Captured</th>
+                        <th scope="col">Rulebook &amp; validation</th>
+                        <th scope="col">Evidence</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {state.page.data.map((capture) => (
+                        <CaptureRow
+                          key={capture.captureId}
+                          capture={capture}
+                          onNavigate={onNavigate}
+                        />
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {total > state.page.data.length ? (
+                  <Alert variant="info">
+                    <p>
+                      This view shows the first {state.page.data.length} of {total} captures; the
+                      explorer API page limit is {state.page.pagination.limit}.
+                    </p>
+                  </Alert>
+                ) : null}
+              </>
+            ) : null}
+          </div>
         </div>
       </main>
 

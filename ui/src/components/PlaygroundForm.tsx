@@ -9,6 +9,7 @@ import {
 } from '../playground'
 import type { Attestation, CredentialFormatHint, Rulebook, RulebookVersion } from '../types'
 import { PUBLICATION_STATUS_LABELS } from '../catalog'
+import { Alert } from './Alert'
 
 export type RelatedState = 'idle' | 'loading' | 'ready' | 'error'
 
@@ -74,7 +75,7 @@ export function PlaygroundForm({
   const errorEntries = Object.entries(errors) as [PlaygroundFormField, string][]
 
   return (
-    <section className="detail-card" aria-labelledby="playground-request-heading">
+    <section className="content-section" aria-labelledby="playground-request-heading">
       <h2 id="playground-request-heading">Validation request</h2>
       <p className="table-note playground-disclosure">
         The credential is sent only to <code>POST /api/v1/credentials/validate</code> for this run.
@@ -82,14 +83,18 @@ export function PlaygroundForm({
       </p>
 
       {formHasErrors ? (
-        <div className="state-panel state-panel--error playground-error-summary" role="alert">
-          <h3 className="state-title">Check the request before running validation</h3>
+        <Alert
+          variant="destructive"
+          title="Check the request before running validation"
+          titleAs="h3"
+          role="alert"
+        >
           <ul>
             {errorEntries.map(([field, message]) => (
               <li key={field}>{message}</li>
             ))}
           </ul>
-        </div>
+        </Alert>
       ) : null}
 
       <div className="playground-grid">
@@ -197,19 +202,18 @@ export function PlaygroundForm({
       </div>
 
       {relatedState === 'error' ? (
-        <div className="notice notice--warning" role="alert">
-          <p className="notice-title">
-            The rulebook versions or attestation types could not be loaded.
-          </p>
+        <Alert
+          variant="warning"
+          title="The rulebook versions or attestation types could not be loaded."
+          role="alert"
+          action={
+            <button type="button" className="btn btn-outline btn-sm" onClick={onRetryRelated}>
+              Retry rulebook details
+            </button>
+          }
+        >
           <p>{relatedMessage ?? 'The related rulebook read failed.'}</p>
-          <button
-            type="button"
-            className="button button--ghost button--small"
-            onClick={onRetryRelated}
-          >
-            Retry rulebook details
-          </button>
-        </div>
+        </Alert>
       ) : null}
 
       {selectedRulebook === null ? null : (
@@ -218,7 +222,7 @@ export function PlaygroundForm({
           {values.rulebookVersion === '' ? null : (
             <>
               {' '}
-              version <code>{values.rulebookVersion}</code>
+              version <span className="data">{values.rulebookVersion}</span>
             </>
           )}
           .
@@ -274,13 +278,18 @@ export function PlaygroundForm({
       <div className="playground-actions">
         <button
           type="button"
-          className="button button--primary"
+          className="btn btn-primary btn-lg"
           onClick={onSubmit}
           disabled={running}
         >
           {running ? 'Validating…' : 'Run validation'}
         </button>
-        <button type="button" className="button button--ghost" onClick={onClear} disabled={running}>
+        <button
+          type="button"
+          className="btn btn-outline btn-lg"
+          onClick={onClear}
+          disabled={running}
+        >
           Clear form
         </button>
         <span className="playground-run-status" role="status" aria-live="polite">

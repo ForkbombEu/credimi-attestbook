@@ -2,17 +2,16 @@ import { useCallback, useEffect, useState } from 'react'
 
 import type { CatalogApi } from './api'
 import { CatalogApiError } from './api'
-import { formatDate } from './catalog'
+import { Alert } from './components/Alert'
+import { StatusBadge } from './components/Badges'
 import {
   AttestationsSection,
   CompatibilitySection,
-  MetadataSection,
-  ProvenanceSection,
-  SchemaReferencesSection,
+  RulebookSummary,
   VersionsSection,
   VersionSummary,
 } from './components/DetailSections'
-import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { ErrorState, LoadingState } from './components/CatalogStates'
 import { VersionComparisonPanel } from './components/VersionComparisonPanel'
 import type { RulebookDetailSnapshot } from './detail'
@@ -33,6 +32,7 @@ type DetailState =
   | { readonly status: 'error'; readonly message: string }
 
 export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDetailPageProps) {
+  const session = useSession()
   const [state, setState] = useState<DetailState>({ status: 'loading' })
   const [reloadToken, setReloadToken] = useState(0)
 
@@ -78,6 +78,53 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
   const backToCatalog = useCallback(() => onNavigate(CATALOG_PATH), [onNavigate])
 
   const heading = state.status === 'ready' ? state.snapshot.rulebook.name : 'Rulebook details'
+  const breadcrumb = (
+    <nav className="breadcrumb" aria-label="Breadcrumb">
+      <ol>
+        <li>
+          <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
+            Rulebook catalog
+          </AppLink>
+        </li>
+        <li aria-current="page">{heading}</li>
+      </ol>
+    </nav>
+  )
+  // Only the signed-in administrator bound to the owning provider is offered
+  // the editor; the server independently enforces the same ownership rule.
+  const canEditDraft =
+    state.status === 'ready' &&
+    session.status === 'authenticated' &&
+    session.session !== null &&
+    session.session.provider.id === state.snapshot.rulebook.providerId
+
+  if (state.status === 'not-found') {
+    return (
+      <div className="app-shell">
+        <SkipLink href="#rulebook-detail">Skip to rulebook details</SkipLink>
+
+        <SiteHeader section="Rulebook detail" onNavigate={onNavigate} />
+
+        <main className="page-main" id="main-content">
+          <div id="rulebook-detail" tabIndex={-1}>
+            <PageHero title="Rulebook not found" alert breadcrumb={breadcrumb}>
+              <p>
+                No rulebook matches this address. It may have been removed, or the identifier may be
+                incorrect.
+              </p>
+              <p className="hero-actions">
+                <button type="button" className="btn btn-outline btn-lg" onClick={backToCatalog}>
+                  Back to the catalog
+                </button>
+              </p>
+            </PageHero>
+          </div>
+        </main>
+
+        <SiteFooter />
+      </div>
+    )
+  }
 
   return (
     <div className="app-shell">
@@ -85,38 +132,50 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
 
       <SiteHeader section="Rulebook detail" onNavigate={onNavigate} />
 
-      <main className="page" id="main-content">
-        <nav className="breadcrumb" aria-label="Breadcrumb">
-          <ol>
-            <li>
-              <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                Rulebook catalog
-              </AppLink>
-            </li>
-            <li aria-current="page">{heading}</li>
-          </ol>
-        </nav>
+      <main className="page-main" id="main-content">
+        {state.status === 'ready' ? (
+          <PageHero
+            title={heading}
+            breadcrumb={breadcrumb}
+            badge={<StatusBadge status={state.snapshot.rulebook.publicationStatus} />}
+          >
+            {state.snapshot.rulebook.description === '' ? null : (
+              <p>{state.snapshot.rulebook.description}</p>
+            )}
+            <RulebookSummary snapshot={state.snapshot} />
+            <div className="detail-actions">
+              <VersionSummary snapshot={state.snapshot} />
+              {state.snapshot.rulebook.publicationStatus === 'draft' && canEditDraft ? (
+                <AppLink
+                  className="btn btn-outline btn-lg"
+                  href={rulebookEditorPath(state.snapshot.rulebook.id)}
+                  onNavigate={onNavigate}
+                >
+                  Edit draft
+                </AppLink>
+              ) : null}
+              {state.snapshot.rulebook.publicationStatus === 'published' && canEditDraft ? (
+                <AppLink
+                  className="btn btn-outline btn-lg"
+                  href={rulebookEditorPath(state.snapshot.rulebook.id)}
+                  onNavigate={onNavigate}
+                >
+                  Create new version
+                </AppLink>
+              ) : null}
+            </div>
+          </PageHero>
+        ) : (
+          <PageHero title={heading} breadcrumb={breadcrumb} />
+        )}
 
-        <div id="rulebook-detail" tabIndex={-1}>
+        <div className="page" id="rulebook-detail" tabIndex={-1}>
           {state.status === 'loading' ? (
             <LoadingState
               title="Loading rulebook…"
               detail="Reading the public rulebook API."
               rowCount={5}
             />
-          ) : null}
-
-          {state.status === 'not-found' ? (
-            <div className="state-panel state-panel--empty" role="alert">
-              <h1 className="state-title">Rulebook not found</h1>
-              <p className="state-detail">
-                No rulebook matches this address. It may have been removed, or the identifier may be
-                incorrect.
-              </p>
-              <button type="button" className="button button--primary" onClick={backToCatalog}>
-                Back to the catalog
-              </button>
-            </div>
           ) : null}
 
           {state.status === 'error' ? (
@@ -127,9 +186,7 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
             />
           ) : null}
 
-          {state.status === 'ready' ? (
-            <DetailContent api={api} snapshot={state.snapshot} onNavigate={onNavigate} />
-          ) : null}
+          {state.status === 'ready' ? <DetailContent api={api} snapshot={state.snapshot} /> : null}
         </div>
       </main>
 
@@ -141,67 +198,20 @@ export function RulebookDetailPage({ api, rulebookId, onNavigate }: RulebookDeta
 function DetailContent({
   api,
   snapshot,
-  onNavigate,
 }: {
   readonly api: CatalogApi
   readonly snapshot: RulebookDetailSnapshot
-  readonly onNavigate: (path: string) => void
 }) {
-  const session = useSession()
-  const { rulebook, versions } = snapshot
-  // Only the signed-in administrator bound to the owning provider is offered
-  // the editor; the server independently enforces the same ownership rule.
-  const canEditDraft =
-    session.status === 'authenticated' &&
-    session.session !== null &&
-    session.session.provider.id === rulebook.providerId
+  const { rulebook, versions, availability } = snapshot
   return (
     <>
-      <header className="detail-heading">
-        <p className="eyebrow">Rulebook</p>
-        <h1>{rulebook.name}</h1>
-        {rulebook.description === '' ? null : <p className="lede">{rulebook.description}</p>}
-        <p className="detail-heading__meta">
-          <span>{rulebook.applicableSpec}</span>
-          <span aria-hidden="true"> · </span>
-          <span>Last updated {formatDate(rulebook.updatedAt)}</span>
-          {versions.length > 0 ? (
-            <>
-              <span aria-hidden="true"> · </span>
-              <span>{versions.length === 1 ? '1 version' : `${versions.length} versions`}</span>
-            </>
-          ) : null}
-        </p>
-        <div className="detail-actions">
-          <VersionSummary snapshot={snapshot} />
-          {rulebook.publicationStatus === 'draft' && canEditDraft ? (
-            <AppLink
-              className="button button--ghost"
-              href={rulebookEditorPath(rulebook.id)}
-              onNavigate={onNavigate}
-            >
-              Edit draft
-            </AppLink>
-          ) : null}
-          {rulebook.publicationStatus === 'published' && canEditDraft ? (
-            <AppLink
-              className="button button--ghost"
-              href={rulebookEditorPath(rulebook.id)}
-              onNavigate={onNavigate}
-            >
-              Create new version
-            </AppLink>
-          ) : null}
-        </div>
-      </header>
-
-      <div className="detail-grid">
-        <MetadataSection snapshot={snapshot} />
-        <ProvenanceSection snapshot={snapshot} />
-      </div>
+      {availability.provider ? null : (
+        <Alert variant="info">
+          <p>The provider list could not be loaded, so only the provider identifier is shown.</p>
+        </Alert>
+      )}
 
       <AttestationsSection snapshot={snapshot} />
-      <SchemaReferencesSection snapshot={snapshot} />
       <CompatibilitySection />
       <VersionsSection snapshot={snapshot} api={api} />
       <VersionComparisonPanel api={api} rulebookId={rulebook.id} versions={versions} />
