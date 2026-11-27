@@ -21,13 +21,14 @@ import {
 } from '../detail'
 import type { HostedSchema, Rulebook, SchemaReference, VersionSchemaReferences } from '../types'
 
+import { Alert } from './Alert'
 import { CompatibilityBadge, StatusBadge } from './Badges'
 
 function SectionUnavailable({ children }: { readonly children: string }) {
   return (
-    <p className="notice notice--warning" role="status">
-      {children}
-    </p>
+    <Alert variant="warning" role="status">
+      <p>{children}</p>
+    </Alert>
   )
 }
 
@@ -110,7 +111,9 @@ function ReferenceIntegrity({ reference }: { readonly reference: ReferenceWithHo
       {reference.integrity === null ? (
         <span className="muted">None recorded</span>
       ) : (
-        <code title={reference.integrity}>{reference.integrity}</code>
+        <span className="data" title={reference.integrity}>
+          {reference.integrity}
+        </span>
       )}
       {state === 'matches' ? (
         <span className="reference-pin reference-pin--ok">Pin matches stored digest</span>
@@ -169,9 +172,9 @@ function SchemaReferenceTable({
                       </span>
                       <span>
                         SHA-256:{' '}
-                        <code className="digest" title={hosted.contentDigest}>
+                        <span className="data" title={hosted.contentDigest}>
                           {formatDigest(hosted.contentDigest)}
-                        </code>
+                        </span>
                       </span>
                     </p>
                   )}
@@ -187,7 +190,7 @@ function SchemaReferenceTable({
                     <span className="muted">—</span>
                   ) : (
                     <a
-                      className="button button--small button--ghost"
+                      className="btn btn-outline btn-sm"
                       href={hosted.url}
                       download={hostedSchemaDownloadName(hosted)}
                       aria-label={`Download the ${hostedSchemaKindLabel(hosted.kind)} document for ${row.formatIdentifier}`}
@@ -225,7 +228,7 @@ export function MetadataSection({ snapshot }: { readonly snapshot: RulebookDetai
         <div>
           <dt>Rulebook ID</dt>
           <dd>
-            <code>{rulebook.id}</code>
+            <span className="data">{rulebook.id}</span>
           </dd>
         </div>
         <div>
@@ -249,7 +252,7 @@ export function MetadataSection({ snapshot }: { readonly snapshot: RulebookDetai
         <div>
           <dt>Applicable specification</dt>
           <dd>
-            <code>{rulebook.applicableSpec}</code>
+            <span className="data">{rulebook.applicableSpec}</span>
           </dd>
         </div>
         <div>
@@ -266,9 +269,9 @@ export function MetadataSection({ snapshot }: { readonly snapshot: RulebookDetai
         </div>
       </dl>
       {availability.provider ? null : (
-        <p className="notice">
-          The provider list could not be loaded, so only the provider identifier is shown.
-        </p>
+        <Alert variant="info">
+          <p>The provider list could not be loaded, so only the provider identifier is shown.</p>
+        </Alert>
       )}
     </section>
   )
@@ -550,18 +553,23 @@ function VersionSchemaReferencesPanel({
   }
   if (state.status === 'error') {
     return (
-      <div className="version-references__status" role="alert">
+      <Alert
+        variant="destructive"
+        role="alert"
+        action={
+          <button
+            type="button"
+            className="btn btn-outline btn-sm"
+            onClick={() => {
+              void load()
+            }}
+          >
+            Retry
+          </button>
+        }
+      >
         <p>{state.message}</p>
-        <button
-          type="button"
-          className="button button--small button--ghost"
-          onClick={() => {
-            void load()
-          }}
-        >
-          Retry
-        </button>
-      </div>
+      </Alert>
     )
   }
 
@@ -573,10 +581,10 @@ function VersionSchemaReferencesPanel({
     <div className="version-references">
       <h3 className="version-references__title">Schema references in version {data.version}</h3>
       <p className="version-references__pin">
-        Exact frozen version <code>{data.version}</code> · SHA-256{' '}
-        <code className="digest" title={data.contentDigest}>
+        Exact frozen version <span className="data">{data.version}</span> · SHA-256{' '}
+        <span className="data" title={data.contentDigest}>
           {formatDigest(data.contentDigest)}
-        </code>
+        </span>
       </p>
       {referenceCount === 0 ? (
         <p className="muted">No schema references are recorded in this version.</p>
@@ -656,7 +664,7 @@ export function VersionsSection({
                     <Fragment key={version.id}>
                       <tr>
                         <th scope="row">
-                          <code>{version.version}</code>
+                          <span className="data">{version.version}</span>
                           {current?.id === version.id ? (
                             <span className="badge badge--latest">Latest</span>
                           ) : null}
@@ -665,12 +673,12 @@ export function VersionsSection({
                           <StatusBadge status={version.status} />
                         </td>
                         <td>
-                          <code>{version.specVersion}</code>
+                          <span className="data">{version.specVersion}</span>
                         </td>
                         <td>
-                          <code className="digest" title={version.contentDigest}>
+                          <span className="data" title={version.contentDigest}>
                             {formatDigest(version.contentDigest)}
-                          </code>
+                          </span>
                         </td>
                         <td>
                           <time dateTime={version.createdAt}>{formatDate(version.createdAt)}</time>
@@ -688,7 +696,7 @@ export function VersionsSection({
                           <div className="version-actions">
                             <button
                               type="button"
-                              className="button button--small button--ghost"
+                              className="btn btn-outline btn-sm"
                               aria-expanded={open}
                               aria-controls={panelId}
                               aria-label={`${open ? 'Hide' : 'Inspect'} references for version ${version.version}`}
@@ -699,7 +707,7 @@ export function VersionsSection({
                               {open ? 'Hide references' : 'Inspect references'}
                             </button>
                             <a
-                              className="button button--small button--ghost"
+                              className="btn btn-outline btn-sm"
                               href={versionContentPath(rulebook.id, version.version)}
                               download={`rulebook-${rulebook.id}-${version.version}.json`}
                               aria-label={`Export version ${version.version} snapshot`}
@@ -747,7 +755,7 @@ export function VersionSummary({ snapshot }: { readonly snapshot: RulebookDetail
   }
   return (
     <a
-      className="button button--primary"
+      className="btn btn-outline btn-lg"
       href={versionContentPath(snapshot.rulebook.id, current.version)}
       download={`rulebook-${snapshot.rulebook.id}-${current.version}.json`}
     >

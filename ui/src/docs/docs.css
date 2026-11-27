@@ -81,7 +81,7 @@ body {
 .docs-chrome__inner {
   display: flex;
   height: var(--docs-chrome-height);
-  max-width: var(--max-width, 1280px);
+  max-width: var(--max-width, 1440px);
   margin: 0 auto;
   padding: 0 var(--app-page-gutter, 24px);
   align-items: center;
@@ -97,23 +97,20 @@ body {
   text-decoration: none;
 }
 
+/* DESIGN.md §8 topbar identity: the 32px Credimi mark beside the product
+   title, matching the SPA topbar. */
 .docs-chrome__logo {
   display: block;
-  width: auto;
-  height: 22px;
-}
-
-.docs-chrome__divider {
-  width: 1px;
-  height: 22px;
-  background: var(--border-strong, #d8cfff);
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
 }
 
 .docs-chrome__product {
   color: var(--fg, #2f294b);
   font-size: var(--fs-md, 16px);
   font-weight: 600;
-  letter-spacing: -0.005em;
+  line-height: 28px;
 }
 
 .docs-chrome__nav {

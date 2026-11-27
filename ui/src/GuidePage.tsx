@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 
 import { GuideNavigation } from './components/GuideNavigation'
-import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { GuideMarkdown } from './GuideMarkdown'
 import { findGuide, GUIDE_DOCUMENTS } from './guide'
 import { AppLink, CATALOG_PATH, DOCS_PATH, GUIDE_PATH, guidePath } from './router'
@@ -27,64 +27,67 @@ export function GuideIndexPage({ onNavigate }: GuidePageProps) {
 
       <SiteHeader section="Product guide" onNavigate={onNavigate} />
 
-      <main className="page" id="main-content">
-        <nav className="breadcrumb" aria-label="Breadcrumb">
-          <ol>
-            <li>
-              <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                Catalog
-              </AppLink>
-            </li>
-            <li aria-current="page">Guides</li>
-          </ol>
-        </nav>
+      <main className="page-main" id="main-content">
+        <PageHero
+          title="AttestBook product guide"
+          breadcrumb={
+            <nav className="breadcrumb" aria-label="Breadcrumb">
+              <ol>
+                <li>
+                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
+                    Catalog
+                  </AppLink>
+                </li>
+                <li aria-current="page">Guides</li>
+              </ol>
+            </nav>
+          }
+        >
+          <p>
+            Short, task-focused guides for finding rulebooks, validating credentials and reading the
+            public product API. Every page is public and bundled with the application.
+          </p>
+        </PageHero>
 
-        <div className="guide-landing">
-          <div className="guide-landing__main">
-            <div className="page-heading">
-              <p className="eyebrow">Documentation</p>
-              <h1>AttestBook product guide</h1>
-              <p className="lede">
-                Short, task-focused guides for finding rulebooks, validating credentials and reading
-                the public product API. Every page is public and bundled with the application.
-              </p>
+        <div className="page">
+          <div className="guide-landing">
+            <div className="guide-landing__main">
+              <div id="guide-content" tabIndex={-1}>
+                <h2 className="guide-section-title" id="guide-pages">
+                  Product guides
+                </h2>
+                <ul className="guide-index link-cards" aria-labelledby="guide-pages">
+                  {GUIDE_DOCUMENTS.map((guide) => (
+                    <li key={guide.slug}>
+                      <AppLink
+                        className="link-card"
+                        href={guidePath(guide.slug)}
+                        onNavigate={onNavigate}
+                      >
+                        <h3>{guide.title}</h3>
+                        <p className="guide-index__description">{guide.description}</p>
+                      </AppLink>
+                    </li>
+                  ))}
+                </ul>
+              </div>
             </div>
 
-            <div id="guide-content" tabIndex={-1}>
-              <h2 className="guide-section-title" id="guide-pages">
-                Product guides
-              </h2>
-              <ul className="guide-index" aria-labelledby="guide-pages">
-                {GUIDE_DOCUMENTS.map((guide) => (
-                  <li key={guide.slug}>
-                    <AppLink
-                      className="guide-index__card"
-                      href={guidePath(guide.slug)}
-                      onNavigate={onNavigate}
-                    >
-                      <span className="guide-index__title">{guide.title}</span>
-                      <span className="guide-index__description">{guide.description}</span>
-                    </AppLink>
-                  </li>
-                ))}
-              </ul>
-            </div>
+            <aside className="guide-landing__aside" aria-labelledby="guide-api-reference">
+              <div className="guide-reference">
+                <p className="eyebrow">Reference</p>
+                <h2 id="guide-api-reference">API reference</h2>
+                <p className="guide-reference__detail">
+                  Every operation and schema of the public product API, rendered from the canonical
+                  OpenAPI contract. It is a separate reference page, not part of this guide.
+                </p>
+                <a className="btn btn-primary btn-md" href={DOCS_PATH}>
+                  Open the API reference
+                  <span aria-hidden="true"> ↗</span>
+                </a>
+              </div>
+            </aside>
           </div>
-
-          <aside className="guide-landing__aside" aria-labelledby="guide-api-reference">
-            <div className="guide-reference">
-              <p className="eyebrow">Reference</p>
-              <h2 id="guide-api-reference">API reference</h2>
-              <p className="guide-reference__detail">
-                Every operation and schema of the public product API, rendered from the canonical
-                OpenAPI contract. It is a separate reference page, not part of this guide.
-              </p>
-              <a className="button button--primary" href={DOCS_PATH}>
-                Open the API reference
-                <span aria-hidden="true"> ↗</span>
-              </a>
-            </div>
-          </aside>
         </div>
       </main>
 
@@ -120,16 +123,11 @@ export function GuideEntryPage({ slug, onNavigate }: GuideEntryPageProps) {
 
       <SiteHeader section="Product guide" onNavigate={onNavigate} />
 
-      <main className="page" id="main-content">
-        <div className="guide-layout">
-          <aside className="guide-sidebar">
-            <GuideNavigation
-              state={guide === null ? { kind: 'not-found' } : { kind: 'page', slug: guide.slug }}
-              onNavigate={onNavigate}
-            />
-          </aside>
-
-          <div className="guide-content">
+      <main className="page-main" id="main-content">
+        <PageHero
+          title={guide === null ? 'Guide page not found' : guide.title}
+          alert={guide === null}
+          breadcrumb={
             <nav className="breadcrumb" aria-label="Breadcrumb">
               <ol>
                 <li>
@@ -145,33 +143,44 @@ export function GuideEntryPage({ slug, onNavigate }: GuideEntryPageProps) {
                 <li aria-current="page">{guide === null ? 'Guide page not found' : guide.title}</li>
               </ol>
             </nav>
-
-            {guide === null ? (
-              <div className="state-panel state-panel--empty">
-                <h1 className="state-title">Guide page not found</h1>
-                <p className="state-detail">
-                  No bundled product guide matches this address. The guide pages are fixed Markdown
-                  files shipped with the application, so a mistyped or removed slug has no page.
-                </p>
+          }
+        >
+          {guide === null ? (
+            <>
+              <p>
+                No bundled product guide matches this address. The guide pages are fixed Markdown
+                files shipped with the application, so a mistyped or removed slug has no page.
+              </p>
+              <p className="hero-actions">
                 <AppLink
-                  className="button button--primary"
+                  className="btn btn-outline btn-lg"
                   href={GUIDE_PATH}
                   onNavigate={onNavigate}
                 >
                   Back to the product guide
                 </AppLink>
-              </div>
-            ) : (
-              <>
-                <div className="page-heading">
-                  <p className="eyebrow">Product guide</p>
-                  <h1>{guide.title}</h1>
-                  <p className="lede">{guide.description}</p>
-                </div>
+              </p>
+            </>
+          ) : (
+            <p>{guide.description}</p>
+          )}
+        </PageHero>
+
+        <div className="page">
+          <div className="guide-layout">
+            <aside className="guide-sidebar">
+              <GuideNavigation
+                state={guide === null ? { kind: 'not-found' } : { kind: 'page', slug: guide.slug }}
+                onNavigate={onNavigate}
+              />
+            </aside>
+
+            {guide === null ? null : (
+              <div className="guide-content">
                 <div id="guide-content" tabIndex={-1}>
                   <GuideMarkdown markdown={guide.markdown} onNavigate={onNavigate} />
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>

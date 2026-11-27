@@ -1,5 +1,6 @@
 import { useMemo, type ReactNode } from 'react'
 
+import { CODE_OUTPUT_CLASS } from './components/CodeOutput'
 import { parseInline, parseMarkdown, type InlineToken } from './markdown'
 import { AppLink, isClientRoute } from './router'
 
@@ -96,7 +97,7 @@ export function GuideMarkdown({ markdown, onNavigate }: GuideMarkdownProps) {
         return (
           // A code block can scroll horizontally on a narrow screen; making it
           // focusable keeps that overflow reachable from the keyboard.
-          <pre key={key} tabIndex={0}>
+          <pre key={key} className={CODE_OUTPUT_CLASS} tabIndex={0}>
             <code {...(block.language === null ? {} : { className: `language-${block.language}` })}>
               {block.code}
             </code>

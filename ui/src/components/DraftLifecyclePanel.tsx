@@ -27,6 +27,7 @@ import type {
   RulebookVersion,
 } from '../types'
 
+import { Alert } from './Alert'
 import { StatusBadge } from './Badges'
 import { LoadingState } from './CatalogStates'
 
@@ -241,7 +242,7 @@ export function DraftLifecyclePanel({
               conflict.
             </p>
           </div>
-          <button type="submit" className="button button--primary" disabled={busy !== null}>
+          <button type="submit" className="btn btn-primary btn-lg" disabled={busy !== null}>
             {busy === 'create' ? 'Freezing…' : 'Freeze as draft version'}
           </button>
         </form>
@@ -251,33 +252,37 @@ export function DraftLifecyclePanel({
           editing; published versions stay immutable.
         </p>
       ) : (
-        <p className="notice notice--warning" role="status">
-          This rulebook is historical. Its versions cannot be transitioned again.
-        </p>
+        <Alert variant="warning" role="status">
+          <p>This rulebook is historical. Its versions cannot be transitioned again.</p>
+        </Alert>
       )}
 
       {error === null ? null : (
-        <div className="state-panel state-panel--error playground-error-summary" role="alert">
-          <p className="state-title">The lifecycle action was rejected</p>
+        <Alert variant="destructive" role="alert" title="The lifecycle action was rejected">
           <p>{error}</p>
-        </div>
+        </Alert>
       )}
       {statusMessage === null ? null : (
-        <p className="notice editor-saved" role="status">
-          {statusMessage}
-        </p>
+        <Alert variant="success" role="status">
+          <p>{statusMessage}</p>
+        </Alert>
       )}
 
       <h3>Versions</h3>
       {state.status === 'loading' ? <LoadingState title="Loading versions…" rowCount={3} /> : null}
       {state.status === 'error' ? (
-        <div className="state-panel state-panel--error playground-error-summary" role="alert">
-          <p className="state-title">The version history could not be loaded</p>
+        <Alert
+          variant="destructive"
+          role="alert"
+          title="The version history could not be loaded"
+          action={
+            <button type="button" className="btn btn-outline btn-sm" onClick={reloadVersions}>
+              Retry
+            </button>
+          }
+        >
           <p>{state.message}</p>
-          <button type="button" className="button button--ghost" onClick={reloadVersions}>
-            Retry
-          </button>
-        </div>
+        </Alert>
       ) : null}
       {state.status === 'ready' && versions.length === 0 ? (
         <p className="muted">No versions have been frozen for this rulebook yet.</p>
@@ -305,15 +310,15 @@ export function DraftLifecyclePanel({
                 return (
                   <tr key={version.id}>
                     <th scope="row">
-                      <code>{version.version}</code>
+                      <span className="data">{version.version}</span>
                     </th>
                     <td>
                       <StatusBadge status={version.status} />
                     </td>
                     <td>
-                      <code className="digest" title={version.contentDigest}>
+                      <span className="data digest" title={version.contentDigest}>
                         {formatDigest(version.contentDigest)}
-                      </code>
+                      </span>
                     </td>
                     <td>
                       <time dateTime={version.createdAt}>{formatDate(version.createdAt)}</time>
@@ -323,7 +328,7 @@ export function DraftLifecyclePanel({
                         <div className="lifecycle-actions">
                           <button
                             type="button"
-                            className="button button--ghost"
+                            className="btn btn-outline btn-md"
                             onClick={() => handleRefresh(version.version)}
                             disabled={busy !== null}
                           >
@@ -331,7 +336,7 @@ export function DraftLifecyclePanel({
                           </button>
                           <button
                             type="button"
-                            className="button button--ghost"
+                            className="btn btn-outline btn-md"
                             onClick={() => handleReadiness(version.version)}
                             disabled={busy !== null}
                           >
@@ -341,7 +346,7 @@ export function DraftLifecyclePanel({
                           </button>
                           <button
                             type="button"
-                            className="button button--primary"
+                            className="btn btn-primary btn-md"
                             onClick={() => handlePublish(version.version)}
                             disabled={busy !== null || !readyForThis}
                             title={

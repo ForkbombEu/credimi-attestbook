@@ -479,9 +479,8 @@ test('keeps the guide navigation reachable in the wrapped header at 860 px', asy
   await expect(primary.getByRole('link', { name: 'Guides' })).toBeVisible()
   await expect(primary.getByRole('link', { name: 'API reference' })).toBeVisible()
 
-  // The header wraps into two rows instead of widening the page; the page-level
-  // horizontal overflow that remains comes from the pre-existing decorative
-  // page-heading motif, so assert the header itself fits the viewport.
+  // The header wraps into two rows instead of widening the page, so the
+  // header itself fits the viewport.
   const header = await page.locator('.site-header').boundingBox()
   expect(header).not.toBeNull()
   expect((header?.x ?? 0) + (header?.width ?? 0)).toBeLessThanOrEqual(860)

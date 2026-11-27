@@ -3,10 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { CatalogApi } from './api'
 import type { CatalogSnapshot, CatalogFilters as Filters } from './catalog'
 import { EMPTY_FILTERS, filterEntries, isFiltering, loadCatalog, providerOptions } from './catalog'
+import { Alert } from './components/Alert'
 import { CatalogFilterBar } from './components/CatalogFilters'
 import { CatalogTable } from './components/CatalogTable'
 import { EmptyState, ErrorState, LoadingState } from './components/CatalogStates'
-import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { AppLink, NEW_RULEBOOK_PATH } from './router'
 import { useSession } from './session'
 
@@ -75,18 +76,16 @@ export function CatalogPage({ api, onNavigate }: CatalogPageProps) {
 
       <SiteHeader section="Rulebook catalog" onNavigate={onNavigate} />
 
-      <main className="page" id="main-content">
-        <div className="page-heading">
-          <p className="eyebrow">Catalog</p>
-          <h1>Rulebook catalog</h1>
-          <p className="lede">
+      <main className="page-main" id="main-content">
+        <PageHero title="Rulebook catalog">
+          <p>
             Browse attestation rulebooks by provider, version, publication status and attestation
             type. Every entry comes from the public AttestBook API.
           </p>
           {canAuthor ? (
-            <p className="page-heading__actions">
+            <p className="hero-actions">
               <AppLink
-                className="button button--primary"
+                className="btn btn-outline btn-lg"
                 href={NEW_RULEBOOK_PATH}
                 onNavigate={onNavigate}
               >
@@ -94,53 +93,57 @@ export function CatalogPage({ api, onNavigate }: CatalogPageProps) {
               </AppLink>
             </p>
           ) : null}
-        </div>
+        </PageHero>
 
-        {state.status === 'ready' ? (
-          <CatalogFilterBar
-            filters={filters}
-            providers={providers}
-            resultCount={filteredEntries.length}
-            totalCount={state.snapshot.entries.length}
-            catalogTotal={state.snapshot.total}
-            onChange={setFilters}
-            onClear={clearFilters}
-          />
-        ) : null}
-
-        <section
-          className="results"
-          id="catalog-results"
-          aria-label="Catalog results"
-          aria-busy={state.status === 'loading'}
-        >
-          {state.status === 'ready' && state.snapshot.truncated ? (
-            <p className="notice">
-              Showing the first {state.snapshot.entries.length} of {state.snapshot.total} rulebooks;
-              search and filters apply only to these {state.snapshot.entries.length}.
-            </p>
-          ) : null}
-
-          {state.status === 'loading' ? <LoadingState /> : null}
-
-          {state.status === 'error' ? (
-            <ErrorState message={state.message} onRetry={reload} />
-          ) : null}
-
+        <div className="page">
           {state.status === 'ready' ? (
-            state.snapshot.entries.length === 0 ? (
-              <EmptyState filtering={false} onClear={clearFilters} />
-            ) : filteredEntries.length === 0 ? (
-              <EmptyState
-                filtering={filtering}
-                partial={state.snapshot.truncated}
-                onClear={clearFilters}
-              />
-            ) : (
-              <CatalogTable entries={filteredEntries} onNavigate={onNavigate} />
-            )
+            <CatalogFilterBar
+              filters={filters}
+              providers={providers}
+              resultCount={filteredEntries.length}
+              totalCount={state.snapshot.entries.length}
+              catalogTotal={state.snapshot.total}
+              onChange={setFilters}
+              onClear={clearFilters}
+            />
           ) : null}
-        </section>
+
+          <section
+            className="results"
+            id="catalog-results"
+            aria-label="Catalog results"
+            aria-busy={state.status === 'loading'}
+          >
+            {state.status === 'ready' && state.snapshot.truncated ? (
+              <Alert variant="info">
+                <p>
+                  Showing the first {state.snapshot.entries.length} of {state.snapshot.total}{' '}
+                  rulebooks; search and filters apply only to these {state.snapshot.entries.length}.
+                </p>
+              </Alert>
+            ) : null}
+
+            {state.status === 'loading' ? <LoadingState /> : null}
+
+            {state.status === 'error' ? (
+              <ErrorState message={state.message} onRetry={reload} />
+            ) : null}
+
+            {state.status === 'ready' ? (
+              state.snapshot.entries.length === 0 ? (
+                <EmptyState filtering={false} onClear={clearFilters} />
+              ) : filteredEntries.length === 0 ? (
+                <EmptyState
+                  filtering={filtering}
+                  partial={state.snapshot.truncated}
+                  onClear={clearFilters}
+                />
+              ) : (
+                <CatalogTable entries={filteredEntries} onNavigate={onNavigate} />
+              )
+            ) : null}
+          </section>
+        </div>
       </main>
 
       <SiteFooter />

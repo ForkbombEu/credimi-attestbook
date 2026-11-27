@@ -12,6 +12,7 @@ import { useId, useRef, useState, type FormEvent } from 'react'
 import type { EditorApi } from '../api'
 import { isSessionAuthError } from '../api'
 import type { RulebookVersion } from '../types'
+import { Alert } from './Alert'
 
 interface CreateVersionPanelProps {
   readonly api: EditorApi
@@ -117,15 +118,14 @@ export function CreateVersionPanel({
             </p>
           )}
         </div>
-        <button type="submit" className="button button--primary" disabled={busy}>
+        <button type="submit" className="btn btn-primary btn-lg" disabled={busy}>
           {busy ? 'Creating…' : 'Create new version'}
         </button>
       </form>
       {error === null ? null : (
-        <div className="state-panel state-panel--error playground-error-summary" role="alert">
-          <p className="state-title">The new version was not created</p>
+        <Alert variant="destructive" role="alert" title="The new version was not created">
           <p>{error}</p>
-        </div>
+        </Alert>
       )}
     </section>
   )

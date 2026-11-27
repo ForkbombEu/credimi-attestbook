@@ -52,9 +52,13 @@ describe('Credimi Extras chrome', () => {
 
     const header = screen.getByRole('banner')
     expect(strip.compareDocumentPosition(header) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(within(header).getByRole('img', { name: 'Credimi' })).toHaveAttribute(
+    // DESIGN.md §8: the topbar pairs the 32px mark with the product title,
+    // never a wordmark, and the pair links home.
+    const brand = within(header).getByRole('link', { name: /^Credimi\s*AttestBook$/ })
+    expect(brand).toHaveAttribute('href', '/')
+    expect(within(brand).getByRole('img', { name: 'Credimi' })).toHaveAttribute(
       'src',
-      '/brand/logos/credimi_logo-transp.svg',
+      '/brand/logos/credimi_logo.svg',
     )
     expect(within(header).getByRole('link', { name: 'Catalog' })).toHaveAttribute(
       'aria-current',
@@ -62,20 +66,26 @@ describe('Credimi Extras chrome', () => {
     )
   })
 
-  test('renders the footer strip with the wordmark as its only link', () => {
+  test('closes the footer with the ForkBomb attribution, then the Credimi Extras strip', () => {
     render(<SiteFooter />)
 
     const footer = screen.getByRole('contentinfo')
     expect(footer).toHaveTextContent('AttestBook does not test or claim trust')
 
-    const links = within(footer).getAllByRole('link')
-    expect(links).toHaveLength(1)
-    const link = links[0]!
-    expect(link).toHaveAccessibleName('Credimi')
-    expect(link).toHaveAttribute('href', 'https://credimi.io')
-    expect(link).toHaveAttribute('target', '_blank')
-    expect(link.getAttribute('rel')).toContain('noopener')
-    expect(within(link).getByRole('img')).toHaveAttribute(
+    const [forkbomb, credimi, ...rest] = within(footer).getAllByRole('link')
+    expect(rest).toHaveLength(0)
+
+    expect(forkbomb).toHaveTextContent('ForkBomb BV')
+    expect(forkbomb!.closest('p')).toHaveTextContent(/^Proudly developed by ForkBomb BV$/)
+    expect(forkbomb).toHaveAttribute('href', 'https://forkbomb.solutions/')
+    expect(forkbomb).toHaveAttribute('target', '_blank')
+    expect(forkbomb!.getAttribute('rel')).toContain('noopener')
+
+    expect(credimi).toHaveAccessibleName('Credimi')
+    expect(credimi).toHaveAttribute('href', 'https://credimi.io')
+    expect(credimi).toHaveAttribute('target', '_blank')
+    expect(credimi!.getAttribute('rel')).toContain('noopener')
+    expect(within(credimi!).getByRole('img')).toHaveAttribute(
       'src',
       '/brand/logos/credimi_logo-transp_white.svg',
     )

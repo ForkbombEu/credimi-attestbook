@@ -10,7 +10,8 @@ import { useEffect, useState, type FormEvent } from 'react'
 
 import { AuthApiError, safeRedirectPath } from './auth'
 import { useSession } from './session'
-import { SiteFooter, SiteHeader, SkipLink } from './components/Layout'
+import { Alert } from './components/Alert'
+import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { formatDate } from './catalog'
 import { AppLink, CATALOG_PATH } from './router'
 
@@ -102,174 +103,174 @@ export function LoginPage({ onNavigate, nextPath = null }: LoginPageProps) {
 
       <SiteHeader section="Administrator login" onNavigate={onNavigate} showLoginLink={false} />
 
-      <main className="page login-page" id="main-content">
-        <div className="page-heading">
-          <p className="eyebrow">Administrator</p>
-          <h1>Sign in</h1>
-          <p className="lede">
+      <main className="page-main" id="main-content">
+        <PageHero title="Sign in">
+          <p>
             Use the administrator credentials configured for this server. The catalogue and the
             validation playground stay available without signing in.
           </p>
-        </div>
+        </PageHero>
 
-        <section className="login-card" aria-labelledby="login-card-title">
-          <h2 className="login-card__title" id="login-card-title">
-            {session.status === 'authenticated' ? 'Signed in' : 'Administrator credentials'}
-          </h2>
+        <div className="page login-page">
+          <section className="login-card" aria-labelledby="login-card-title">
+            <h2 className="login-card__title" id="login-card-title">
+              {session.status === 'authenticated' ? 'Signed in' : 'Administrator credentials'}
+            </h2>
 
-          {session.status === 'loading' ? (
-            <p className="login-card__status" role="status">
-              Checking your session…
-            </p>
-          ) : null}
-
-          {session.status === 'anonymous' ? (
-            <>
-              <p className="login-card__intro">
-                Sign in to identify the provider this administrator acts for. Signing in starts a
-                server-side session; this page never handles a provider bearer token.
+            {session.status === 'loading' ? (
+              <p className="login-card__status" role="status">
+                Checking your session…
               </p>
+            ) : null}
 
-              <form
-                className="login-form"
-                onSubmit={(event) => {
-                  void handleSubmit(event)
-                }}
-                aria-busy={submitting}
-                noValidate
-              >
-                {submitError !== null ? (
-                  <p className="login-form__error" role="alert">
-                    {submitError}
-                  </p>
-                ) : null}
-
-                <div className="field">
-                  <label htmlFor="login-username">Username</label>
-                  <input
-                    id="login-username"
-                    name="username"
-                    type="text"
-                    value={username}
-                    autoComplete="username"
-                    spellCheck={false}
-                    disabled={submitting}
-                    required
-                    aria-invalid={errors.username === undefined ? undefined : true}
-                    aria-describedby={
-                      errors.username === undefined ? undefined : 'login-username-error'
-                    }
-                    onChange={(event) => {
-                      setUsername(event.target.value)
-                      setErrors((current) => ({ ...current, username: undefined }))
-                    }}
-                  />
-                  {errors.username === undefined ? null : (
-                    <p className="field-error" id="login-username-error">
-                      {errors.username}
-                    </p>
-                  )}
-                </div>
-
-                <div className="field">
-                  <label htmlFor="login-password">Password</label>
-                  <input
-                    id="login-password"
-                    name="password"
-                    type="password"
-                    value={password}
-                    autoComplete="current-password"
-                    disabled={submitting}
-                    required
-                    aria-invalid={errors.password === undefined ? undefined : true}
-                    aria-describedby={
-                      errors.password === undefined ? undefined : 'login-password-error'
-                    }
-                    onChange={(event) => {
-                      setPassword(event.target.value)
-                      setErrors((current) => ({ ...current, password: undefined }))
-                    }}
-                  />
-                  {errors.password === undefined ? null : (
-                    <p className="field-error" id="login-password-error">
-                      {errors.password}
-                    </p>
-                  )}
-                </div>
-
-                <div className="login-form__actions">
-                  <button className="button button--primary" type="submit" disabled={submitting}>
-                    {submitting ? 'Signing in…' : 'Sign in'}
-                  </button>
-                  {submitting ? (
-                    <p className="login-form__working" role="status">
-                      Verifying your credentials…
-                    </p>
-                  ) : null}
-                </div>
-              </form>
-
-              <p className="login-card__note">
-                Your password is sent only to this server. The session lives in an HttpOnly cookie;
-                no password or token is written to browser storage.
-              </p>
-            </>
-          ) : null}
-
-          {session.status === 'authenticated' && session.session !== null ? (
-            <>
-              <p className="login-card__intro">
-                You are signed in as <strong>{session.session.provider.name}</strong>.
-              </p>
-              <dl className="login-card__meta">
-                <div>
-                  <dt>Provider</dt>
-                  <dd>{session.session.provider.name}</dd>
-                </div>
-                <div>
-                  <dt>Session expires</dt>
-                  <dd>
-                    <time dateTime={session.session.expiresAt}>
-                      {formatDate(session.session.expiresAt)}
-                    </time>
-                  </dd>
-                </div>
-              </dl>
-              {signOutError === null ? null : (
-                <p className="login-form__error" role="alert">
-                  {signOutError}
+            {session.status === 'anonymous' ? (
+              <>
+                <p className="login-card__intro">
+                  Sign in to identify the provider this administrator acts for. Signing in starts a
+                  server-side session; this page never handles a provider bearer token.
                 </p>
-              )}
-              <div className="login-card__actions">
-                <AppLink
-                  className="button button--primary"
-                  href={destination}
-                  onNavigate={onNavigate}
-                >
-                  Continue
-                </AppLink>
-                <button
-                  className="button button--ghost"
-                  type="button"
-                  disabled={signingOut}
-                  onClick={() => {
-                    void handleSignOut()
-                  }}
-                >
-                  {signingOut ? 'Signing out…' : 'Log out'}
-                </button>
-              </div>
-            </>
-          ) : null}
-        </section>
 
-        {session.status === 'authenticated' ? null : (
-          <p className="login-page__back">
-            <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-              Back to the rulebook catalog
-            </AppLink>
-          </p>
-        )}
+                <form
+                  className="login-form"
+                  onSubmit={(event) => {
+                    void handleSubmit(event)
+                  }}
+                  aria-busy={submitting}
+                  noValidate
+                >
+                  {submitError !== null ? (
+                    <Alert variant="destructive" role="alert">
+                      <p>{submitError}</p>
+                    </Alert>
+                  ) : null}
+
+                  <div className="field">
+                    <label htmlFor="login-username">Username</label>
+                    <input
+                      id="login-username"
+                      name="username"
+                      type="text"
+                      value={username}
+                      autoComplete="username"
+                      spellCheck={false}
+                      disabled={submitting}
+                      required
+                      aria-invalid={errors.username === undefined ? undefined : true}
+                      aria-describedby={
+                        errors.username === undefined ? undefined : 'login-username-error'
+                      }
+                      onChange={(event) => {
+                        setUsername(event.target.value)
+                        setErrors((current) => ({ ...current, username: undefined }))
+                      }}
+                    />
+                    {errors.username === undefined ? null : (
+                      <p className="field-error" id="login-username-error">
+                        {errors.username}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="field">
+                    <label htmlFor="login-password">Password</label>
+                    <input
+                      id="login-password"
+                      name="password"
+                      type="password"
+                      value={password}
+                      autoComplete="current-password"
+                      disabled={submitting}
+                      required
+                      aria-invalid={errors.password === undefined ? undefined : true}
+                      aria-describedby={
+                        errors.password === undefined ? undefined : 'login-password-error'
+                      }
+                      onChange={(event) => {
+                        setPassword(event.target.value)
+                        setErrors((current) => ({ ...current, password: undefined }))
+                      }}
+                    />
+                    {errors.password === undefined ? null : (
+                      <p className="field-error" id="login-password-error">
+                        {errors.password}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="login-form__actions">
+                    <button className="btn btn-primary btn-lg" type="submit" disabled={submitting}>
+                      {submitting ? 'Signing in…' : 'Sign in'}
+                    </button>
+                    {submitting ? (
+                      <p className="login-form__working" role="status">
+                        Verifying your credentials…
+                      </p>
+                    ) : null}
+                  </div>
+                </form>
+
+                <p className="login-card__note">
+                  Your password is sent only to this server. The session lives in an HttpOnly
+                  cookie; no password or token is written to browser storage.
+                </p>
+              </>
+            ) : null}
+
+            {session.status === 'authenticated' && session.session !== null ? (
+              <>
+                <p className="login-card__intro">
+                  You are signed in as <strong>{session.session.provider.name}</strong>.
+                </p>
+                <dl className="login-card__meta">
+                  <div>
+                    <dt>Provider</dt>
+                    <dd>{session.session.provider.name}</dd>
+                  </div>
+                  <div>
+                    <dt>Session expires</dt>
+                    <dd>
+                      <time dateTime={session.session.expiresAt}>
+                        {formatDate(session.session.expiresAt)}
+                      </time>
+                    </dd>
+                  </div>
+                </dl>
+                {signOutError === null ? null : (
+                  <Alert variant="destructive" role="alert">
+                    <p>{signOutError}</p>
+                  </Alert>
+                )}
+                <div className="login-card__actions">
+                  <AppLink
+                    className="btn btn-primary btn-md"
+                    href={destination}
+                    onNavigate={onNavigate}
+                  >
+                    Continue
+                  </AppLink>
+                  <button
+                    className="btn btn-outline btn-md"
+                    type="button"
+                    disabled={signingOut}
+                    onClick={() => {
+                      void handleSignOut()
+                    }}
+                  >
+                    {signingOut ? 'Signing out…' : 'Log out'}
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </section>
+
+          {session.status === 'authenticated' ? null : (
+            <p className="login-page__back">
+              <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
+                Back to the rulebook catalog
+              </AppLink>
+            </p>
+          )}
+        </div>
       </main>
 
       <SiteFooter />

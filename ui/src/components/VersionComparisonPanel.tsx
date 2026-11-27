@@ -13,6 +13,8 @@ import { isAbortError } from '../api'
 import { formatDigest, versionsNewestFirst } from '../detail'
 import type { JsonValue, RulebookVersion, VersionDiff } from '../types'
 
+import { Alert } from './Alert'
+
 interface VersionComparisonPanelProps {
   readonly api: CatalogApi
   readonly rulebookId: string
@@ -131,7 +133,7 @@ export function VersionComparisonPanel({ api, rulebookId, versions }: VersionCom
             </div>
             <button
               type="button"
-              className="button button--primary"
+              className="btn btn-primary btn-md"
               onClick={compare}
               disabled={state.status === 'loading' || sameVersion}
             >
@@ -145,25 +147,32 @@ export function VersionComparisonPanel({ api, rulebookId, versions }: VersionCom
           ) : null}
 
           {state.status === 'error' ? (
-            <div className="state-panel state-panel--error playground-error-summary" role="alert">
-              <p className="state-title">The versions could not be compared</p>
+            <Alert
+              variant="destructive"
+              title="The versions could not be compared"
+              role="alert"
+              action={
+                <button type="button" className="btn btn-outline btn-sm" onClick={compare}>
+                  Retry
+                </button>
+              }
+            >
               <p>{state.message}</p>
-              <button type="button" className="button button--ghost" onClick={compare}>
-                Retry
-              </button>
-            </div>
+            </Alert>
           ) : null}
 
           {state.status === 'ready' ? (
             state.diff.identical ? (
-              <p className="notice" role="status">
-                <strong>
-                  {state.diff.from.version} and {state.diff.to.version}
-                </strong>{' '}
-                have identical authored content (digests{' '}
-                {formatDigest(state.diff.from.contentDigest)} and{' '}
-                {formatDigest(state.diff.to.contentDigest)}).
-              </p>
+              <Alert variant="info" role="status">
+                <p>
+                  <strong>
+                    {state.diff.from.version} and {state.diff.to.version}
+                  </strong>{' '}
+                  have identical authored content (digests{' '}
+                  {formatDigest(state.diff.from.contentDigest)} and{' '}
+                  {formatDigest(state.diff.to.contentDigest)}).
+                </p>
+              </Alert>
             ) : (
               <>
                 <p className="editor-status" role="status">
