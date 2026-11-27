@@ -101,7 +101,7 @@ export function LoginPage({ onNavigate, nextPath = null }: LoginPageProps) {
     <div className="app-shell">
       <SkipLink href="#main-content">Skip to administrator sign-in</SkipLink>
 
-      <SiteHeader section="Administrator login" onNavigate={onNavigate} showLoginLink={false} />
+      <SiteHeader section="Administrator login" onNavigate={onNavigate} />
 
       <main className="page-main" id="main-content">
         <PageHero title="Sign in">
@@ -273,7 +273,7 @@ export function LoginPage({ onNavigate, nextPath = null }: LoginPageProps) {
         </div>
       </main>
 
-      <SiteFooter />
+      <SiteFooter onNavigate={onNavigate} showLoginLink={false} />
     </div>
   )
 }

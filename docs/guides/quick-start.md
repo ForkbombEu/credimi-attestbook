@@ -58,8 +58,9 @@ On the detail page:
   hosts marked and given a download link and digest. References bound to no
   attestation type follow as a rulebook-level group.
 - **Standards compatibility** reports rulebook-level compatibility as **Not
-  tested** and lists the eight validation dimensions with whether this build
-  executes them. It never presents an untested dimension as a pass.
+  tested**: no rulebook-level result is recorded yet. It links to the
+  playground, which lists the eight validation dimensions with whether this
+  build executes them. It never presents an untested dimension as a pass.
 - **Version history** lists versions newest first, marks the latest one, and
   shows each version's status, profile, SHA-256 content digest, creation time and
   publication time.

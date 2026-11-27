@@ -366,7 +366,11 @@ describe('app catalog and detail navigation', () => {
     expect(window.location.pathname).toBe('/rulebooks/rulebook-pid')
     expect(await screen.findByRole('heading', { name: 'PID Rulebook' })).toBeInTheDocument()
 
-    await user.click(screen.getByRole('link', { name: 'Rulebook catalog' }))
+    await user.click(
+      within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('link', {
+        name: 'Catalog',
+      }),
+    )
 
     expect(window.location.pathname).toBe('/')
     expect(await screen.findByRole('heading', { name: 'Rulebook catalog' })).toBeInTheDocument()
@@ -451,8 +455,11 @@ describe('app catalog and detail navigation', () => {
       '/docs',
     )
 
-    const breadcrumb = screen.getByRole('navigation', { name: 'Breadcrumb' })
-    await user.click(within(breadcrumb).getByRole('link', { name: 'Catalog' }))
+    await user.click(
+      within(screen.getByRole('navigation', { name: 'Primary' })).getByRole('link', {
+        name: 'Catalog',
+      }),
+    )
 
     expect(window.location.pathname).toBe('/')
     expect(await screen.findByRole('heading', { name: 'Rulebook catalog' })).toBeInTheDocument()

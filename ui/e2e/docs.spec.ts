@@ -45,7 +45,7 @@ test('serves the product API reference from /docs without third-party assets', a
     'href',
     '/guide',
   )
-  await expect(documentation.getByRole('link', { name: 'API reference' })).toHaveAttribute(
+  await expect(documentation.getByRole('link', { name: 'API docs' })).toHaveAttribute(
     'aria-current',
     'page',
   )
@@ -124,7 +124,7 @@ test('keeps the reference and its documentation header usable at 390 px', async 
   const documentation = page.getByRole('navigation', { name: 'Documentation' })
   await expect(documentation.getByRole('link', { name: 'Catalog' })).toBeVisible()
   await expect(documentation.getByRole('link', { name: 'Guides' })).toBeVisible()
-  await expect(documentation.getByRole('link', { name: 'API reference' })).toBeVisible()
+  await expect(documentation.getByRole('link', { name: 'API docs' })).toBeVisible()
 
   const horizontalOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth - window.innerWidth,

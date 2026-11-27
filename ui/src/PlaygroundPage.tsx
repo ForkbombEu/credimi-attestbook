@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CatalogApiError, isAbortError, type CatalogApi, type ValidationApi } from './api'
 import { Alert } from './components/Alert'
 import { EmptyState, ErrorState, LoadingState } from './components/CatalogStates'
+import { EvaluationSupportSection } from './components/EvaluationSupport'
 import { GuideLink } from './components/GuideLink'
 import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { PlaygroundForm } from './components/PlaygroundForm'
@@ -19,7 +20,6 @@ import {
   validationResultDocument,
   validationResultFilename,
 } from './playground'
-import { AppLink, CATALOG_PATH } from './router'
 import type { Attestation, CredentialValidationResult, Rulebook, RulebookVersion } from './types'
 
 interface PlaygroundPageProps {
@@ -308,21 +308,7 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
       <SiteHeader section="Credential playground" onNavigate={onNavigate} />
 
       <main className="page-main" id="main-content">
-        <PageHero
-          title="Credential playground"
-          breadcrumb={
-            <nav className="breadcrumb" aria-label="Breadcrumb">
-              <ol>
-                <li>
-                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                    Rulebook catalog
-                  </AppLink>
-                </li>
-                <li aria-current="page">Credential playground</li>
-              </ol>
-            </nav>
-          }
-        >
+        <PageHero title="Credential playground">
           <p>
             Run the real structural validation API against a pinned rulebook version. Inspect the
             per-dimension evidence and violations, then export the typed result. This page never
@@ -334,8 +320,14 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
           </p>
         </PageHero>
 
+        {/* The capability table describes the engine and stays on the lavender
+            wash; the request form and its result follow on a white band. */}
         <div className="page">
-          <div id="playground" tabIndex={-1}>
+          <EvaluationSupportSection />
+        </div>
+
+        <div className="page-section-white">
+          <div className="page" id="playground" tabIndex={-1}>
             {catalog.status === 'loading' ? (
               <LoadingState
                 title="Loading rulebooks…"
@@ -406,7 +398,7 @@ export function PlaygroundPage({ api, validator, onNavigate }: PlaygroundPagePro
         </div>
       </main>
 
-      <SiteFooter />
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   )
 }

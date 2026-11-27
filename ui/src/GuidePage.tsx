@@ -4,7 +4,7 @@ import { GuideNavigation } from './components/GuideNavigation'
 import { PageHero, SiteFooter, SiteHeader, SkipLink } from './components/Layout'
 import { GuideMarkdown } from './GuideMarkdown'
 import { findGuide, GUIDE_DOCUMENTS } from './guide'
-import { AppLink, CATALOG_PATH, DOCS_PATH, GUIDE_PATH, guidePath } from './router'
+import { AppLink, DOCS_PATH, GUIDE_PATH, guidePath } from './router'
 
 interface GuidePageProps {
   readonly onNavigate: (path: string) => void
@@ -28,21 +28,7 @@ export function GuideIndexPage({ onNavigate }: GuidePageProps) {
       <SiteHeader section="Product guide" onNavigate={onNavigate} />
 
       <main className="page-main" id="main-content">
-        <PageHero
-          title="AttestBook product guide"
-          breadcrumb={
-            <nav className="breadcrumb" aria-label="Breadcrumb">
-              <ol>
-                <li>
-                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                    Catalog
-                  </AppLink>
-                </li>
-                <li aria-current="page">Guides</li>
-              </ol>
-            </nav>
-          }
-        >
+        <PageHero title="AttestBook product guide">
           <p>
             Short, task-focused guides for finding rulebooks, validating credentials and reading the
             public product API. Every page is public and bundled with the application.
@@ -91,7 +77,7 @@ export function GuideIndexPage({ onNavigate }: GuidePageProps) {
         </div>
       </main>
 
-      <SiteFooter />
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   )
 }
@@ -127,23 +113,6 @@ export function GuideEntryPage({ slug, onNavigate }: GuideEntryPageProps) {
         <PageHero
           title={guide === null ? 'Guide page not found' : guide.title}
           alert={guide === null}
-          breadcrumb={
-            <nav className="breadcrumb" aria-label="Breadcrumb">
-              <ol>
-                <li>
-                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                    Catalog
-                  </AppLink>
-                </li>
-                <li>
-                  <AppLink href={GUIDE_PATH} onNavigate={onNavigate}>
-                    Guides
-                  </AppLink>
-                </li>
-                <li aria-current="page">{guide === null ? 'Guide page not found' : guide.title}</li>
-              </ol>
-            </nav>
-          }
         >
           {guide === null ? (
             <>
@@ -186,7 +155,7 @@ export function GuideEntryPage({ slug, onNavigate }: GuideEntryPageProps) {
         </div>
       </main>
 
-      <SiteFooter />
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   )
 }

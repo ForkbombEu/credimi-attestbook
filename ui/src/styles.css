@@ -201,43 +201,7 @@ dd {
   font-weight: 600;
 }
 
-/* The API reference lives at `/docs` rather than in the app router. The
-   outlined treatment and arrow separate it from the in-app `Guides` view. */
-.site-nav a.site-nav__reference {
-  display: inline-flex;
-  margin-left: var(--space-2);
-  align-items: center;
-  gap: 4px;
-  border: 1px solid var(--border-strong);
-  color: var(--brand-primary);
-  font-weight: 600;
-  text-decoration: underline;
-  text-underline-offset: 3px;
-}
-
-.site-nav a.site-nav__reference:hover {
-  color: var(--brand-primary);
-  background: var(--brand-secondary);
-}
-
-.site-nav__reference-arrow {
-  font-size: 0.9em;
-  line-height: 1;
-}
-
-.site-header__section {
-  margin-left: var(--space-2);
-  padding-left: var(--space-4);
-  border-left: 1px solid var(--border);
-  color: var(--fg-subtle);
-  font-size: var(--fs-xs);
-  font-weight: 500;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  white-space: nowrap;
-}
-
-/* ------------------------------------------- administrator session (topbar) */
+/* ------------------------------------------- administrator session (footer) */
 
 .site-session {
   display: flex;
@@ -245,11 +209,10 @@ dd {
   min-width: 0;
   align-items: center;
   gap: var(--space-2);
-  margin-left: var(--space-2);
 }
 
 .site-session__status {
-  color: var(--fg-subtle);
+  color: var(--brand-secondary);
   font-size: var(--fs-xs);
   white-space: nowrap;
 }
@@ -265,22 +228,30 @@ dd {
 
 .site-session__label {
   flex: none;
-  color: var(--fg-subtle);
+  color: var(--brand-secondary);
   font-size: var(--fs-xs);
 }
 
 .site-session__provider {
   overflow: hidden;
-  color: var(--fg);
+  color: var(--fg-on-primary);
   font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
+/* The error sits on the indigo footer, so it takes a light ink rather than
+   the danger red, which lacks contrast there. */
 .site-session__error {
-  color: var(--ink-danger);
+  color: var(--fg-on-primary);
   font-size: var(--fs-xs);
+  font-weight: 600;
   white-space: nowrap;
+}
+
+/* An outlined button keeps its own ink on the footer. */
+.site-footer .btn-outline {
+  color: var(--fg);
 }
 
 .page-main {
@@ -297,7 +268,7 @@ dd {
 }
 
 /* The hero band's own type and fold come from the brand stylesheet; these
-   rules only place AttestBook's breadcrumb, metadata and actions on it. */
+   rules only place AttestBook's metadata and actions on it. */
 .hero-band .section-intro-title {
   overflow-wrap: anywhere;
   text-wrap: balance;
@@ -318,16 +289,6 @@ dd {
 
 .hero-band :focus-visible {
   outline-color: var(--fg-on-primary);
-}
-
-.hero-band .breadcrumb {
-  margin-bottom: var(--space-8);
-  color: color-mix(in srgb, var(--fg-on-primary) 85%, transparent);
-}
-
-.hero-band .breadcrumb li + li::before,
-.hero-band .breadcrumb [aria-current='page'] {
-  color: inherit;
 }
 
 /* An outlined button keeps its own ink on the band instead of inheriting
@@ -1251,30 +1212,6 @@ dd {
 }
 
 /* ----------------------------------------------------------- detail page */
-
-.breadcrumb {
-  margin-bottom: var(--space-5);
-  font-size: var(--fs-sm);
-}
-
-.breadcrumb ol {
-  display: flex;
-  margin: 0;
-  padding: 0;
-  flex-wrap: wrap;
-  gap: 6px;
-  list-style: none;
-}
-
-.breadcrumb li + li::before {
-  content: '/';
-  margin-right: 6px;
-  color: var(--fg-subtle);
-}
-
-.breadcrumb [aria-current='page'] {
-  color: var(--fg-subtle);
-}
 
 .detail-heading__meta {
   display: flex;
@@ -2266,9 +2203,14 @@ dd {
 }
 
 .site-footer__inner {
+  display: flex;
   max-width: var(--max-width);
   margin: 0 auto;
   padding: var(--space-8) var(--app-page-gutter);
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4) var(--space-8);
 }
 
 .site-footer__inner p {
@@ -2297,10 +2239,6 @@ dd {
 /* ------------------------------------------------------------ responsive */
 
 @media (max-width: 1080px) {
-  .site-header__section {
-    display: none;
-  }
-
   .filter-bar {
     grid-template-columns: minmax(220px, 1.6fr) repeat(2, minmax(150px, 1fr));
   }
@@ -2311,9 +2249,9 @@ dd {
   }
 }
 
-/* The shared header gains its own wrap point: with the Guides item and the
-   API-reference link a single row no longer fits below about 940 px, and an
-   unwrapped header would push a horizontal scrollbar onto every page. */
+/* The shared header gains its own wrap point: with the Guides and API docs
+   items a single row no longer fits below about 940 px, and an unwrapped
+   header would push a horizontal scrollbar onto every page. */
 @media (max-width: 960px) {
   .site-header__inner {
     min-height: 0;
@@ -2330,11 +2268,6 @@ dd {
     margin-left: 0;
     order: 2;
     overflow-x: auto;
-  }
-
-  .site-session {
-    order: 1;
-    margin-left: auto;
   }
 }
 

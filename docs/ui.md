@@ -51,9 +51,9 @@ The documentation-navigation slice of
 [issue #131](https://github.com/ForkbombEu/credimi-attestbook/issues/131) makes that guide
 discoverable from the shared header and gives the guide pages a documentation layout. The
 header's `Guides` item uses the client router and marks the current guide view with
-`aria-current="page"`; the separate `API reference` item points at `/docs` with a full page
-load and a distinct outlined treatment. `/guide` adds a breadcrumb back to the catalog and an
-API-reference panel, and `/guide/<slug>` adds a sidebar generated from the same
+`aria-current="page"`; the separate `API docs` item points at `/docs` with a full page
+load. `/guide` adds an API-reference panel, and `/guide/<slug>` adds a sidebar generated from
+the same
 `GUIDE_DOCUMENTS` registry. The standalone Scalar page at `/docs` keeps its existing
 reference and gains a small branded documentation header with links back to the catalog and
 the guides. No guide or Scalar content is moved or reimplemented.
@@ -113,7 +113,7 @@ Implemented by these slices:
     same hosted/external provenance, the version label and the pinned content digest;
 - loading, error (with retry), empty and not-found states, including section-level
   degradation when a related read fails;
-- accessible markup (landmarks, breadcrumb, table semantics, labelled controls, live status,
+- accessible markup (landmarks, table semantics, labelled controls, live status,
   skip link, visible focus, reduced-motion support) checked by axe-core in component and
   browser tests;
 - a credential validation playground at `/playground`:
@@ -191,7 +191,7 @@ Implemented by these slices:
   - the auth client restores the session from `GET /api/v1/auth/me` on every load, treats an
     anonymous `401` as no session, and relies only on the server's HttpOnly session cookie:
     no `localStorage`, `sessionStorage` or bearer token is read or written;
-  - the shared header shows the signed-in provider identity with a `Log out` action, or a
+  - the shared footer shows the signed-in provider identity with a `Log out` action, or a
     `Log in` link that preserves the current path; logout is a same-origin
     `POST /api/v1/auth/logout` carrying the session-bound `X-CSRF-Token` returned by the auth
     responses, so the browser's `Origin`/`Sec-Fetch-Site` evidence and the token satisfy the
@@ -226,20 +226,21 @@ Implemented by these slices:
   - the shared `SiteHeader` carries a `Guides` link on the catalog, detail, playground,
     editor, capture and guide views; it uses the client router and marks
     `aria-current="page"` on `/guide` and `/guide/<slug>`;
-  - the same header renders a separate, outlined `API reference` link with an arrow. It is a
-    plain anchor to `/docs`, so the Scalar document gets a full page load instead of the SPA
-    router falling back to the catalog;
-  - `/guide` is a documentation landing page: a `Catalog / Guides` breadcrumb, guide cards in
-    `GUIDE_DOCUMENTS` order and a separate API-reference panel. It needs no session;
+  - the same header renders an `API docs` item styled like the other navigation items. It
+    is a plain anchor to `/docs`, so the Scalar document gets a full page load instead of
+    the SPA router falling back to the catalog. The header carries navigation only: no
+    section label and no session controls, which live in the footer;
+  - `/guide` is a documentation landing page: guide cards in `GUIDE_DOCUMENTS` order and a
+    separate API-reference panel. It needs no session;
   - `/guide/<slug>` places a persistent article sidebar beside the document. The sidebar lists
     `Guides overview`, every registered page and the separate API-reference block; the current
-    page carries `aria-current="page"`, and the breadcrumb is `Catalog / Guides / <page>` so a
-    reader can always return to the catalog or the index;
+    page carries `aria-current="page"`, so a reader can always return to the index, and the
+    topbar's `Catalog` item returns to the catalog;
   - the landing cards, the sidebar and the page titles all derive from the single
     `GUIDE_DOCUMENTS` registry in `ui/src/guide.ts`; a later guide-only change adds its
     Markdown file and one registry entry, with no navigation component edit;
   - `/docs` keeps the existing standalone Scalar reference and adds only a small branded
-    documentation header (`Catalog`, `Guides`, the current `API reference`) plus a skip link,
+    documentation header (`Catalog`, `Guides`, the current `API docs`) plus a skip link,
     giving a way back to the product. Scalar and `/openapi.json` are not embedded, moved or
     reimplemented. The docs entry does not load the SPA brand stylesheet, whose unlayered global
     rules would override Scalar's layered styles; its chrome stylesheet is scoped to the header
@@ -250,7 +251,7 @@ Implemented by these slices:
     and below the layouts become a single column, so the sidebar becomes a keyboard-reachable
     list above the article at 390 px without horizontal scrolling. The shared header wraps its
     navigation at 960 px and lets the primary nav scroll horizontally, so the `Guides` and
-    `API reference` links stay reachable at tablet widths.
+    `API docs` links stay reachable at tablet widths.
 - contextual help links from the working views into the product guide (#139):
   - the draft editor adds one unobtrusive line under its lede linking the
     `/guide/rulebook-authoring` page, and the **Attestation types** section links
@@ -345,7 +346,7 @@ The browser is a client of the public API only:
     `GET /api/v1/rulebooks/{id}/versions/{version}/compare?to={version}`; the result is
     rendered as returned and never re-derived client-side;
 13. on every view the session provider calls `GET /api/v1/auth/me` once; on `/login` the
-    form posts `POST /api/v1/auth/login` with the username and password, and the header's
+    form posts `POST /api/v1/auth/login` with the username and password, and the footer's
     `Log out` action posts `POST /api/v1/auth/logout` with the session CSRF token. The
     HttpOnly session cookie and its in-memory `X-CSRF-Token` are the only credentials
     involved, and no bearer token is read or written by these calls.
@@ -369,9 +370,9 @@ query string. Modified clicks (new tab, copy address) keep the native anchor beh
 
 The shared topbar links to the in-app guide with the client router (`Guides`, current on guide
 routes) and to the standalone Scalar document with a plain `/docs` anchor, so the two kinds of
-documentation stay distinct. The guide pages add `Catalog / Guides` (and, on an article,
-`/ <page>`) breadcrumbs, and the separate `/docs` entry's own small header links back to `/`
-and `/guide`; `/docs` itself remains a full page load in both directions.
+documentation stay distinct. Navigation lives in the topbar only: no hero carries a
+breadcrumb. The separate `/docs` entry's own small header links back to `/` and `/guide`;
+`/docs` itself remains a full page load in both directions.
 
 The latest displayed version is the most recently created **published** version, or the most
 recently created version of any status when nothing is published. Rulebook no. 1 in
@@ -406,20 +407,26 @@ explicit unavailable notice.
 ### 3.2 Standards compatibility
 
 UI-002 asks for standards compatibility, but Phase 1 has no persisted rulebook-level
-compatibility result and FR-010/FR-012 forbid inferring one. The detail view therefore:
+compatibility result and FR-010/FR-012 forbid inferring one. The detail view therefore ends
+with a **Standards compatibility** section, after the version history and comparison, that:
 
-- reports **Rulebook-level compatibility: Not tested**;
-- lists the eight FR-010 dimensions with an explicit support label: **Supported per
-  credential** for the structural checks this build executes, **Not tested** for the
-  cryptographic and issuer-trust checks it does not implement, and **Not applicable** for
-  protocol conformance and interoperability, which a single credential artifact cannot
-  exercise;
-- states that a structural check never implies cryptographic, trust, protocol or
-  interoperability success.
+- reports **Rulebook-level compatibility: Not tested** and states that no rulebook-level
+  result is recorded and that a structural check never implies cryptographic, trust,
+  protocol or interoperability success;
+- links to the playground and the credential validation guide, where credentials are
+  actually checked.
 
-The table mirrors `src/validation/dimensions.ts`; `ui/src/compatibility.test.ts` compares it
-with `DIMENSION_DEFINITIONS`, so the UI cannot claim support the engine does not have.
-Neither **Not tested** nor **Not applicable** is presented as a pass.
+The eight FR-010 dimensions describe the validation engine rather than a rulebook, so their
+support table is the first section of `/playground`, **What this playground checks**, on the
+lavender wash; the request form and its result follow on a white band, so the two read as
+separate sections. The table shows **Supported per credential** for the structural checks
+this build executes, **Not
+tested** for the cryptographic and issuer-trust checks it does not implement, and **Not
+applicable** for protocol conformance and interoperability, which a single credential
+artifact cannot exercise. The table mirrors `src/validation/dimensions.ts`;
+`ui/src/compatibility.test.ts` compares it with `DIMENSION_DEFINITIONS`, so the UI cannot
+claim support the engine does not have. Neither **Not tested** nor **Not applicable** is
+presented as a pass.
 
 ### 3.3 Credential playground
 
@@ -707,7 +714,7 @@ keeps `ui/src/styles.css` to AttestBook's own layouts:
 - the topbar pairs the 32px `credimi_logo.svg` mark with the `AttestBook` title
   (on `/docs` too); no wordmark appears in either header;
 - every view opens with the indigo `.hero-band` (`PageHero` in
-  `ui/src/components/Layout.tsx`) carrying the breadcrumb, the only `h1` and the
+  `ui/src/components/Layout.tsx`) carrying the only `h1` and the
   description; content follows in 96px page sections (64px on mobile) on the
   lavender wash, and a not-found address is the hero itself, announced as an alert;
 - buttons are the brand `.btn` sizes (`btn-lg` for a page's or form's main
@@ -1009,7 +1016,7 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   destinations rejected), raw HTML staying inert text, heading/list/code/link rendering,
   in-app links using the client router while `/docs` gets a full page load, the index and
   deep-link views, the unknown-slug not-found view without a catalog fallback, the
-  `Catalog / Guides` and `Catalog / Guides / <page>` breadcrumbs, the registry-derived guide
+  registry-derived guide
   cards and sidebar order, the current-page `aria-current`, the API-reference panel and
   sidebar links, the API-integration page's bearer-token and administrator-session sections
   with its `/openapi.json` and `/docs` links, the credential-validation page's no-over-claim
@@ -1018,14 +1025,14 @@ Component and unit tests (`ui/src/*.test.ts[x]`, Vitest + jsdom):
   valid JSON example and catalog/API links, and axe-core checks for the guide index, every
   guide page and the not-found view;
 - the shared header's documentation navigation (`ui/src/components/Layout.test.tsx`): the
-  in-app `Guides` link, the plain `/docs` `API reference` link that the SPA router never
+  in-app `Guides` link, the plain `/docs` `API docs` link that the SPA router never
   handles, and `aria-current="page"` moving with the current view;
-- a client-side navigation from the catalog to `/guide` and back through the guide
-  breadcrumb, plus a deep-linked guide page with its sidebar (`ui/src/App.test.tsx`);
+- a client-side navigation from the catalog to `/guide` and back through the topbar's
+  `Catalog` item, plus a deep-linked guide page with its sidebar (`ui/src/App.test.tsx`);
 - an end-to-end component navigation test from the catalog to a detail page and back, from
   the catalog to the new-rulebook editor, from the catalog to the administrator sign-in
   page, a direct deep-link render of both editors and the login page, and a direct render of
-  `/login?next=…` with the anonymous header sign-in link suppressed;
+  `/login?next=…` with the anonymous footer sign-in link suppressed;
 - axe-core accessibility checks for the catalog results/error states and the detail page and
   not-found state (colour contrast is disabled in jsdom because it cannot compute painted
   colours; the browser tests run the full rule set).
@@ -1125,7 +1132,7 @@ keeps its own view.
 
 The documentation navigation (#131) is covered by the same spec and
 `ui/e2e/docs.spec.ts`: opening `/guide` from the catalog's primary `Guides` link, the
-`aria-current="page"` state on the header and sidebar, the `Catalog / Guides` breadcrumb back
+`aria-current="page"` state on the header and sidebar, the topbar's `Catalog` link back
 to the catalog, the current guide page in the article sidebar, following the API-reference
 link to the Scalar page and back through the reference's own `Guides` link, and a 390 px
 check that keeps the sidebar keyboard focusable, the article readable and the page free of

@@ -1,13 +1,14 @@
-// Standards-compatibility disclosure for the rulebook detail view (issue #37).
+// Standards-compatibility disclosure (issue #37).
 //
 // UI-002 asks for standards compatibility, and FR-010/R-18 forbid inferring a
 // result: plan Phase 1 reports only structural and attestation-constraint checks
 // per credential, and reports every other dimension as NOT_TESTED or
 // NOT_APPLICABLE. The table below mirrors the FR-010 dimension catalogue in
 // `src/validation/dimensions.ts`; `compatibility.test.ts` compares the two so
-// the UI cannot silently claim support the engine does not have. There is no
-// persisted rulebook-level compatibility result in Phase 1, so the section is
-// always reported as NOT_TESTED for the rulebook itself.
+// the UI cannot silently claim support the engine does not have. The table
+// describes the engine, so the playground shows it; the rulebook detail view
+// shows only the disclosure, because there is no persisted rulebook-level
+// compatibility result in Phase 1.
 
 export type EvaluationSupport = 'supported' | 'not_tested' | 'not_applicable'
 

@@ -2,11 +2,7 @@ import { Fragment, useCallback, useEffect, useId, useRef, useState, type ReactNo
 
 import { versionContentPath, type CatalogApi } from '../api'
 import { formatDate } from '../catalog'
-import {
-  EVALUATION_SUPPORT,
-  EVALUATION_SUPPORT_LABELS,
-  RULEBOOK_COMPATIBILITY_DISCLOSURE,
-} from '../compatibility'
+import { RULEBOOK_COMPATIBILITY_DISCLOSURE } from '../compatibility'
 import type { RulebookDetailSnapshot } from '../detail'
 import {
   attestationNameFor,
@@ -20,10 +16,12 @@ import {
   versionsNewestFirst,
   type ReferenceWithHostedSchema,
 } from '../detail'
+import { AppLink, PLAYGROUND_PATH } from '../router'
 import type { HostedSchema, SchemaReference, VersionSchemaReferences } from '../types'
 
 import { Alert } from './Alert'
 import { CompatibilityBadge, StatusBadge } from './Badges'
+import { GuideLink } from './GuideLink'
 
 function SectionUnavailable({ children }: { readonly children: string }) {
   return (
@@ -392,43 +390,29 @@ export function AttestationsSection({ snapshot }: { readonly snapshot: RulebookD
   )
 }
 
-export function CompatibilitySection() {
+/**
+ * UI-002 standards compatibility. No rulebook-level result exists yet, so the
+ * section states that and points to where credentials are actually checked;
+ * the per-dimension capability table lives on the playground.
+ */
+export function CompatibilitySection({
+  onNavigate,
+}: {
+  readonly onNavigate: (path: string) => void
+}) {
   return (
     <section className="content-section" aria-labelledby="compatibility-heading">
       <h2 id="compatibility-heading">Standards compatibility</h2>
       <p className="compatibility-summary">
         <CompatibilityBadge /> <strong>Rulebook-level compatibility: not tested.</strong>
       </p>
-      <p>{RULEBOOK_COMPATIBILITY_DISCLOSURE}</p>
-      <div className="table-wrap table-wrap--nested">
-        <table className="detail-table">
-          <caption className="sr-only">
-            Evaluation dimensions and whether this build supports them for a credential
-          </caption>
-          <thead>
-            <tr>
-              <th scope="col">Evaluation dimension</th>
-              <th scope="col">Support in this build</th>
-            </tr>
-          </thead>
-          <tbody>
-            {EVALUATION_SUPPORT.map((dimension) => (
-              <tr key={dimension.id}>
-                <th scope="row">{dimension.title}</th>
-                <td>
-                  <span className={`support support--${dimension.support}`}>
-                    {EVALUATION_SUPPORT_LABELS[dimension.support]}
-                  </span>
-                  <span className="support-detail"> {dimension.detail}</span>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
       <p className="table-note">
-        Not tested means the check did not run; not applicable means the dimension cannot be
-        evaluated for a standalone credential. Neither status is a pass.
+        {RULEBOOK_COMPATIBILITY_DISCLOSURE} Validate a credential in the{' '}
+        <AppLink href={PLAYGROUND_PATH} onNavigate={onNavigate}>
+          Validation playground
+        </AppLink>
+        ; the <GuideLink slug="credential-validation">credential validation guide</GuideLink>{' '}
+        explains what each run checks.
       </p>
     </section>
   )
@@ -694,21 +678,5 @@ export function VersionsSection({
         </>
       ) : null}
     </section>
-  )
-}
-
-export function VersionSummary({ snapshot }: { readonly snapshot: RulebookDetailSnapshot }) {
-  const current = latestVersion(snapshot.versions)
-  if (current === null) {
-    return null
-  }
-  return (
-    <a
-      className="btn btn-outline btn-lg"
-      href={versionContentPath(snapshot.rulebook.id, current.version)}
-      download={`rulebook-${snapshot.rulebook.id}-${current.version}.json`}
-    >
-      Export version {current.version}
-    </a>
   )
 }

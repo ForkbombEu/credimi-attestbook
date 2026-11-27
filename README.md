@@ -618,7 +618,7 @@ The login endpoints are:
   session also requires its `csrfToken` in `X-CSRF-Token`.
 
 The web UI exposes this flow at `/login`: the form uses only the username and password, the
-shared header restores `GET /api/v1/auth/me` on load and shows either the signed-in provider
+shared footer restores `GET /api/v1/auth/me` on load and shows either the signed-in provider
 identity with a `Log out` action or a `Log in` link, and logout sends the session's CSRF token.
 The catalogue and playground stay usable anonymously. See [`docs/ui.md`](docs/ui.md) §3.5.
 

@@ -436,9 +436,6 @@ test('opens the guide index from the catalog primary navigation', async ({ page 
   await expect(
     page.getByRole('navigation', { name: 'Primary' }).getByRole('link', { name: 'Guides' }),
   ).toHaveAttribute('aria-current', 'page')
-  await expect(
-    page.getByRole('navigation', { name: 'Breadcrumb' }).getByRole('link', { name: 'Catalog' }),
-  ).toHaveAttribute('href', '/')
   await expect(page).not.toHaveURL(/\/login/)
 })
 
@@ -477,7 +474,7 @@ test('keeps the guide navigation reachable in the wrapped header at 860 px', asy
 
   const primary = page.getByRole('navigation', { name: 'Primary' })
   await expect(primary.getByRole('link', { name: 'Guides' })).toBeVisible()
-  await expect(primary.getByRole('link', { name: 'API reference' })).toBeVisible()
+  await expect(primary.getByRole('link', { name: 'API docs' })).toBeVisible()
 
   // The header wraps into two rows instead of widening the page, so the
   // header itself fits the viewport.

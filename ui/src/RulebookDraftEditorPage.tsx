@@ -422,7 +422,7 @@ export function RulebookDraftEditorPage({
             />
           </div>
         </main>
-        <SiteFooter />
+        <SiteFooter onNavigate={onNavigate} />
       </div>
     )
   }
@@ -439,7 +439,7 @@ export function RulebookDraftEditorPage({
             onNavigate={onNavigate}
           />
         </main>
-        <SiteFooter />
+        <SiteFooter onNavigate={onNavigate} />
       </div>
     )
   }
@@ -455,7 +455,7 @@ export function RulebookDraftEditorPage({
             <LoadingState title="Loading the draft…" detail="Reading the draft working copy." />
           </div>
         </main>
-        <SiteFooter />
+        <SiteFooter onNavigate={onNavigate} />
       </div>
     )
   }
@@ -478,7 +478,7 @@ export function RulebookDraftEditorPage({
             </p>
           </PageHero>
         </main>
-        <SiteFooter />
+        <SiteFooter onNavigate={onNavigate} />
       </div>
     )
   }
@@ -497,7 +497,7 @@ export function RulebookDraftEditorPage({
             />
           </div>
         </main>
-        <SiteFooter />
+        <SiteFooter onNavigate={onNavigate} />
       </div>
     )
   }
@@ -514,27 +514,6 @@ export function RulebookDraftEditorPage({
               : creatingNextVersion
                 ? `Create a new version of ${nameForHeading}`
                 : `Edit ${nameForHeading} draft`
-          }
-          breadcrumb={
-            <nav className="breadcrumb" aria-label="Breadcrumb">
-              <ol>
-                <li>
-                  <AppLink href={CATALOG_PATH} onNavigate={onNavigate}>
-                    Rulebook catalog
-                  </AppLink>
-                </li>
-                {rulebookId === undefined ? null : (
-                  <li>
-                    <AppLink href={rulebookPath(rulebookId)} onNavigate={onNavigate}>
-                      {nameForHeading}
-                    </AppLink>
-                  </li>
-                )}
-                <li aria-current="page">
-                  {creating ? 'New rulebook' : creatingNextVersion ? 'New version' : 'Edit draft'}
-                </li>
-              </ol>
-            </nav>
           }
         >
           <p>
@@ -785,7 +764,7 @@ export function RulebookDraftEditorPage({
           )}
         </div>
       </main>
-      <SiteFooter />
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   )
 }

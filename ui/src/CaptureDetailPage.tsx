@@ -807,20 +807,6 @@ export function CaptureDetailPage({
         <PageHero
           title={state.status === 'not-found' ? 'Capture not found' : captureId}
           alert={state.status === 'not-found'}
-          breadcrumb={
-            <nav className="breadcrumb" aria-label="Breadcrumb">
-              <ol>
-                <li>
-                  <AppLink href={CAPTURES_PATH} onNavigate={onNavigate}>
-                    Capture explorer
-                  </AppLink>
-                </li>
-                <li aria-current="page">
-                  <span className="data">{captureId}</span>
-                </li>
-              </ol>
-            </nav>
-          }
         >
           {state.status === 'not-found' ? (
             <>
@@ -923,7 +909,7 @@ export function CaptureDetailPage({
         )}
       </main>
 
-      <SiteFooter />
+      <SiteFooter onNavigate={onNavigate} />
     </div>
   )
 }

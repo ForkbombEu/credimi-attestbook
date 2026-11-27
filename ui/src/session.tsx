@@ -31,7 +31,7 @@ export interface SessionController {
 }
 
 /**
- * The header also renders outside a provider in component tests and in any
+ * The footer also renders outside a provider in component tests and in any
  * future standalone shell; there, an anonymous session is the safe default
  * and sign-in is unavailable rather than silently mocked.
  */

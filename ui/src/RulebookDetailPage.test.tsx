@@ -85,7 +85,6 @@ describe('rulebook detail states', () => {
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Rulebook not found')
-    expect(screen.getByRole('link', { name: 'Rulebook catalog' })).toHaveAttribute('href', '/')
     await waitFor(() => expect(document.title).toBe('Rulebook not found · AttestBook'))
 
     await user.click(screen.getByRole('button', { name: 'Back to the catalog' }))
@@ -190,18 +189,24 @@ describe('rulebook detail content', () => {
     expect(within(rulebookTable).getByText('None recorded')).toBeInTheDocument()
   })
 
-  test('reports standards compatibility and marks unsupported evaluations', async () => {
-    renderDetail()
+  test('reports rulebook-level compatibility as not tested and points to the playground', async () => {
+    const { onNavigate } = renderDetail()
 
     const section = await screen.findByRole('region', { name: 'Standards compatibility' })
     expect(
       within(section).getByText('Rulebook-level compatibility: not tested.'),
     ).toBeInTheDocument()
-    expect(within(section).getAllByText('Not tested')).toHaveLength(3)
-    expect(within(section).getAllByText('Not applicable')).toHaveLength(2)
-    expect(within(section).getAllByText('Supported per credential')).toHaveLength(4)
-    expect(within(section).getByText('Cryptographic verification')).toBeInTheDocument()
-    expect(within(section).getByText('End-to-end interoperability')).toBeInTheDocument()
+    expect(section).toHaveTextContent('No rulebook-level compatibility result is recorded.')
+    // The per-credential capability table belongs to the playground, not to a rulebook.
+    expect(within(section).queryByRole('table')).toBeNull()
+    expect(
+      within(section).getByRole('link', { name: /credential validation guide/ }),
+    ).toHaveAttribute('href', '/guide/credential-validation')
+
+    await userEvent
+      .setup()
+      .click(within(section).getByRole('link', { name: 'Validation playground' }))
+    expect(onNavigate).toHaveBeenCalledWith('/playground')
   })
 
   test('renders newest-first version history with digest and export links', async () => {
@@ -219,13 +224,6 @@ describe('rulebook detail content', () => {
     })
     expect(exportOne).toHaveAttribute('href', '/api/v1/rulebooks/rulebook-pid/versions/1.0/content')
     expect(exportOne).toHaveAttribute('download', 'rulebook-rulebook-pid-1.0.json')
-  })
-
-  test('offers an export action for the latest version in the heading', async () => {
-    renderDetail()
-
-    const action = await screen.findByRole('link', { name: 'Export version 1.0' })
-    expect(action).toHaveAttribute('href', '/api/v1/rulebooks/rulebook-pid/versions/1.0/content')
   })
 
   test('does not link unsafe reference or source URLs', async () => {
